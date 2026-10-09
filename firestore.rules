@@ -1,0 +1,28 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function owner(userId) {
+      return request.auth != null && request.auth.uid == userId;
+    }
+    function validKitchen() {
+      let data = request.resource.data;
+      return data.keys().hasOnly(['schemaVersion', 'revision', 'state', 'updatedAt'])
+        && data.schemaVersion == 1
+        && data.revision is int && data.revision >= 1
+        && data.state is map
+        && data.state.keys().hasOnly(['products', 'batches', 'tools'])
+        && data.state.products is list && data.state.products.size() <= 1000
+        && data.state.batches is list && data.state.batches.size() <= 2000
+        && data.state.tools is list && data.state.tools.size() <= 500
+        && data.updatedAt == request.time;
+    }
+    match /users/{userId}/kitchen/inventory {
+      allow read: if owner(userId);
+      allow create: if owner(userId) && validKitchen() && request.resource.data.revision == 1;
+      // Transaction version preconditions handle concurrent writes. Comparing
+      // revisions here can reject a conflict before the SDK has a chance to retry.
+      allow update: if owner(userId) && validKitchen();
+      allow delete: if false;
+    }
+  }
+}
