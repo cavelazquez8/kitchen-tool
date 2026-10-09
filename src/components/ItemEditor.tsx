@@ -67,12 +67,49 @@ export function ItemEditor({
           Item name
           <input
             autoFocus
+            list="common-ingredients"
             value={draft.name}
             onChange={(event) => onDraftChange({ ...draft, name: event.target.value })}
             placeholder="e.g. Carrots"
             maxLength={120}
             required
           />
+          <datalist id="common-ingredients">
+            {[
+              'Apples',
+              'Avocados',
+              'Bananas',
+              'Bell peppers',
+              'Broccoli',
+              'Butter',
+              'Carrots',
+              'Cheddar cheese',
+              'Chicken breast',
+              'Chicken thighs',
+              'Eggs',
+              'Flour',
+              'Garlic',
+              'Ground beef',
+              'Ground turkey',
+              'Lemons',
+              'Lettuce',
+              'Milk',
+              'Mushrooms',
+              'Olive oil',
+              'Onions',
+              'Pasta',
+              'Potatoes',
+              'Rice',
+              'Salmon',
+              'Salt',
+              'Spinach',
+              'Tomatoes',
+              'Yogurt',
+              'Zucchini',
+            ].map((name) => (
+              <option value={name} key={name} />
+            ))}
+          </datalist>
         </label>
         <label>
           Brand <span className="optional">optional</span>
