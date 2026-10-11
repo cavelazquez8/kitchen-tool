@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import {
   BookOpen,
   Check,
@@ -8,6 +8,7 @@ import {
   ShoppingCart,
   Sparkles,
   Trash2,
+  Utensils,
   Upload,
   X,
 } from 'lucide-react';
@@ -17,6 +18,7 @@ import { generateMarkdown } from '../domain/export';
 import { formatQuantity } from '../domain/inventory';
 import { rankRecipes, matchRecipe, buildShoppingList } from '../recipes/matching';
 import { discoverRecipes, searchRecipes } from '../recipes/library';
+import { loadLocalRecipes, searchLocalRecipes, recipeFacets } from '../recipes/localLibrary';
 import { isRecipe, type Recipe } from '../recipes/types';
 import {
   normalizeAiRecipe,
@@ -38,6 +40,7 @@ import { Modal } from './Modal';
 import { Autocomplete } from './Autocomplete';
 import { RecipeEditor } from './RecipeEditor';
 import { FinishCooking } from './FinishCooking';
+import { Choice } from './Choice';
 
 export type HubPage = 'recipes' | 'shopping' | 'assistant';
 interface Props {
@@ -54,10 +57,12 @@ interface Props {
 const labels = { ready: 'Ready to cook', almost: 'Almost ready', check: 'Check quantities' };
 const sourceLabels = {
   themealdb: 'TheMealDB',
+  wikibooks: 'Wikibooks Cookbook',
   imported: 'Imported',
   ai: 'AI-created',
   manual: 'Your recipe',
 };
+const RECIPE_PAGE_SIZE = 24;
 function safeLink(value?: string) {
   try {
     const url = new URL(value ?? '');
@@ -94,6 +99,12 @@ function RecipeCard({
     <article className="recipe-card">
       {recipe.imageUrl && safeLink(recipe.imageUrl) && (
         <img src={recipe.imageUrl} alt="" loading="lazy" />
+      )}
+      {!safeLink(recipe.imageUrl) && (
+        <div className="recipe-art" aria-hidden="true">
+          <Utensils size={30} strokeWidth={1.3} />
+          <span>{recipe.category ?? 'From the cookbook'}</span>
+        </div>
       )}
       <div className="recipe-card-body">
         <span className={`match-badge ${match.status}`}>{labels[match.status]}</span>
@@ -139,8 +150,16 @@ export function KitchenHub({
   onNavigate,
 }: Props) {
   const [catalog, setCatalog] = useState<Recipe[]>([]);
+  const [localCatalog, setLocalCatalog] = useState<Recipe[]>([]);
   const [query, setQuery] = useState('');
+  const [submittedQuery, setSubmittedQuery] = useState('');
+  const [category, setCategory] = useState('');
+  const [cuisine, setCuisine] = useState('');
+  const [libraryView, setLibraryView] = useState<'kitchen' | 'browse'>('kitchen');
+  const [visibleCount, setVisibleCount] = useState(RECIPE_PAGE_SIZE);
   const [libraryBusy, setLibraryBusy] = useState(false);
+  const [onlineBusy, setOnlineBusy] = useState(false);
+  const [libraryError, setLibraryError] = useState('');
   const [error, setError] = useState('');
   const [filter, setFilter] = useState<'all' | 'ready' | 'close' | 'saved'>('all');
   const [prioritize, setPrioritize] = useState(false);
@@ -165,11 +184,12 @@ export function KitchenHub({
   const [minutes, setMinutes] = useState<Record<string, string>>({});
   const [now, setNow] = useState(Date.now());
   const [awake, setAwake] = useState(false);
-  const started = useRef(false);
-  const latestInventory = useRef(inventory);
-  useEffect(() => {
-    latestInventory.current = inventory;
-  }, [inventory]);
+  const libraryRequest = useRef(0);
+  const onlineRequest = useRef(0);
+  const cancelOnlineSearch = useCallback(() => {
+    onlineRequest.current++;
+    setOnlineBusy(false);
+  }, []);
   const endRef = useRef<HTMLDivElement>(null);
   const saved = useMemo(() => inventory.recipes ?? [], [inventory.recipes]);
   const plan = inventory.mealPlan ?? [];
@@ -186,41 +206,59 @@ export function KitchenHub({
     [inventory, useSelection, selectedBatchIds],
   );
   const allRecipes = useMemo(
-    () => [...new Map([...catalog, ...saved].map((recipe) => [recipe.id, recipe])).values()],
-    [catalog, saved],
+    () => [
+      ...new Map(
+        [...localCatalog, ...catalog, ...saved].map((recipe) => [recipe.id, recipe]),
+      ).values(),
+    ],
+    [localCatalog, catalog, saved],
   );
-  const matches = useMemo(
-    () =>
-      rankRecipes(allRecipes, relevant, { prioritizeExpiration: prioritize }).filter(
-        (item) =>
-          (!query || item.recipe.title.toLowerCase().includes(query.toLowerCase())) &&
-          (filter === 'all' ||
-            (filter === 'ready' && item.status === 'ready') ||
-            (filter === 'close' && item.missingCount <= 2) ||
-            (filter === 'saved' && saved.some((recipe) => recipe.id === item.recipe.id))),
-      ),
-    [allRecipes, relevant, prioritize, query, filter, saved],
-  );
+  const facets = useMemo(() => recipeFacets(allRecipes), [allRecipes]);
+  const matches = useMemo(() => {
+    const recipes = searchLocalRecipes(allRecipes, submittedQuery, { category, cuisine });
+    const ranked = rankRecipes(recipes, relevant, { prioritizeExpiration: prioritize }).filter(
+      (item) =>
+        filter === 'all' ||
+        (filter === 'ready' && item.status === 'ready') ||
+        (filter === 'close' && item.missingCount <= 2) ||
+        (filter === 'saved' && saved.some((recipe) => recipe.id === item.recipe.id)),
+    );
+    if (libraryView === 'browse' || !relevant.batches.length)
+      ranked.sort((a, b) => a.recipe.title.localeCompare(b.recipe.title));
+    return ranked;
+  }, [
+    allRecipes,
+    relevant,
+    prioritize,
+    submittedQuery,
+    category,
+    cuisine,
+    libraryView,
+    filter,
+    saved,
+  ]);
   useEffect(() => {
-    if (page !== 'recipes' || started.current) return;
-    started.current = true;
+    if (page !== 'recipes') return;
     let active = true;
+    const request = ++libraryRequest.current;
     setLibraryBusy(true);
-    discoverRecipes(latestInventory.current)
+    setLibraryError('');
+    loadLocalRecipes()
       .then((recipes) => {
-        if (active) setCatalog(recipes);
+        if (active && request === libraryRequest.current) setLocalCatalog(recipes);
       })
       .catch((e) => {
-        if (active) setError(e instanceof Error ? e.message : 'Could not load recipes.');
+        if (active && request === libraryRequest.current)
+          setLibraryError(e instanceof Error ? e.message : 'Could not load recipes.');
       })
       .finally(() => {
-        if (active) setLibraryBusy(false);
+        if (active && request === libraryRequest.current) setLibraryBusy(false);
       });
     return () => {
       active = false;
-      started.current = false;
+      cancelOnlineSearch();
     };
-  }, [page]); // inventory is captured only on entering the recipe page
+  }, [page, cancelOnlineSearch]);
   useEffect(() => {
     if (!Object.keys(timers).length) return;
     const timer = window.setInterval(() => setNow(Date.now()), 1000);
@@ -265,7 +303,7 @@ export function KitchenHub({
       throw e;
     }
   }
-  async function saveRecipe(recipe: Recipe) {
+  async function saveRecipe(recipe: Recipe, reveal = false) {
     if (!isRecipe(recipe)) throw new Error('Please review the recipe details before saving.');
     await mutate(
       (state) => ({
@@ -275,6 +313,16 @@ export function KitchenHub({
       'Recipe saved.',
     );
     setDetail((current) => (current?.id === recipe.id ? recipe : current));
+    if (reveal) {
+      onlineRequest.current++;
+      setOnlineBusy(false);
+      setFilter('saved');
+      setQuery('');
+      setSubmittedQuery('');
+      setCategory('');
+      setCuisine('');
+      setVisibleCount(RECIPE_PAGE_SIZE);
+    }
   }
   function openEditor(recipe: Recipe, notes: readonly string[] = []) {
     setEditingNotes(notes);
@@ -292,16 +340,47 @@ export function KitchenHub({
   }
   async function loadLibrary(event?: FormEvent, discover = false) {
     event?.preventDefault();
+    onlineRequest.current++;
+    setOnlineBusy(false);
+    setSubmittedQuery(discover ? '' : query.trim());
+    if (discover) setQuery('');
+    setLibraryView(discover ? 'kitchen' : 'browse');
+    setVisibleCount(RECIPE_PAGE_SIZE);
+    const request = ++libraryRequest.current;
     setLibraryBusy(true);
-    setError('');
+    setLibraryError('');
     try {
-      const recipes =
-        !discover && query.trim() ? await searchRecipes(query) : await discoverRecipes(relevant);
-      setCatalog(recipes);
+      const recipes = await loadLocalRecipes();
+      if (request === libraryRequest.current) setLocalCatalog(recipes);
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Could not load the recipe library.');
+      if (request === libraryRequest.current)
+        setLibraryError(e instanceof Error ? e.message : 'Could not load the recipe library.');
     } finally {
-      setLibraryBusy(false);
+      if (request === libraryRequest.current) setLibraryBusy(false);
+    }
+  }
+  async function loadOnlineRecipes() {
+    const request = ++onlineRequest.current;
+    const term = query.trim();
+    setSubmittedQuery(term);
+    setVisibleCount(RECIPE_PAGE_SIZE);
+    setOnlineBusy(true);
+    setLibraryError('');
+    try {
+      const recipes = term ? await searchRecipes(term) : await discoverRecipes(relevant);
+      if (request !== onlineRequest.current) return;
+      setCatalog((current) => [
+        ...new Map([...current, ...recipes].map((r) => [r.id, r])).values(),
+      ]);
+      if (!recipes.length)
+        setLibraryError(
+          'No additional recipes found. Your built-in and saved recipes are still available.',
+        );
+    } catch (e) {
+      if (request === onlineRequest.current)
+        setLibraryError(e instanceof Error ? e.message : 'Could not search TheMealDB.');
+    } finally {
+      if (request === onlineRequest.current) setOnlineBusy(false);
     }
   }
   async function ask(prompt = message) {
@@ -470,6 +549,18 @@ export function KitchenHub({
     <div className="kitchen-hub">
       {page === 'recipes' && (
         <>
+          <section className="library-intro">
+            <div>
+              <span className="library-eyebrow">YOUR NEXT GOOD MEAL</span>
+              <h2>Your built-in cookbook.</h2>
+              <p>
+                {localCatalog.length
+                  ? `${localCatalog.length.toLocaleString()} built-in recipes · Free to browse · No account needed`
+                  : 'A free built-in cookbook, matched to your kitchen.'}
+              </p>
+            </div>
+            <BookOpen size={36} strokeWidth={1.3} aria-hidden="true" />
+          </section>
           <div className="hub-toolbar">
             <form
               className="hub-search"
@@ -481,7 +572,7 @@ export function KitchenHub({
                 aria-label="Find recipes"
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
-                placeholder="Search familiar recipes…"
+                placeholder="Search dishes or ingredients…"
               />
               <button className="button secondary" disabled={libraryBusy}>
                 Search library
@@ -504,12 +595,33 @@ export function KitchenHub({
               Your own recipe
             </button>
           </div>
+          <div className="library-browse-controls">
+            <div className="library-view" aria-label="Recipe order">
+              {(['kitchen', 'browse'] as const).map((view) => (
+                <button
+                  key={view}
+                  className={libraryView === view ? 'active' : ''}
+                  aria-pressed={libraryView === view}
+                  onClick={() => {
+                    setLibraryView(view);
+                    setVisibleCount(RECIPE_PAGE_SIZE);
+                  }}
+                >
+                  {view === 'kitchen' ? 'For your kitchen' : 'Browse all'}
+                </button>
+              ))}
+            </div>
+          </div>
           <div className="hub-filters">
             {(['all', 'ready', 'close', 'saved'] as const).map((value) => (
               <button
                 className={filter === value ? 'active' : ''}
                 key={value}
-                onClick={() => setFilter(value)}
+                aria-pressed={filter === value}
+                onClick={() => {
+                  setFilter(value);
+                  setVisibleCount(RECIPE_PAGE_SIZE);
+                }}
               >
                 {
                   {
@@ -522,43 +634,119 @@ export function KitchenHub({
               </button>
             ))}
           </div>
-          <div className="hub-preferences">
-            <label>
-              <input
-                type="checkbox"
-                checked={prioritize}
-                onChange={(e) => setPrioritize(e.target.checked)}
+          <details className="library-refine">
+            <summary>
+              Refine recipes
+              {category || cuisine ? ` · ${[category, cuisine].filter(Boolean).join(' / ')}` : ''}
+            </summary>
+            <div className="library-browse-controls">
+              <Choice
+                label="Recipe category"
+                value={category}
+                options={[
+                  { value: '', label: 'Every category' },
+                  ...facets.categories.map((name) => ({ value: name, label: name })),
+                ]}
+                onChange={(value) => {
+                  setCategory(value);
+                  setVisibleCount(RECIPE_PAGE_SIZE);
+                }}
               />
-              Prioritize expiring ingredients
-            </label>
-            {selectedBatchIds.length > 0 && (
+              {facets.cuisines.length > 0 && (
+                <Choice
+                  label="Recipe cuisine"
+                  value={cuisine}
+                  options={[
+                    { value: '', label: 'Every cuisine' },
+                    ...facets.cuisines.map((name) => ({ value: name, label: name })),
+                  ]}
+                  onChange={(value) => {
+                    setCuisine(value);
+                    setVisibleCount(RECIPE_PAGE_SIZE);
+                  }}
+                />
+              )}
+            </div>
+            <div className="hub-preferences">
               <label>
                 <input
                   type="checkbox"
-                  checked={useSelection}
-                  onChange={(e) => setUseSelection(e.target.checked)}
+                  checked={prioritize}
+                  onChange={(e) => setPrioritize(e.target.checked)}
                 />
-                Use only selected inventory
+                Prioritize expiring ingredients
               </label>
-            )}
-            <button
-              className="text-button"
-              disabled={libraryBusy}
-              onClick={() => {
-                setQuery('');
-                void loadLibrary(undefined, true);
-              }}
-            >
-              Refresh suggestions
-            </button>
-          </div>
+              {selectedBatchIds.length > 0 && (
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={useSelection}
+                    onChange={(e) => setUseSelection(e.target.checked)}
+                  />
+                  Use only selected inventory
+                </label>
+              )}
+              <button
+                className="text-button"
+                disabled={libraryBusy}
+                onClick={() => {
+                  setQuery('');
+                  setCategory('');
+                  setCuisine('');
+                  setFilter('all');
+                  void loadLibrary(undefined, true);
+                }}
+              >
+                Refresh suggestions
+              </button>
+            </div>
+          </details>
           {libraryBusy && (
             <p role="status" className="settings-note">
-              Finding familiar recipes…
+              Opening your cookbook…
             </p>
           )}
+          {libraryError && (
+            <p role="alert" className="library-error">
+              {libraryError}{' '}
+              {!localCatalog.length && (
+                <button
+                  className="text-button"
+                  onClick={() => {
+                    void loadLibrary();
+                  }}
+                >
+                  Retry cookbook
+                </button>
+              )}
+            </p>
+          )}
+          <div className="library-results" role="status" aria-live="polite">
+            <span>
+              Showing {Math.min(visibleCount, matches.length).toLocaleString()} of{' '}
+              {matches.length.toLocaleString()} recipes
+              {submittedQuery ? ` for “${submittedQuery}”` : ''}
+            </span>
+            {(submittedQuery || category || cuisine || filter !== 'all') && (
+              <button
+                className="text-button"
+                onClick={() => {
+                  setQuery('');
+                  setSubmittedQuery('');
+                  setCategory('');
+                  setCuisine('');
+                  setFilter('all');
+                  setVisibleCount(RECIPE_PAGE_SIZE);
+                  onlineRequest.current++;
+                  setOnlineBusy(false);
+                }}
+              >
+                Clear filters
+              </button>
+            )}
+          </div>
           <div className="recipe-grid">
-            {matches.map((item) => (
+            {matches.slice(0, visibleCount).map((item) => (
               <RecipeCard
                 key={item.recipe.id}
                 recipe={item.recipe}
@@ -572,29 +760,80 @@ export function KitchenHub({
               />
             ))}
           </div>
+          {visibleCount < matches.length && (
+            <div className="library-more">
+              <button
+                className="button primary"
+                onClick={() => setVisibleCount((count) => count + RECIPE_PAGE_SIZE)}
+              >
+                Load more recipes
+              </button>
+              <small>{(matches.length - visibleCount).toLocaleString()} more to explore</small>
+            </div>
+          )}
           {!libraryBusy && !matches.length && (
             <div className="empty-state compact">
               <BookOpen size={36} />
-              <h2>A recipe library that grows with you.</h2>
+              <h2>
+                {filter === 'saved' ? 'Your favorites start here.' : 'Let’s broaden the search.'}
+              </h2>
               <p>
-                Search the free library, import something you love, or save a recipe from Gemini.
+                {filter === 'saved'
+                  ? 'Save something you like, import a recipe, or add your own.'
+                  : 'Try a dish or ingredient name, clear the filters, or ask Gemini for a variation.'}
               </p>
               <button
                 className="button secondary"
                 onClick={() => {
-                  void loadLibrary();
+                  setCategory('');
+                  setCuisine('');
+                  setFilter('all');
+                  void loadLibrary(undefined, true);
                 }}
               >
-                Browse starter recipes
+                Browse the cookbook
               </button>
             </div>
           )}
+          <div className="library-online">
+            <div>
+              <strong>Keep exploring</strong>
+              <p>
+                Find additional recipes from TheMealDB using your search or ingredients on hand.
+              </p>
+            </div>
+            <button
+              className="button secondary"
+              disabled={onlineBusy}
+              onClick={() => {
+                void loadOnlineRecipes();
+              }}
+            >
+              {onlineBusy ? 'Searching TheMealDB…' : 'More recipes online'}
+            </button>
+          </div>
           <p className="footnote">
-            Starter recipes from{' '}
+            Built-in recipes adapted from{' '}
+            <a
+              href="https://en.wikibooks.org/wiki/Cookbook:Table_of_Contents"
+              target="_blank"
+              rel="noreferrer"
+            >
+              Wikibooks contributors
+            </a>{' '}
+            under{' '}
+            <a
+              href="https://creativecommons.org/licenses/by-sa/4.0/"
+              target="_blank"
+              rel="noreferrer"
+            >
+              CC BY-SA 4.0
+            </a>
+            . Additional recipes from{' '}
             <a href="https://www.themealdb.com" target="_blank" rel="noreferrer">
               TheMealDB
             </a>
-            . Matching uses recorded amounts; unknown package sizes stay flagged.
+            . Source links stay with saved recipes. Unknown amounts and yields stay flagged.
           </p>
         </>
       )}
@@ -1040,6 +1279,11 @@ export function KitchenHub({
                         ? (item.ingredient.original ?? 'Amount not specified')
                         : formatQuantity(item.required, item.ingredient.unit)}
                     </small>
+                    {detail.source.type === 'wikibooks' &&
+                      item.required !== null &&
+                      item.ingredient.original && (
+                        <small>Original: {item.ingredient.original}</small>
+                      )}
                   </span>
                   <span className={`ingredient-status ${item.status}`}>
                     {item.status === 'available'
@@ -1127,6 +1371,19 @@ export function KitchenHub({
             {safeLink(detail.source.url) && (
               <a className="text-button" href={detail.source.url} target="_blank" rel="noreferrer">
                 Original recipe source
+              </a>
+            )}
+            {detail.source.attribution && (
+              <p className="field-note recipe-attribution">{detail.source.attribution}</p>
+            )}
+            {safeLink(detail.source.licenseUrl) && (
+              <a
+                className="text-button"
+                href={detail.source.licenseUrl}
+                target="_blank"
+                rel="noreferrer"
+              >
+                {detail.source.license ?? 'Recipe license'}
               </a>
             )}
             <button
@@ -1283,7 +1540,7 @@ export function KitchenHub({
             setEditing(null);
             setEditingNotes([]);
           }}
-          onSave={saveRecipe}
+          onSave={(recipe) => saveRecipe(recipe, true)}
         />
       )}
     </div>

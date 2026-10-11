@@ -10,20 +10,25 @@ A touch-friendly kitchen inventory, recipe library, meal planner, shopping list,
 - Scanning automatically continues by default. Turn it off in the scanner; the preference stays on this device.
 - Repeated intentional scans ask before adding another package. Unknown products open a complete manual entry form and pause the camera.
 - Keep purchases separate by storage location, unit, purchase date, and expiration date. Countable items have −1 and Undo; Used some handles larger changes.
-- Discover familiar recipes from the free TheMealDB API, add your own, or import pasted recipes. Website import uses published Recipe JSON-LD through the optional backend.
+- Browse the free built-in Wikibooks cookbook, search dishes or ingredients, filter by category/cuisine, and load more without losing previous cards. Suggestions rank against your full inventory. TheMealDB remains an optional source for additional online recipes.
+- Add your own recipes or import pasted recipes. Website import uses published Recipe JSON-LD through the optional backend.
 - Review recorded quantities, cook with step timers, and optionally keep the screen awake. Finish cooking reviews deductions before changing inventory.
 - Save recipes and choose meal-plan portions. Request a shopping list to combine requirements and subtract inventory once.
 - Ask Gemini follow-up questions inside Mise after connecting the optional free-tier backend. Copy for Gemini remains available without a backend.
 
 Matching and shopping calculations run locally. Unknown quantities, package contents, and original recipe yields stay unknown until you record them. A generic ingredient name can map a branded product to recipe ingredients. The bundled food/tool catalogue is an autocomplete starter; it is not a comprehensive product database. Barcode suggestions come from Open Food Facts.
 
-TheMealDB provides a modest starter library rather than an exhaustive recipe database. Mise fetches bounded suggestions/search results without crawling the whole service. Attribution and recipe source links remain visible.
+The built-in cookbook is a versioned snapshot of Wikibooks recipes, served with Mise and matched locally without a recipe API key or subscription. It loads only when Recipes is opened. Saved recipes remain available if the collection or online provider cannot load. TheMealDB requests are bounded and user initiated; they do not enumerate its full database.
+
+Wikibooks content is adapted under CC BY-SA 4.0. Recipe details, saved records, and backups preserve contributor attribution, original revision links, and the content license. Recipe photos are not copied from Wikibooks. Unsupported, incomplete, or ambiguous source structures are excluded during ingestion; unknown amounts and yields remain unknown.
 
 ## Data and backups
 
 Kitchen data is saved in **this browser only**. There is no active Firebase connection. Another device, browser profile, or website origin has a separate kitchen. Clearing site data removes the local copy.
 
 Settings → Download backup saves inventory, tools, saved recipes, meal plan, shopping list, and conversation. Restoring requires confirmation and replaces the current kitchen. Older inventory-only backups remain supported. Google API keys and device pairing credentials are excluded. Markdown export is a copyable Gemini context document, not a restore format.
+
+The built-in public collection is separate from personal kitchen data. Browsing never adds recipes or food to your inventory; only recipes you deliberately save enter your backup.
 
 ## Free Gemini connection
 
@@ -50,6 +55,10 @@ npm run test:e2e
 ```
 
 The browser suite exercises representative 412px, 896px, and desktop widths. It does not prove exact Galaxy hardware dimensions or native fold detection. Check camera permissions, the Edge keyboard, folding, split screen, clipboard, and wake lock on your actual phone.
+
+## Refresh the built-in cookbook
+
+`npm run recipes:update` snapshots the official Wikibooks API in sequential batches, validates ingredients and instructions, and atomically replaces `public/data/wikibooks-recipes.json`. It also updates the ingestion report under `docs/`. Review the report, run checks, and commit the data and parser together before publishing. Regular app builds use the committed snapshot and do not crawl a recipe service.
 
 The previous Firebase adapter and emulator fixtures are retained as inactive code for a potential future sync feature. They do not select the current repository or require account setup. `npm run test:rules` can still test that adapter's rules with Java 21.
 

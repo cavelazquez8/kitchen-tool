@@ -1,6 +1,43 @@
 import { expect, test, type Page } from '@playwright/test';
 import { readFile } from 'node:fs/promises';
 import type { InventoryState } from '../src/domain/types';
+import type { Recipe } from '../src/recipes/types';
+
+function cookbookFixture(): Recipe[] {
+  return Array.from({ length: 60 }, (_, index) => ({
+    id: `wikibooks:${index + 1}`,
+    title: `${index < 40 ? 'Rice dinner' : 'Egg breakfast'} ${String(index + 1).padStart(2, '0')}`,
+    servings: 2,
+    ingredients: [
+      {
+        name: index < 40 ? 'Rice' : 'Eggs',
+        quantity: index < 40 ? 100 : 2,
+        unit: index < 40 ? 'g' : 'each',
+        original: index < 40 ? '100 g rice' : '2 eggs',
+      },
+    ],
+    steps: ['Prepare the ingredients.', 'Cook and serve.'],
+    category: index < 40 ? 'Dinner' : 'Breakfast',
+    cuisine: 'American',
+    source: {
+      type: 'wikibooks',
+      url: `https://en.wikibooks.org/w/index.php?oldid=${index + 1}`,
+      attribution: 'Wikibooks contributors; adapted for Mise.',
+      license: 'CC BY-SA 4.0',
+      licenseUrl: 'https://creativecommons.org/licenses/by-sa/4.0/',
+    },
+  }));
+}
+
+async function mockCookbook(page: Page) {
+  await page.route('**/data/wikibooks-recipes.json', (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ version: 1, recipes: cookbookFixture() }),
+    }),
+  );
+}
 
 async function addItem(
   page: Page,
@@ -300,7 +337,7 @@ test('persists the automatic-next scanner preference', async ({ page }) => {
   await expect(autoNext).not.toBeChecked();
 });
 
-test('loads mocked full library recipes, compares quantities, and shows cooking steps', async ({
+test('searches online recipes, compares quantities, and shows cooking steps', async ({
   page,
 }) => {
   await page.route('https://www.themealdb.com/api/**', (route) => {
@@ -325,6 +362,8 @@ test('loads mocked full library recipes, compares quantities, and shows cooking 
   });
   await addItem(page, 'Chicken breast', '500', '', '2026-01-01', 'g');
   await navigate(page, 'Recipes');
+  await page.getByRole('textbox', { name: 'Find recipes', exact: true }).fill('Weeknight chicken');
+  await page.getByRole('button', { name: 'More recipes online', exact: true }).click();
   const card = page
     .locator('.recipe-card')
     .filter({ has: page.getByRole('heading', { name: 'Weeknight chicken', exact: true }) });
@@ -411,6 +450,152 @@ test('imports pasted recipes through ingredient review without Gemini', async ({
   await navigate(page, 'Recipes');
   await page.getByRole('button', { name: 'Saved recipes', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Egg toast', exact: true })).toBeVisible();
+});
+
+test('browses the real bundled cookbook, loads more, and finds a familiar recipe with source attribution', async ({
+  page,
+}) => {
+  test.setTimeout(60_000);
+  await navigate(page, 'Recipes');
+  await expect(page.locator('.library-intro')).toContainText(/\d[\d,]* built-in recipes/);
+  const recipes = page.locator('.kitchen-hub > .recipe-grid .recipe-card');
+  await expect(recipes).toHaveCount(24);
+  const firstPage = await recipes.locator('h3').allTextContents();
+  await page.getByRole('button', { name: 'Load more recipes', exact: true }).click();
+  await expect(recipes).toHaveCount(48);
+  expect((await recipes.locator('h3').allTextContents()).slice(0, 24)).toEqual(firstPage);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(
+    true,
+  );
+  await page
+    .getByRole('textbox', { name: 'Find recipes', exact: true })
+    .fill('Basic Scrambled Eggs');
+  await page.getByRole('button', { name: 'Search library', exact: true }).click();
+  const card = recipes.filter({
+    has: page.getByRole('heading', { name: 'Basic Scrambled Eggs', exact: true }),
+  });
+  await expect(card).toBeVisible();
+  await card.getByRole('button', { name: 'View recipe', exact: true }).click();
+  const detail = page.getByRole('dialog', { name: 'Basic Scrambled Eggs', exact: true });
+  await expect(
+    detail.getByRole('link', { name: 'Original recipe source', exact: true }),
+  ).toHaveAttribute('href', /en.wikibooks.org\/w\/index.php\?oldid=\d+/);
+  await expect(detail.getByText(/Wikibooks contributors/)).toBeVisible();
+  await expect(detail.getByRole('link', { name: 'CC BY-SA 4.0', exact: true })).toHaveAttribute(
+    'href',
+    'https://creativecommons.org/licenses/by-sa/4.0/',
+  );
+  await expect(detail.locator('.recipe-steps > li')).not.toHaveCount(0);
+});
+
+test('keeps local browsing during provider failure and saves licensed recipes into the meal plan and backup', async ({
+  page,
+}) => {
+  await mockCookbook(page);
+  await page.route('https://www.themealdb.com/api/**', (route) => route.abort());
+  await addItem(page, 'Rice', '50', '', '2026-01-01', 'g');
+  await navigate(page, 'Recipes');
+  const recipes = page.locator('.kitchen-hub > .recipe-grid .recipe-card');
+  await expect(recipes).toHaveCount(24);
+  await page.getByRole('button', { name: 'More recipes online', exact: true }).click();
+  await expect(page.locator('.library-error')).toContainText('unavailable');
+  await expect(recipes).toHaveCount(24);
+  await page.getByRole('button', { name: 'Load more recipes', exact: true }).click();
+  await expect(recipes).toHaveCount(48);
+  await page.getByRole('button', { name: 'Load more recipes', exact: true }).click();
+  await expect(recipes).toHaveCount(60);
+  await expect(page.getByRole('button', { name: 'Load more recipes', exact: true })).toHaveCount(0);
+  const category = page.getByRole('combobox', { name: 'Recipe category', exact: true });
+  await page.getByText('Refine recipes', { exact: true }).click();
+  await category.click();
+  await page.getByRole('option', { name: 'Breakfast', exact: true }).click();
+  await expect(recipes).toHaveCount(20);
+  await expect(recipes.first()).toContainText('Egg breakfast');
+  await page.getByRole('button', { name: 'Clear filters', exact: true }).click();
+  await expect(recipes).toHaveCount(24);
+  await page.getByRole('textbox', { name: 'Find recipes', exact: true }).fill('Rice dinner 01');
+  await expect(recipes).toHaveCount(24);
+  await page.getByRole('button', { name: 'Search library', exact: true }).click();
+  await expect(recipes).toHaveCount(1);
+  await recipes.first().getByRole('button', { name: 'View recipe', exact: true }).click();
+  const detail = page.getByRole('dialog', { name: 'Rice dinner 01', exact: true });
+  await detail.getByRole('button', { name: 'Add to meal plan', exact: true }).click();
+  await expect(page.locator('.toast')).toContainText('Added to your meal plan');
+  await detail.getByRole('button', { name: 'Close', exact: true }).click();
+  await navigate(page, 'Shopping list');
+  await page.getByRole('button', { name: 'Make shopping list', exact: true }).click();
+  await expect(page.locator('.shopping-row')).toContainText('50 g');
+  expect((await storedKitchen(page)).recipes?.[0].source.license).toBe('CC BY-SA 4.0');
+  await page.getByRole('button', { name: 'Local only', exact: true }).click();
+  const download = page.waitForEvent('download');
+  await page
+    .getByRole('dialog', { name: 'Your kitchen, your way' })
+    .getByRole('button', { name: 'Download backup', exact: true })
+    .click();
+  const backup = JSON.parse(await readFile((await (await download).path())!, 'utf8')) as {
+    inventory: InventoryState;
+  };
+  expect(backup.inventory.recipes?.[0].source).toMatchObject({
+    type: 'wikibooks',
+    license: 'CC BY-SA 4.0',
+    attribution: 'Wikibooks contributors; adapted for Mise.',
+  });
+  await page
+    .getByRole('dialog', { name: 'Your kitchen, your way' })
+    .getByRole('button', { name: 'Close', exact: true })
+    .click();
+  await page.route('**/data/wikibooks-recipes.json', (route) => route.abort());
+  await page.reload();
+  await navigate(page, 'Recipes');
+  await expect(page.getByRole('heading', { name: 'Rice dinner 01', exact: true })).toBeVisible();
+});
+
+test('ignores an old online recipe search after a newer local search', async ({ page }) => {
+  await mockCookbook(page);
+  let release: () => void = () => {};
+  const delayed = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  let requested: () => void = () => {};
+  const started = new Promise<void>((resolve) => {
+    requested = resolve;
+  });
+  await page.route('https://www.themealdb.com/api/**', async (route) => {
+    requested();
+    await delayed;
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        meals: [
+          {
+            idMeal: '999',
+            strMeal: 'Old rice search',
+            strIngredient1: 'Rice',
+            strMeasure1: '100g',
+            strInstructions: 'Cook the rice.',
+          },
+        ],
+      }),
+    });
+  });
+  await navigate(page, 'Recipes');
+  await expect(page.locator('.recipe-card')).toHaveCount(24);
+  const query = page.getByRole('textbox', { name: 'Find recipes', exact: true });
+  await query.fill('rice');
+  await page.getByRole('button', { name: 'More recipes online', exact: true }).click();
+  await started;
+  await query.fill('egg');
+  await page.getByRole('button', { name: 'Search library', exact: true }).click();
+  await expect(page.locator('.recipe-card')).toHaveCount(20);
+  const lateResponse = page.waitForResponse((response) =>
+    response.url().includes('search.php?s=rice'),
+  );
+  release();
+  await (await lateResponse).finished();
+  await page.getByRole('button', { name: 'Clear filters', exact: true }).click();
+  await expect(page.locator('.library-results')).toContainText('of 60 recipes');
+  await expect(page.getByRole('heading', { name: 'Old rice search', exact: true })).toHaveCount(0);
 });
 
 async function storedKitchen(page: Page): Promise<InventoryState> {
