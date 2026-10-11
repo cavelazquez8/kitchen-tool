@@ -12,7 +12,14 @@ export interface Recipe {
   servings: number | null;
   ingredients: RecipeIngredient[];
   steps: string[];
-  source: { type: 'themealdb' | 'imported' | 'ai' | 'manual'; url?: string; name?: string };
+  source: {
+    type: 'themealdb' | 'wikibooks' | 'imported' | 'ai' | 'manual';
+    url?: string;
+    name?: string;
+    attribution?: string;
+    license?: string;
+    licenseUrl?: string;
+  };
   imageUrl?: string;
   category?: string;
   cuisine?: string;
@@ -78,9 +85,12 @@ export function isRecipe(value: unknown): value is Recipe {
   }
   if (
     !record(value.source) ||
-    !['themealdb', 'imported', 'ai', 'manual'].includes(value.source.type as string) ||
+    !['themealdb', 'wikibooks', 'imported', 'ai', 'manual'].includes(value.source.type as string) ||
     !optionalText(value.source.name) ||
-    !optionalUrl(value.source.url)
+    !optionalUrl(value.source.url) ||
+    !optionalText(value.source.attribution) ||
+    !optionalText(value.source.license) ||
+    !optionalUrl(value.source.licenseUrl)
   )
     return false;
   return optionalUrl(value.imageUrl) && optionalText(value.category) && optionalText(value.cuisine);

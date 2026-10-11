@@ -23,6 +23,11 @@ function copyRecipe(recipe: Recipe): Recipe {
       type: recipe.source.type,
       ...(recipe.source.url === undefined ? {} : { url: recipe.source.url }),
       ...(recipe.source.name === undefined ? {} : { name: recipe.source.name }),
+      ...(recipe.source.attribution === undefined
+        ? {}
+        : { attribution: recipe.source.attribution }),
+      ...(recipe.source.license === undefined ? {} : { license: recipe.source.license }),
+      ...(recipe.source.licenseUrl === undefined ? {} : { licenseUrl: recipe.source.licenseUrl }),
     },
     ...(recipe.imageUrl === undefined ? {} : { imageUrl: recipe.imageUrl }),
     ...(recipe.category === undefined ? {} : { category: recipe.category }),

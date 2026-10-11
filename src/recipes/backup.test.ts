@@ -70,6 +70,29 @@ function completeState(): InventoryState {
 }
 
 describe('backward-compatible kitchen backups', () => {
+  it('retains recipe attribution and licenses through backups and local restoration', async () => {
+    const state = completeState();
+    state.recipes = [
+      {
+        ...savedRecipe(),
+        source: {
+          type: 'wikibooks',
+          name: 'Wikibooks Cookbook',
+          url: 'https://en.wikibooks.org/w/index.php?oldid=42',
+          attribution: 'Wikibooks contributors · CC BY-SA 4.0; adapted for Mise.',
+          license: 'CC BY-SA 4.0',
+          licenseUrl: 'https://creativecommons.org/licenses/by-sa/4.0/',
+        },
+      },
+    ];
+    const backup = buildInventoryBackup(state);
+    expect(backup.inventory.recipes?.[0].source).toEqual(state.recipes[0].source);
+    const storage = new MemoryStorage();
+    await createLocalRepository(storage).replace(backup.inventory);
+    expect(createLocalRepository(storage).getSnapshot().state.recipes?.[0].source).toEqual(
+      state.recipes[0].source,
+    );
+  });
   it('continues accepting original empty and food-only documents without new fields', () => {
     expect(isInventoryState({ products: [], batches: [], tools: [] })).toBe(true);
     const old = completeState();
