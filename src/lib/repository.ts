@@ -1,7 +1,5 @@
 import type { InventoryState } from '../domain/types';
 import { createLocalRepository } from './localRepository';
-import { createFirebaseRepository } from './firebaseRepository';
-import { getFirebaseConfigurationError, getFirebaseServices } from './firebase';
 
 export interface RepositoryUser {
   uid: string;
@@ -38,9 +36,7 @@ let repository: InventoryRepository | undefined;
 
 export function getInventoryRepository(): InventoryRepository {
   if (!repository) {
-    const services = getFirebaseServices();
-    const local = createLocalRepository(undefined, getFirebaseConfigurationError());
-    repository = services ? createFirebaseRepository(local, services) : local;
+    repository = createLocalRepository();
   }
   return repository;
 }

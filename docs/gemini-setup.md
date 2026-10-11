@@ -1,0 +1,143 @@
+# Connect Mise to free Gemini
+
+Mise saves kitchen data in your browser. No Firebase account or database is needed.
+The optional Cloudflare Worker sends Gemini requests without exposing your Google API
+key. Its personal access token pairs one browser with your Worker. File backups contain
+kitchen data, not either secret; pair another device separately after restoring a backup.
+
+## Keep both services free
+
+1. In [Google AI Studio](https://aistudio.google.com/api-keys), select the Mise project.
+   Confirm the project remains on the Free tier and has **no linked billing account**.
+   Use its API key only as the Worker's `GEMINI_API_KEY` secret. Do not enter it in Mise,
+   a chat message, a source file, or a client environment variable.
+2. Keep Cloudflare **Workers Free**. This Worker uses its included `workers.dev` address;
+   it does not provision paid storage, AI gateways, search, or a custom domain.
+3. Gemini API free access is separate from your consumer Gemini subscription. Availability
+   and quotas depend on the project and can change. Google permits product-improvement
+   use of unpaid API submissions; send only content you are comfortable submitting.
+
+The default model is `gemini-3.5-flash-lite`. Its text/image/video/audio inputs and text
+outputs are listed as free on Google's pricing page, checked October 10, 2026. The other
+reviewed choices are `gemini-3.1-flash-lite` and `gemini-3.8-flash`. The Worker rejects
+other model names and never switches models or billing plans automatically. A reviewed
+model name does **not** detect or disable Google project billing: keep billing unlinked.
+
+## Build and deploy from this project
+
+Use Node 24 or newer. From `kitchen-wrapper/server`:
+
+```sh
+npm ci
+npm run build
+npm run login
+npm run deploy
+```
+
+`build` bundles locally without deploying or spending Gemini quota. `login` opens
+Cloudflare's authorization flow in your browser. `deploy` uploads only the AI backend
+and prints its `https://mise-gemini.<your-subdomain>.workers.dev` address. Keep the Mise
+interface on its existing hosting address.
+
+For deployment through Cloudflare's dashboard instead: run `npm run build`, create a
+Worker named `mise-gemini` on Workers Free, and paste the complete bundled module from
+`server/dist/index.js` into its editor. Save/deploy, then add the settings below. Do not
+paste the unbundled TypeScript source; it imports a shared validation module.
+
+## Add the Worker settings
+
+In **Workers & Pages → mise-gemini → Settings → Variables and Secrets**, add:
+
+| Name                | Type   | Value                                                                  |
+| ------------------- | ------ | ---------------------------------------------------------------------- |
+| `GEMINI_API_KEY`    | Secret | Your Google AI Studio key                                              |
+| `MISE_ACCESS_TOKEN` | Secret | A new random pairing token, generated in Mise's AI connection settings |
+| `ALLOWED_ORIGIN`    | Text   | `https://mise-kitchen-cv8.expertroot3.chatgpt.site`                    |
+| `GEMINI_MODEL`      | Text   | `gemini-3.5-flash-lite`                                                |
+
+The origin is the exact interface address, with no trailing slash or path. Wrangler
+already sets the two text values from `server/wrangler.jsonc`; set them explicitly when
+using the dashboard. Save/deploy the settings. The Worker refuses AI requests until both
+secrets are present and the access token is sufficiently strong.
+
+If using the CLI for secrets, these commands prompt privately for each value:
+
+```sh
+npx wrangler secret put GEMINI_API_KEY
+npx wrangler secret put MISE_ACCESS_TOKEN
+```
+
+Keep secret values out of command arguments, shell history, Git, screenshots and this
+conversation. Both keys can be rotated later. Changing `MISE_ACCESS_TOKEN` disconnects
+previously paired browsers until you enter the new token in each one.
+
+## Pair Mise
+
+1. Open Mise's AI connection settings.
+2. Generate a personal access token and store the same value in the Worker's
+   `MISE_ACCESS_TOKEN` secret. This token is separate from your Google API key.
+3. Enter the Worker base URL and that personal access token in Mise; save and test.
+4. A successful connection test confirms the Worker address, origin, settings and pairing.
+   It makes no Gemini request and does not verify the Google key or actual model access.
+5. Send one short cooking question to verify Gemini itself. Errors explain a missing or
+   rejected key, unavailable model, quota exhaustion, or network failure.
+
+The pairing token is saved only in this browser's separate connection settings. It is a
+credential: protect it and use **Disconnect** on shared devices. Mise does not include
+it in inventory exports or backups. The browser never receives the Google API key.
+
+## Limits and imports
+
+- Requests require the exact allowed origin plus the personal bearer token. Origin
+  checking alone is not authentication; the private token supplies authentication.
+- Each Worker isolate allows up to 6 AI requests/minute, 100/day and 2 simultaneously.
+  These are best-effort limits, **not a globally persistent quota**: Cloudflare can create
+  or restart isolates. Google's own free-project quota remains the final limit. Leave
+  Google billing disabled rather than relying on these counters to prevent charges.
+- An upstream quota error pauses that isolate for at least 60 seconds. Mise never retries
+  with a paid model; inventory and recipe matching continue locally, and copying context
+  to the consumer Gemini website remains available.
+- Recipe extraction accepts pasted text or a JPG, PNG, WebP, MP4 or WebM file under 1 MB.
+  Use a short clip or cropped screenshots. The Worker forwards content inline to Gemini;
+  it does not create persistent Cloudflare storage or a Gemini Files API upload. Free
+  Workers have a 10 ms CPU budget; large media or complex pages can exceed it even below
+  the file-size cap. Prefer smaller/cropped images or clips and inspect Cloudflare's
+  `Exceeded CPU Time Limits` error if requests fail. Live free-plan media performance
+  must be verified after deployment; no paid plan is enabled as a fallback.
+- **Website link import** uses the authenticated `/import` endpoint. It fetches a public
+  HTTPS recipe page, reads embedded Recipe JSON-LD, and retains ingredients and steps
+  for review without making a Gemini generation request. It checks DNS addresses and
+  each redirect, limits downloads to 2 MB, and times out after 15 seconds. No credentials
+  or cookies are sent to recipe websites. Login-only/social/dynamic pages may require
+  pasted text or media instead.
+- **Gemini extraction** uses `/extract`: its optional source link is attribution only;
+  that endpoint receives actual text/image/video content and does not fetch the link.
+  Unknown quantities remain unknown and results need review before saving.
+- Website imports have their own per-isolate request counters, separate from Gemini
+  calls. DNS checks reduce obvious private-network requests but do not pin an IP during
+  the subsequent HTTPS fetch. This is a private personal importer, not a general public
+  URL proxy; keep its access token private.
+- Gemini chat sends the selected inventory/context and recent history on each request.
+  Generated content cannot directly edit inventory. Mise performs its own quantity math.
+
+## Local development
+
+Copy `server/.dev.vars.example` to ignored `server/.dev.vars` and fill values privately.
+Set `ALLOWED_ORIGIN` to `http://localhost:5173`, then run `npm run dev` in `server`.
+Pair the interface with `http://localhost:8787`. Do not commit `.dev.vars`; do not use real
+credentials in automated tests. Change the origin back to the hosted address before
+production deployment.
+
+## Official references
+
+- [Gemini pricing and free availability](https://ai.google.dev/gemini-api/docs/pricing)
+- [Gemini billing and projects](https://ai.google.dev/gemini-api/docs/billing)
+- [API key security](https://ai.google.dev/gemini-api/docs/api-key)
+- [Gemini generateContent REST reference](https://ai.google.dev/api/generate-content)
+- [Gemini video input](https://ai.google.dev/gemini-api/docs/video-understanding)
+- [Gemini unpaid-service data terms](https://ai.google.dev/gemini-api/terms)
+- [Cloudflare secrets](https://developers.cloudflare.com/workers/configuration/secrets/)
+- [Cloudflare CLI deployment](https://developers.cloudflare.com/workers/get-started/guide/)
+- [Cloudflare Workers pricing](https://developers.cloudflare.com/workers/platform/pricing/)
+- [Cloudflare free resource limits](https://developers.cloudflare.com/workers/platform/limits/)
+- [Recipe structured data](https://schema.org/Recipe)

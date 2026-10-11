@@ -5,10 +5,20 @@ import { ScanGate } from './scanGate';
 import './scanner.css';
 
 export interface ScannerProps {
-  onAdd: (code: string) => Promise<void>;
+  onAdd: (code: string) => Promise<void | boolean>;
   onClose: () => void;
   tray?: ReactNode;
   packageCount?: number;
+}
+
+export const AUTO_NEXT_PREFERENCE_KEY = 'mise:scanner:auto-next:v1';
+
+function readAutoNextPreference(): boolean {
+  try {
+    return localStorage.getItem(AUTO_NEXT_PREFERENCE_KEY) !== 'false';
+  } catch {
+    return true;
+  }
 }
 
 interface DevicePosture extends EventTarget {
@@ -46,6 +56,8 @@ export function Scanner({ onAdd, onClose, tray, packageCount = 0 }: ScannerProps
   const [code, setCode] = useState('');
   const [busy, setBusy] = useState(false);
   const [armed, setArmed] = useState(true);
+  const [autoNext, setAutoNext] = useState(readAutoNextPreference);
+  const autoNextRef = useRef(autoNext);
   const [feedback, setFeedback] = useState('');
   const [formError, setFormError] = useState('');
   const [folded, setFolded] = useState(() => currentPosture()?.type === 'folded');
@@ -99,10 +111,14 @@ export function Scanner({ onAdd, onClose, tray, packageCount = 0 }: ScannerProps
     setFormError('');
     setFeedback('Finding this item…');
     try {
-      await onAddRef.current(normalizedCode);
+      const added = await onAddRef.current(normalizedCode);
       if (mountedRef.current) {
-        setFeedback('Package added to your review.');
-        setCode('');
+        setFeedback(
+          added === false
+            ? 'Item not added. You can scan again when ready.'
+            : 'Package added to your review.',
+        );
+        if (added !== false) setCode('');
       }
     } catch (error) {
       if (mountedRef.current) {
@@ -112,6 +128,7 @@ export function Scanner({ onAdd, onClose, tray, packageCount = 0 }: ScannerProps
         );
       }
     } finally {
+      gateRef.current.resetObservations();
       busyRef.current = false;
       if (mountedRef.current) setBusy(false);
     }
@@ -134,10 +151,8 @@ export function Scanner({ onAdd, onClose, tray, packageCount = 0 }: ScannerProps
     setCameraMessage('');
     let stream: MediaStream | null = null;
     try {
-      const [{ BrowserMultiFormatReader }, { BarcodeFormat }] = await Promise.all([
-        import('@zxing/browser'),
-        import('@zxing/library'),
-      ]);
+      const [{ BrowserMultiFormatReader }, { BarcodeFormat, NotFoundException }] =
+        await Promise.all([import('@zxing/browser'), import('@zxing/library')]);
       if (!mountedRef.current || attempt !== startAttemptRef.current) return;
       stream = await navigator.mediaDevices.getUserMedia({
         audio: false,
@@ -162,19 +177,34 @@ export function Scanner({ onAdd, onClose, tray, packageCount = 0 }: ScannerProps
         BarcodeFormat.UPC_A,
         BarcodeFormat.UPC_E,
       ];
-      const controls = await reader.decodeFromStream(stream, videoRef.current, (result) => {
-        if (
-          !result ||
-          busyRef.current ||
-          !mountedRef.current ||
-          attempt !== startAttemptRef.current
-        )
+      const controls = await reader.decodeFromStream(stream, videoRef.current, (result, error) => {
+        if (busyRef.current || !mountedRef.current || attempt !== startAttemptRef.current) return;
+        const gate = gateRef.current;
+        const now = performance.now();
+        if (!result) {
+          // Checksum/format errors may still describe a visible barcode. Only a
+          // no-barcode observation contributes to automatic absence detection.
+          if (error instanceof NotFoundException) {
+            const wasArmed = gate.isArmed;
+            gate.observe(null, now, autoNextRef.current);
+            if (!wasArmed && gate.isArmed) {
+              setArmed(true);
+              setFeedback('Ready for the next package.');
+            }
+          } else {
+            gate.resetObservations();
+          }
           return;
+        }
         const normalized = normalizeBarcode(
           result.getText(),
           result.getBarcodeFormat() === BarcodeFormat.UPC_E ? 'UPC_E' : undefined,
         );
-        if (!normalized || !gateRef.current.accept()) return;
+        if (!normalized) {
+          gate.resetObservations();
+          return;
+        }
+        if (!gate.observe(normalized, now, autoNextRef.current)) return;
         setArmed(false);
         void addCode(normalized);
       });
@@ -209,7 +239,7 @@ export function Scanner({ onAdd, onClose, tray, packageCount = 0 }: ScannerProps
       return;
     }
     if (busyRef.current) return;
-    if (gateRef.current.isArmed) gateRef.current.accept();
+    gateRef.current.capture(normalized, performance.now());
     setArmed(false);
     void addCode(normalized);
   };
@@ -258,7 +288,7 @@ export function Scanner({ onAdd, onClose, tray, packageCount = 0 }: ScannerProps
                 </div>
                 <span className="scanner__camera-label">
                   <span className={armed ? 'scanner__live-dot' : 'scanner__paused-dot'} />
-                  {armed ? 'Ready to scan' : 'Package captured'}
+                  {busy ? 'Reviewing item…' : armed ? 'Ready to scan' : 'Package captured'}
                 </span>
               </>
             ) : (
@@ -315,7 +345,9 @@ export function Scanner({ onAdd, onClose, tray, packageCount = 0 }: ScannerProps
           )}
           {cameraState === 'active' && !armed && (
             <p className="scanner__hint">
-              Move to the next package, then tap to scan. This prevents accidental duplicates.
+              {autoNext
+                ? 'Move this barcode out of view, then show the next item. Or tap above to scan another identical package.'
+                : 'Move to the next package, then tap to scan.'}
             </p>
           )}
           <form className="scanner__manual" onSubmit={submitBarcode}>
@@ -351,6 +383,28 @@ export function Scanner({ onAdd, onClose, tray, packageCount = 0 }: ScannerProps
               </p>
             )}
           </form>
+          <label className="scanner__auto-next">
+            <span>
+              <strong>Automatically scan next item</strong>
+              <span>Pause while reviewing; resume when you move to the next item.</span>
+            </span>
+            <input
+              type="checkbox"
+              role="switch"
+              checked={autoNext}
+              onChange={(event) => {
+                const enabled = event.target.checked;
+                autoNextRef.current = enabled;
+                setAutoNext(enabled);
+                gateRef.current.resetObservations();
+                try {
+                  localStorage.setItem(AUTO_NEXT_PREFERENCE_KEY, String(enabled));
+                } catch {
+                  // Keep the preference for this session when storage is unavailable.
+                }
+              }}
+            />
+          </label>
           <div className="scanner__options">
             <button
               type="button"

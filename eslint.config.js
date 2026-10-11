@@ -5,7 +5,17 @@ import reactRefresh from 'eslint-plugin-react-refresh';
 import tseslint from 'typescript-eslint';
 
 export default tseslint.config(
-  { ignores: ['dist', 'coverage', 'playwright-report', 'test-results', '.firebase'] },
+  {
+    ignores: [
+      'dist',
+      'server/dist',
+      'public/mise-gemini-worker.js',
+      'coverage',
+      'playwright-report',
+      'test-results',
+      '.firebase',
+    ],
+  },
   js.configs.recommended,
   ...tseslint.configs.recommended,
   {

@@ -14,7 +14,10 @@ import {
   ExternalLink,
   Flame,
   Leaf,
-  LogOut,
+  BookOpen,
+  MessageCircle,
+  ShoppingCart,
+  Undo2,
   Package,
   Plus,
   ScanLine,
@@ -33,11 +36,12 @@ import type {
   Product,
   StorageLocation,
 } from './domain/types';
-import { isInventoryState } from './domain/types';
+import { isDateOnly, isInventoryState } from './domain/types';
 import {
   addBatch,
   addProduct,
   addTool,
+  convertQuantity,
   formatQuantity,
   groupInventory,
   removeBatch,
@@ -50,6 +54,7 @@ import {
 } from './domain/inventory';
 import { generateMarkdown } from './domain/export';
 import { getInventoryRepository } from './lib/repository';
+import { buildInventoryBackup } from './lib/backup';
 import { useInventoryRepository } from './lib/useInventoryRepository';
 import { Scanner } from './scanner/Scanner';
 import { lookupProduct } from './scanner/lookup';
@@ -57,6 +62,11 @@ import { Modal } from './components/Modal';
 import { ItemEditor, type ItemDraft } from './components/ItemEditor';
 import { InventoryList } from './components/InventoryList';
 import { groupExpiry, isSoon } from './components/inventoryPresentation';
+import { Autocomplete } from './components/Autocomplete';
+import { Choice } from './components/Choice';
+import { FOOD_CATALOG, TOOL_CATALOG } from './recipes/catalog';
+import { KitchenHub, type HubPage } from './components/KitchenHub';
+import { GeminiSettings } from './components/GeminiSettings';
 
 const locationNames: Record<StorageLocation, string> = {
   fridge: 'Fridge',
@@ -64,14 +74,19 @@ const locationNames: Record<StorageLocation, string> = {
   pantry: 'Pantry',
 };
 type Filter = 'all' | 'soon' | 'undated';
-type Page = 'inventory' | 'tools';
+type Page = 'inventory' | 'tools' | HubPage;
 type Editor = { kind: 'add' } | { kind: 'edit'; batchId: string };
 type ScanEntry = {
   id: string;
   barcode: string;
   name: string;
   brand: string;
-  quantity: number;
+  quantity: number | null;
+  unit: string;
+  purchasedOn: string;
+  ingredientName?: string;
+  isStaple?: boolean;
+  stapleStatus?: ItemDraft['stapleStatus'];
   location: StorageLocation;
   expiresOn: string;
   note?: string;
@@ -80,6 +95,7 @@ type ScanEntry = {
 function newDraft(): ItemDraft {
   return {
     name: '',
+    ingredientName: '',
     brand: '',
     quantity: '',
     unit: 'each',
@@ -93,6 +109,7 @@ function newDraft(): ItemDraft {
 function draftFor(batch: Batch, product: Product): ItemDraft {
   return {
     name: product.name,
+    ingredientName: product.ingredientName ?? '',
     brand: product.brand ?? '',
     quantity: batch.quantity === null ? '' : String(batch.quantity),
     unit: batch.unit,
@@ -128,6 +145,9 @@ export default function App() {
   const [scannerOpen, setScannerOpen] = useState(false);
   const [scanEntries, setScanEntries] = useState<ScanEntry[]>([]);
   const [scanError, setScanError] = useState('');
+  const [scanInProgress, setScanInProgress] = useState(false);
+  const scanOperation = useRef<{ session: number; controller: AbortController } | null>(null);
+  const scanSaving = useRef(false);
   const [usedBatch, setUsedBatch] = useState<string | null>(null);
   const [usageMode, setUsageMode] = useState<'used' | 'remaining'>('used');
   const [usageAmount, setUsageAmount] = useState('');
@@ -135,7 +155,21 @@ export default function App() {
   const [toolName, setToolName] = useState('');
   const [toolToDelete, setToolToDelete] = useState<string | null>(null);
   const [backupToImport, setBackupToImport] = useState<InventoryState | null>(null);
-  const [importLocalOpen, setImportLocalOpen] = useState(false);
+  const [unknownScan, setUnknownScan] = useState<string | null>(null);
+  const pendingScan = useRef<{
+    barcode: string;
+    resolve: (entry: ScanEntry | false) => void;
+  } | null>(null);
+  const [repeatScan, setRepeatScan] = useState<{ name: string; inTray: boolean } | null>(null);
+  const repeatResolver = useRef<((confirmed: boolean) => void) | null>(null);
+  const scanSession = useRef(0);
+  const undoPending = useRef(false);
+  const pendingShoppingId = useRef<string | undefined>(undefined);
+  const [undoDeduction, setUndoDeduction] = useState<{
+    batchId: string;
+    unit: string;
+    message: string;
+  } | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
   const exportText = useRef<HTMLTextAreaElement>(null);
 
@@ -144,6 +178,18 @@ export default function App() {
     const timer = window.setTimeout(() => setToast(''), 5500);
     return () => window.clearTimeout(timer);
   }, [toast]);
+  useEffect(
+    () => () => {
+      pendingScan.current?.resolve(false);
+      pendingScan.current = null;
+      repeatResolver.current?.(false);
+      repeatResolver.current = null;
+      scanOperation.current?.controller.abort();
+      scanOperation.current = null;
+      scanSession.current++;
+    },
+    [],
+  );
   const groups = useMemo(() => groupInventory(inventory), [inventory]);
   const visibleGroups = useMemo(
     () =>
@@ -207,8 +253,67 @@ export default function App() {
       setBusy(false);
     }
   }
+  function closeEditor() {
+    pendingScan.current?.resolve(false);
+    pendingScan.current = null;
+    pendingShoppingId.current = undefined;
+    setUnknownScan(null);
+    setEditor(null);
+  }
+  function decideRepeat(confirmed: boolean) {
+    const resolve = repeatResolver.current;
+    repeatResolver.current = null;
+    setRepeatScan(null);
+    resolve?.(confirmed);
+  }
+  function closeScanner() {
+    scanSession.current++;
+    scanOperation.current?.controller.abort();
+    scanOperation.current = null;
+    setScanInProgress(false);
+    if (pendingScan.current) closeEditor();
+    decideRepeat(false);
+    setScannerOpen(false);
+  }
   function openAdd() {
+    pendingShoppingId.current = undefined;
     setDraft(newDraft());
+    setFormError('');
+    setEditor({ kind: 'add' });
+  }
+  function quickAdd(name: string, quantity?: number | null, unit?: string, shoppingId?: string) {
+    const previous = inventory.products.find(
+      (product) =>
+        product.name.toLowerCase() === name.toLowerCase() ||
+        product.ingredientName?.toLowerCase() === name.toLowerCase(),
+    );
+    const batch =
+      previous &&
+      inventory.batches
+        .filter((item) => item.productId === previous.id)
+        .sort((a, b) => b.purchasedOn.localeCompare(a.purchasedOn))[0];
+    const recordedUnit = unit ?? batch?.unit ?? 'each';
+    const countable = [
+      'each',
+      'piece',
+      'pieces',
+      'package',
+      'can',
+      'bottle',
+      'bag',
+      'packet',
+    ].includes(recordedUnit.toLowerCase());
+    const recordedQuantity = quantity === undefined ? (countable ? 1 : null) : quantity;
+    pendingShoppingId.current = shoppingId;
+    setDraft({
+      ...newDraft(),
+      name: previous?.name ?? name,
+      brand: previous?.brand ?? '',
+      ingredientName: previous?.ingredientName ?? name,
+      quantity: recordedQuantity === null ? '' : String(recordedQuantity),
+      unit: recordedUnit,
+      location: batch?.location ?? 'fridge',
+    });
     setFormError('');
     setEditor({ kind: 'add' });
   }
@@ -246,8 +351,34 @@ export default function App() {
       setFormError('The purchase date cannot be in the future.');
       return;
     }
+    if (!isDateOnly(draft.purchasedOn) || (draft.expiresOn && !isDateOnly(draft.expiresOn))) {
+      setFormError('Enter valid purchase and expiration dates.');
+      return;
+    }
+    if (pendingScan.current) {
+      const { barcode, resolve } = pendingScan.current;
+      pendingScan.current = null;
+      resolve({
+        id: nextId(),
+        barcode,
+        name,
+        brand: draft.brand.trim(),
+        quantity,
+        unit: draft.unit.trim(),
+        purchasedOn: draft.purchasedOn,
+        ingredientName: draft.ingredientName.trim() || undefined,
+        isStaple: draft.isStaple,
+        stapleStatus: draft.isStaple ? draft.stapleStatus : undefined,
+        location: draft.location,
+        expiresOn: draft.expiresOn,
+      });
+      setUnknownScan(null);
+      setEditor(null);
+      return;
+    }
     const productId = nextId(),
       batchId = nextId();
+    const shoppingId = pendingShoppingId.current;
     setBusy(true);
     setFormError('');
     try {
@@ -257,6 +388,7 @@ export default function App() {
           if (!batch) throw new Error('This batch was removed on another device.');
           let next = updateProduct(state, batch.productId, {
             name,
+            ingredientName: draft.ingredientName.trim() || undefined,
             brand: draft.brand.trim() || undefined,
             isStaple: draft.isStaple,
           });
@@ -279,13 +411,19 @@ export default function App() {
         const product: Product = matching ?? {
           id: productId,
           name,
+          ...(draft.ingredientName.trim() ? { ingredientName: draft.ingredientName.trim() } : {}),
           ...(draft.brand.trim() ? { brand: draft.brand.trim() } : {}),
           isStaple,
         };
         const next = matching
-          ? updateProduct(state, matching.id, { isStaple })
+          ? updateProduct(state, matching.id, {
+              isStaple,
+              ...(draft.ingredientName.trim()
+                ? { ingredientName: draft.ingredientName.trim() }
+                : {}),
+            })
           : addProduct(state, product);
-        return addBatch(next, {
+        const added = addBatch(next, {
           id: batchId,
           productId: product.id,
           quantity,
@@ -295,7 +433,16 @@ export default function App() {
           expiresOn: draft.expiresOn || null,
           ...(isStaple ? { stapleStatus: draft.stapleStatus } : {}),
         });
+        return shoppingId
+          ? {
+              ...added,
+              shoppingList: added.shoppingList?.map((item) =>
+                item.id === shoppingId ? { ...item, checked: true, addedBatchId: batchId } : item,
+              ),
+            }
+          : added;
       });
+      pendingShoppingId.current = undefined;
       setEditor(null);
       setToast(
         editor.kind === 'add'
@@ -333,7 +480,7 @@ export default function App() {
   async function readBackup(file?: File) {
     if (!file) return;
     try {
-      if (file.size > 2_000_000) throw new Error('This backup is too large.');
+      if (file.size > 10_000_000) throw new Error('This backup is too large.');
       const parsed: unknown = JSON.parse(await file.text());
       const state =
         typeof parsed === 'object' && parsed !== null && 'inventory' in parsed
@@ -341,40 +488,101 @@ export default function App() {
           : parsed;
       if (!isInventoryState(state))
         throw new Error('That file is not a valid Mise inventory backup.');
-      setBackupToImport(state);
+      setBackupToImport(buildInventoryBackup(state).inventory);
     } catch (error) {
       setToast(error instanceof Error ? error.message : 'Could not read this backup.');
     }
     if (fileInput.current) fileInput.current.value = '';
   }
-  async function scanBarcode(code: string) {
+  async function handleScanBarcode(code: string): Promise<boolean> {
+    if (scanOperation.current || scanSaving.current) return false;
+    const operation = { session: scanSession.current, controller: new AbortController() };
+    scanOperation.current = operation;
+    setScanInProgress(true);
+    try {
+      return await scanBarcode(code, operation.controller.signal);
+    } finally {
+      if (scanOperation.current === operation) {
+        scanOperation.current = null;
+        setScanInProgress(false);
+      }
+    }
+  }
+  async function scanBarcode(code: string, signal: AbortSignal): Promise<boolean> {
     setScanError('');
+    const session = scanSession.current;
     const existing = inventory.products.find((product) => product.barcode === code);
     const inTray = scanEntries.find((entry) => entry.barcode === code);
-    if (inTray) {
-      setScanEntries((entries) =>
-        entries.map((entry) =>
-          entry.id === inTray.id ? { ...entry, quantity: entry.quantity + 1 } : entry,
-        ),
-      );
-      return;
+    if (existing || inTray) {
+      const confirmed = await new Promise<boolean>((resolve) => {
+        repeatResolver.current = resolve;
+        setRepeatScan({ name: inTray?.name ?? existing!.name, inTray: !!inTray });
+      });
+      if (!confirmed || session !== scanSession.current) return false;
+      if (
+        inTray &&
+        inTray.quantity !== null &&
+        ['each', 'package'].includes(inTray.unit.toLowerCase())
+      ) {
+        setScanEntries((entries) =>
+          entries.map((entry) =>
+            entry.id === inTray.id
+              ? { ...entry, quantity: entry.quantity === null ? null : entry.quantity + 1 }
+              : entry,
+          ),
+        );
+        return true;
+      }
     }
-    const result = existing ? null : await lookupProduct(code);
+    const result = existing || inTray ? null : await lookupProduct(code, signal);
+    if (session !== scanSession.current) return false;
+    if (result && result.status !== 'found') {
+      const entry = await new Promise<ScanEntry | false>((resolve) => {
+        pendingScan.current = { barcode: code, resolve };
+        setUnknownScan(
+          result.status === 'unavailable'
+            ? 'Product lookup is unavailable. Enter this item’s details and Mise will remember its barcode.'
+            : 'We couldn’t find this barcode. Enter this item’s details and Mise will remember it next time.',
+        );
+        setDraft({
+          ...newDraft(),
+          quantity: '1',
+          unit: 'package',
+          location: location === 'all' ? 'fridge' : location,
+        });
+        setFormError('');
+        setEditor({ kind: 'add' });
+      });
+      if (!entry || session !== scanSession.current) return false;
+      setScanEntries((entries) => [...entries, entry]);
+      return true;
+    }
+    const previousBatch =
+      existing &&
+      inventory.batches
+        .filter((batch) => batch.productId === existing.id)
+        .sort((a, b) => b.purchasedOn.localeCompare(a.purchasedOn))[0];
     setScanEntries((entries) => [
       ...entries,
       {
         id: nextId(),
         barcode: code,
-        name: existing?.name ?? (result?.status === 'found' ? result.product.name : ''),
-        brand: existing?.brand ?? (result?.status === 'found' ? (result.product.brand ?? '') : ''),
+        name:
+          existing?.name ?? inTray?.name ?? (result?.status === 'found' ? result.product.name : ''),
+        brand:
+          existing?.brand ??
+          inTray?.brand ??
+          (result?.status === 'found' ? (result.product.brand ?? '') : ''),
+        ingredientName: existing?.ingredientName ?? inTray?.ingredientName,
         quantity: 1,
-        location: location === 'all' ? 'fridge' : location,
+        unit: 'package',
+        purchasedOn: todayDate(),
+        location:
+          inTray?.location ?? previousBatch?.location ?? (location === 'all' ? 'fridge' : location),
         expiresOn: '',
-        ...(result && result.status !== 'found'
-          ? { note: 'Name this item once. Mise will remember its barcode.' }
-          : {}),
       },
     ]);
+    return true;
   }
   function updateScan(id: string, patch: Partial<ScanEntry>) {
     setScanEntries((entries) =>
@@ -382,21 +590,33 @@ export default function App() {
     );
   }
   async function saveScan() {
-    if (!scanEntries.length) return;
-    if (
-      scanEntries.some(
-        (entry) => !entry.name.trim() || entry.quantity < 1 || !Number.isInteger(entry.quantity),
-      )
-    ) {
-      setScanError('Give every item a name and a whole number of packages.');
+    if (!scanEntries.length || scanSaving.current) return;
+    if (scanOperation.current) {
+      setScanError('Finish reviewing the current item before adding your groceries.');
       return;
     }
+    if (
+      scanEntries.some(
+        (entry) =>
+          !entry.name.trim() ||
+          !entry.unit.trim() ||
+          (entry.quantity !== null && (!Number.isFinite(entry.quantity) || entry.quantity < 0)) ||
+          !isDateOnly(entry.purchasedOn) ||
+          entry.purchasedOn > todayDate() ||
+          !!(entry.expiresOn && !isDateOnly(entry.expiresOn)),
+      )
+    ) {
+      setScanError(
+        'Give each item a name, unit, valid dates, and a quantity of zero or more—or leave it unknown.',
+      );
+      return;
+    }
+    scanSaving.current = true;
     const entries = scanEntries.map((entry) => ({
       ...entry,
       productId: nextId(),
       batchId: nextId(),
     }));
-    const purchasedOn = todayDate();
     setBusy(true);
     try {
       await repository.update((state) =>
@@ -405,21 +625,27 @@ export default function App() {
             next.products.find((product) => product.barcode === entry.barcode) ??
             next.products.find(
               (product) =>
+                (!product.barcode || product.barcode === entry.barcode) &&
                 product.name.toLowerCase() === entry.name.trim().toLowerCase() &&
                 (product.brand ?? '').toLowerCase() === entry.brand.trim().toLowerCase(),
             );
           const product: Product = {
             id: existing?.id ?? entry.productId,
             name: entry.name.trim(),
+            ...(entry.ingredientName?.trim() || existing?.ingredientName
+              ? { ingredientName: entry.ingredientName?.trim() || existing?.ingredientName }
+              : {}),
             ...(entry.brand.trim() ? { brand: entry.brand.trim() } : {}),
             barcode: entry.barcode,
-            isStaple: existing?.isStaple ?? false,
+            isStaple: existing?.isStaple || entry.isStaple || false,
           };
           const updated = existing
             ? updateProduct(next, existing.id, {
                 name: product.name,
                 brand: product.brand,
                 barcode: entry.barcode,
+                ingredientName: product.ingredientName,
+                isStaple: product.isStaple,
               })
             : addProduct(next, product);
           return addBatch(updated, {
@@ -427,19 +653,22 @@ export default function App() {
             productId: product.id,
             location: entry.location,
             quantity: entry.quantity,
-            unit: 'package',
-            purchasedOn,
+            unit: entry.unit,
+            purchasedOn: entry.purchasedOn,
             expiresOn: entry.expiresOn || null,
-            ...(product.isStaple ? { stapleStatus: 'stocked' as const } : {}),
+            ...(product.isStaple
+              ? { stapleStatus: entry.stapleStatus ?? ('stocked' as const) }
+              : {}),
           });
         }, state),
       );
-      setScannerOpen(false);
+      closeScanner();
       setScanEntries([]);
       setToast('Groceries added. You’re all stocked up.');
     } catch (error) {
       setScanError(error instanceof Error ? error.message : 'Could not add groceries. Try again.');
     } finally {
+      scanSaving.current = false;
       setBusy(false);
     }
   }
@@ -473,11 +702,55 @@ export default function App() {
       setBusy(false);
     }
   }
+  async function deductOne(batch: Batch) {
+    const name =
+      inventory.products.find((product) => product.id === batch.productId)?.name ?? 'item';
+    const message = `Used one ${name}.`;
+    const saved = await act(
+      () =>
+        repository.update((state) =>
+          consumeBatch(state, batch.id, { amount: 1, unit: batch.unit }),
+        ),
+      message,
+    );
+    if (saved) setUndoDeduction({ batchId: batch.id, unit: batch.unit, message });
+  }
+  async function undoLastDeduction() {
+    if (!undoDeduction || undoPending.current) return;
+    undoPending.current = true;
+    const { batchId, unit } = undoDeduction;
+    const saved = await act(
+      () =>
+        repository.update((state) => {
+          const batch = state.batches.find((item) => item.id === batchId);
+          if (!batch || batch.quantity === null)
+            throw new Error('This quantity changed. Please edit the item to correct it.');
+          return setBatchRemaining(
+            state,
+            batchId,
+            batch.quantity + convertQuantity(1, unit, batch.unit),
+          );
+        }),
+      'Quantity restored.',
+    );
+    if (saved) setUndoDeduction(null);
+    undoPending.current = false;
+  }
+  const scanPackageCount = scanEntries.reduce(
+    (sum, entry) =>
+      sum +
+      (entry.quantity !== null && ['each', 'package'].includes(entry.unit.toLowerCase())
+        ? entry.quantity
+        : 1),
+    0,
+  );
   const scanTray = (
     <div className="scan-tray">
       <div className="tray-title">
         <h3>Quick review</h3>
-        <span>{scanEntries.reduce((sum, entry) => sum + entry.quantity, 0)} packages</span>
+        <span>
+          {scanEntries.length} {scanEntries.length === 1 ? 'item' : 'items'}
+        </span>
       </div>
       {!scanEntries.length && (
         <div className="tray-empty">
@@ -491,10 +764,12 @@ export default function App() {
           <div className="scan-entry-top">
             <label>
               Item name
-              <input
+              <Autocomplete
+                label="Item name"
                 value={entry.name}
                 placeholder="What did you scan?"
-                onChange={(event) => updateScan(entry.id, { name: event.target.value })}
+                options={[...inventory.products.map((product) => product.name), ...FOOD_CATALOG]}
+                onChange={(name) => updateScan(entry.id, { name })}
               />
             </label>
             <button
@@ -508,33 +783,62 @@ export default function App() {
             </button>
           </div>
           {entry.note && <p className="field-note">{entry.note}</p>}
+          <label>
+            Store in
+            <Choice
+              label={`Store ${entry.name || 'scanned item'} in`}
+              value={entry.location}
+              onChange={(value) => updateScan(entry.id, { location: value as StorageLocation })}
+              options={Object.entries(locationNames).map(([value, label]) => ({ value, label }))}
+            />
+          </label>
           <div className="form-row">
             <label>
-              Packages
+              Quantity
               <input
                 type="number"
-                min="1"
-                step="1"
-                value={entry.quantity}
-                onChange={(event) => updateScan(entry.id, { quantity: Number(event.target.value) })}
+                min="0"
+                step="any"
+                value={entry.quantity ?? ''}
+                placeholder="Unknown"
+                onChange={(event) =>
+                  updateScan(entry.id, {
+                    quantity: event.target.value === '' ? null : Number(event.target.value),
+                  })
+                }
               />
             </label>
             <label>
-              Store in
-              <select
-                value={entry.location}
-                onChange={(event) =>
-                  updateScan(entry.id, { location: event.target.value as StorageLocation })
-                }
-              >
-                {Object.entries(locationNames).map(([value, name]) => (
-                  <option key={value} value={value}>
-                    {name}
-                  </option>
-                ))}
-              </select>
+              Unit
+              <Autocomplete
+                label="Unit"
+                value={entry.unit}
+                options={[
+                  'package',
+                  'each',
+                  'g',
+                  'kg',
+                  'oz',
+                  'lb',
+                  'mL',
+                  'L',
+                  'cup',
+                  'tbsp',
+                  'tsp',
+                ]}
+                onChange={(unit) => updateScan(entry.id, { unit })}
+              />
             </label>
           </div>
+          <label>
+            Purchased
+            <input
+              type="date"
+              value={entry.purchasedOn}
+              max={todayDate()}
+              onChange={(event) => updateScan(entry.id, { purchasedOn: event.target.value })}
+            />
+          </label>
           <label>
             Expiration <span className="optional">optional</span>
             <input
@@ -552,7 +856,7 @@ export default function App() {
       )}
       <button
         className="button primary full-width"
-        disabled={!scanEntries.length || isSaving}
+        disabled={!scanEntries.length || isSaving || scanInProgress}
         onClick={() => {
           void saveScan();
         }}
@@ -611,6 +915,24 @@ export default function App() {
             <Utensils size={20} />
             <span>Kitchen tools</span>
           </button>
+          {(
+            [
+              { value: 'recipes', label: 'Recipes', icon: BookOpen },
+              { value: 'shopping', label: 'Shopping list', icon: ShoppingCart },
+              { value: 'assistant', label: 'Gemini', icon: Sparkles },
+            ] as const
+          ).map(({ value, label, icon: Icon }) => (
+            <button
+              key={value}
+              aria-label={label}
+              title={label}
+              className={page === value ? 'active' : ''}
+              onClick={() => setPage(value)}
+            >
+              <Icon size={20} />
+              <span>{label}</span>
+            </button>
+          ))}
         </nav>
         <div className="sidebar-note">
           <Leaf size={23} />
@@ -639,7 +961,15 @@ export default function App() {
             mise<span>·</span>
           </div>
           <span className="topbar-context">
-            {page === 'inventory' ? 'The everyday, made easier' : 'Everything you cook with'}
+            {page === 'inventory'
+              ? 'The everyday, made easier'
+              : page === 'tools'
+                ? 'Everything you cook with'
+                : page === 'recipes'
+                  ? 'Make something good'
+                  : page === 'shopping'
+                    ? 'Bring home what you need'
+                    : 'A little help in your kitchen'}
           </span>
           <button className={`sync-pill ${snapshot.mode}`} onClick={() => setSettingsOpen(true)}>
             <span className="status-dot" />
@@ -676,11 +1006,27 @@ export default function App() {
                 <span />
                 YOUR EVERYDAY, ORGANIZED
               </div>
-              <h1>{page === 'inventory' ? 'Your kitchen inventory' : 'Your kitchen tools'}</h1>
+              <h1>
+                {page === 'inventory'
+                  ? 'Your kitchen inventory'
+                  : page === 'tools'
+                    ? 'Your kitchen tools'
+                    : page === 'recipes'
+                      ? 'Recipes for your kitchen'
+                      : page === 'shopping'
+                        ? 'Your shopping list'
+                        : 'Cook with Gemini'}
+              </h1>
               <p>
                 {page === 'inventory'
                   ? 'Know what’s here. Make something good.'
-                  : 'The right tools make all the difference.'}
+                  : page === 'tools'
+                    ? 'The right tools make all the difference.'
+                    : page === 'recipes'
+                      ? 'Find a favorite. See what you can make.'
+                      : page === 'shopping'
+                        ? 'Plan meals. Buy just what’s missing.'
+                        : 'Your ingredients, your recipes, your conversation.'}
               </p>
             </div>
             {page === 'inventory' && (
@@ -702,7 +1048,19 @@ export default function App() {
               </div>
             )}
           </div>
-          {page === 'inventory' ? (
+          {page === 'recipes' || page === 'shopping' || page === 'assistant' ? (
+            <KitchenHub
+              page={page}
+              inventory={inventory}
+              selectedBatchIds={selected}
+              update={(reducer) => repository.update(reducer)}
+              onToast={setToast}
+              onQuickAdd={quickAdd}
+              onScan={() => setScannerOpen(true)}
+              onConfigure={() => setSettingsOpen(true)}
+              onNavigate={setPage}
+            />
+          ) : page === 'inventory' ? (
             <>
               <div className="overview-grid">
                 <button
@@ -787,16 +1145,16 @@ export default function App() {
                         onChange={(event) => setSearch(event.target.value)}
                       />
                     </label>
-                    <select
-                      className="sort-select"
-                      aria-label="Sort inventory"
+                    <Choice
+                      label="Sort inventory"
                       value={sort}
-                      onChange={(event) => setSort(event.target.value)}
-                    >
-                      <option value="name">Name A–Z</option>
-                      <option value="expiry">Expiration date</option>
-                      <option value="purchased">Recently bought</option>
-                    </select>
+                      onChange={setSort}
+                      options={[
+                        { value: 'name', label: 'Name A–Z' },
+                        { value: 'expiry', label: 'Expiration date' },
+                        { value: 'purchased', label: 'Recently bought' },
+                      ]}
+                    />
                   </div>
                 </div>
                 {selected.length > 0 && (
@@ -874,6 +1232,9 @@ export default function App() {
                       onToggleGroup={(id) => setExpanded((current) => (current === id ? null : id))}
                       onToggleSelected={toggleSelected}
                       onEdit={openEdit}
+                      onDeduct={(batch) => {
+                        void deductOne(batch);
+                      }}
                       onUse={(batch) => {
                         setUsedBatch(batch.id);
                         setUsageMode(batch.quantity === null ? 'remaining' : 'used');
@@ -908,9 +1269,12 @@ export default function App() {
                 </div>
                 <div className="gemini-copy">
                   <h2>Your ingredients. A little inspiration.</h2>
-                  <p>Copy your inventory, then ask Gemini what’s for dinner.</p>
+                  <p>Ask Gemini what’s for dinner, or copy your inventory to any AI.</p>
                 </div>
                 <div className="gemini-actions">
+                  <button className="button primary" onClick={() => setPage('assistant')}>
+                    <MessageCircle size={17} /> Ask Gemini
+                  </button>
                   <button
                     className="button mint-outline"
                     onClick={() => {
@@ -962,11 +1326,12 @@ export default function App() {
               >
                 <label>
                   <span className="sr-only">Tool name</span>
-                  <input
+                  <Autocomplete
+                    label="Tool name"
                     value={toolName}
-                    onChange={(event) => setToolName(event.target.value)}
+                    onChange={setToolName}
+                    options={TOOL_CATALOG}
                     placeholder="e.g. Air fryer, blender, chef’s knife"
-                    maxLength={120}
                   />
                 </label>
                 <button className="button primary" disabled={!toolName.trim() || isSaving}>
@@ -1014,6 +1379,21 @@ export default function App() {
             <Package size={20} />
             Inventory
           </button>
+          <button className={page === 'recipes' ? 'active' : ''} onClick={() => setPage('recipes')}>
+            <BookOpen size={20} /> Recipes
+          </button>
+          <button
+            className={page === 'shopping' ? 'active' : ''}
+            onClick={() => setPage('shopping')}
+          >
+            <ShoppingCart size={20} /> Shop
+          </button>
+          <button
+            className={page === 'assistant' ? 'active' : ''}
+            onClick={() => setPage('assistant')}
+          >
+            <Sparkles size={20} /> Gemini
+          </button>
           <button className="mobile-scan" onClick={() => setScannerOpen(true)}>
             <ScanLine size={23} />
             Scan
@@ -1029,7 +1409,11 @@ export default function App() {
         editor={editor}
         draft={draft}
         onDraftChange={setDraft}
-        onClose={() => setEditor(null)}
+        onClose={closeEditor}
+        suggestions={inventory.products.map((product) => product.name)}
+        title={unknownScan ? 'Product not found' : undefined}
+        description={unknownScan ?? undefined}
+        submitLabel={unknownScan ? 'Add to review' : undefined}
         onSubmit={(event) => {
           void saveItem(event);
         }}
@@ -1235,82 +1619,28 @@ export default function App() {
         open={settingsOpen}
         onClose={() => setSettingsOpen(false)}
         title="Your kitchen, your way"
-        description="Manage saving, sync, and your inventory backup."
+        description="Manage Gemini and your kitchen backup."
         className="settings-modal"
       >
         <div className="settings-section">
           <div className="settings-section-heading">
             <Cloud size={21} />
             <div>
-              <h3>
-                {snapshot.status === 'error'
-                  ? 'Saving needs attention'
-                  : snapshot.status === 'loading'
-                    ? 'Connecting to your kitchen'
-                    : snapshot.mode === 'cloud'
-                      ? 'Your kitchen is synced'
-                      : 'Saved on this device'}
-              </h3>
-              <p>
-                {snapshot.mode === 'cloud'
-                  ? snapshot.user?.email
-                  : 'Local only · This browser has its own inventory.'}
-              </p>
+              <h3>Saved on this device</h3>
+              <p>Local only · This browser has its own kitchen.</p>
             </div>
           </div>
-          {snapshot.mode === 'cloud' ? (
-            <>
-              <p className="settings-note">
-                Sign in with the same Google account on another device to open this kitchen.
-              </p>
-              {snapshot.localItemCount > 0 && (
-                <button
-                  className="button secondary full-width"
-                  onClick={() => setImportLocalOpen(true)}
-                >
-                  Import this device’s local inventory
-                </button>
-              )}
-              <button
-                className="text-button"
-                disabled={isSaving}
-                onClick={() => {
-                  void act(
-                    () => repository.signOut(),
-                    'Signed out. Showing this device’s local kitchen.',
-                  );
-                }}
-              >
-                <LogOut size={16} />
-                Sign out
-              </button>
-            </>
-          ) : (
-            <>
-              <p className="settings-note">
-                {snapshot.cloudConfigured
-                  ? 'Sign in to use the same inventory on your phone, laptop, and fridge screen.'
-                  : 'Sync isn’t connected yet. Your inventory stays in this browser. Download a backup to keep a copy.'}
-              </p>
-              {snapshot.cloudConfigured && (
-                <button
-                  className="button primary full-width"
-                  disabled={isSaving}
-                  onClick={() => {
-                    void act(() => repository.signIn());
-                  }}
-                >
-                  Continue with Google
-                </button>
-              )}
-            </>
-          )}
+          <p className="settings-note">
+            Download a backup to keep a copy or transfer your kitchen to another device. Restoring a
+            backup replaces that device’s kitchen.
+          </p>
         </div>
+        <GeminiSettings onToast={setToast} />
         <div className="settings-section">
           <h3>Keep a backup</h3>
           <p className="settings-note">
-            A backup includes ingredients, batches, barcodes, and tools. It can also move your
-            kitchen to another device.
+            A backup includes inventory, tools, saved recipes, meal plans, shopping lists, and your
+            conversation. It can also move your kitchen to another device.
           </p>
           <div className="backup-actions">
             <button
@@ -1318,7 +1648,7 @@ export default function App() {
               onClick={() =>
                 download(
                   JSON.stringify(
-                    { version: 1, exportedAt: new Date().toISOString(), inventory },
+                    { ...buildInventoryBackup(inventory), exportedAt: new Date().toISOString() },
                     null,
                     2,
                   ),
@@ -1363,18 +1693,18 @@ export default function App() {
           </button>
         </div>
         <div className="settings-version">
-          Mise 0.1 <span>Updates arrive at the same website address.</span>
+          Mise 0.2 <span>Updates arrive at the same website address.</span>
         </div>
       </Modal>
       <Modal
         open={!!backupToImport}
         onClose={() => setBackupToImport(null)}
         title="Restore this kitchen?"
-        description={`This backup contains ${backupToImport?.batches.length ?? 0} purchase batches and ${backupToImport?.tools.length ?? 0} tools.`}
+        description={`This backup contains ${backupToImport?.batches.length ?? 0} purchase batches, ${backupToImport?.recipes?.length ?? 0} saved recipes, and ${backupToImport?.shoppingList?.length ?? 0} shopping items.`}
       >
         <p className="settings-note">
-          This replaces the inventory you’re viewing. Download a backup of your current kitchen
-          first if you want to keep it.
+          This replaces the kitchen you’re viewing, including saved recipes, lists, and
+          conversation. Download a backup of your current kitchen first if you want to keep it.
         </p>
         <div className="form-footer">
           <button
@@ -1403,43 +1733,9 @@ export default function App() {
         </div>
       </Modal>
       <Modal
-        open={importLocalOpen}
-        onClose={() => setImportLocalOpen(false)}
-        title="Import this device’s kitchen?"
-        description="This copies your local inventory into your synced kitchen."
-      >
-        <p className="settings-note">
-          If your synced kitchen already contains items, this will replace them. Download a backup
-          of your synced inventory first.
-        </p>
-        <div className="form-footer">
-          <button
-            className="button secondary"
-            disabled={isSaving}
-            onClick={() => setImportLocalOpen(false)}
-          >
-            Cancel
-          </button>
-          <button
-            className="button primary"
-            disabled={isSaving}
-            onClick={() => {
-              void act(
-                () => repository.importLocal({ replaceExisting: true }),
-                'Local kitchen imported.',
-              ).then((saved) => {
-                if (saved) setImportLocalOpen(false);
-              });
-            }}
-          >
-            Import and replace
-          </button>
-        </div>
-      </Modal>
-      <Modal
         open={scannerOpen}
         onClose={() => {
-          if (!isSaving) setScannerOpen(false);
+          if (!isSaving) closeScanner();
         }}
         title="Stock up, simply"
         description="One intentional scan adds one package. Review everything before saving."
@@ -1447,17 +1743,48 @@ export default function App() {
       >
         {scannerOpen && (
           <Scanner
-            onAdd={scanBarcode}
-            onClose={() => setScannerOpen(false)}
+            onAdd={handleScanBarcode}
+            onClose={closeScanner}
             tray={scanTray}
-            packageCount={scanEntries.reduce((sum, entry) => sum + entry.quantity, 0)}
+            packageCount={scanPackageCount}
           />
         )}
+      </Modal>
+      <Modal
+        open={!!repeatScan}
+        onClose={() => decideRepeat(false)}
+        title={`Add another ${repeatScan?.name ?? 'item'}?`}
+        description={
+          repeatScan?.inTray
+            ? 'This item is already in your review. Add one more package?'
+            : 'You already have this item. Add a new package with its own purchase and expiration dates?'
+        }
+      >
+        <div className="form-footer">
+          <button className="button secondary" onClick={() => decideRepeat(false)}>
+            Skip
+          </button>
+          <button className="button primary" onClick={() => decideRepeat(true)}>
+            Add 1 package
+          </button>
+        </div>
       </Modal>
       {toast && (
         <div className="toast" role="status">
           <Check size={19} />
           <span>{toast}</span>
+          {undoDeduction?.message === toast && (
+            <button
+              type="button"
+              className="text-button"
+              disabled={isSaving}
+              onClick={() => {
+                void undoLastDeduction();
+              }}
+            >
+              <Undo2 size={16} /> Undo
+            </button>
+          )}
           <button
             className="icon-button"
             aria-label="Dismiss notification"

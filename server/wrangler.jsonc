@@ -1,0 +1,12 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "mise-gemini",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-10-10",
+  "workers_dev": true,
+  "vars": {
+    "ALLOWED_ORIGIN": "https://mise-kitchen-cv8.expertroot3.chatgpt.site",
+    "GEMINI_MODEL": "gemini-3.5-flash-lite",
+  },
+  "observability": { "enabled": false },
+}

@@ -13,8 +13,8 @@ cover-sized, unfolded, and desktop viewports without claiming native posture sup
 - Purchases retain separate quantities, purchase dates, and entered expiration dates.
 - Unknown quantity is `null`, distinct from zero. Dates are date-only strings.
 - Staples remain stocked until manually marked low/empty. No automatic shopping.
-- Barcode scans add one package, with session review and repeated-frame suppression.
-- Gemini receives copied/downloaded Markdown. No AI API, receipt imports, or Obsidian.
+- Barcode scans default to automatic next-item capture with repeated-frame suppression. Repeat items require confirmation; unknown products require a details form.
+- Gemini supports copied Markdown and an optional free-tier API behind an authenticated Cloudflare Worker. No Firebase setup, receipt imports, or Obsidian in this release. API secrets stay server-side; local pairing credentials never enter backups.
 - Distinguish browser-only storage from signed-in cloud sync. Never imply local sync.
 - Do not overwrite existing cloud data unless the user explicitly confirms replacement.
 - Keep unfinished edits and scan sessions through responsive layout changes.

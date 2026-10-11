@@ -38,6 +38,7 @@ export interface InventoryListProps {
   onToggleSelected: (group: InventoryGroup) => void;
   onEdit: (batch: Batch, product: Product) => void;
   onUse: (batch: Batch) => void;
+  onDeduct: (batch: Batch) => void;
   onClearFilters: () => void;
 }
 
@@ -49,6 +50,7 @@ export function InventoryList({
   onToggleSelected,
   onEdit,
   onUse,
+  onDeduct,
   onClearFilters,
 }: InventoryListProps) {
   return (
@@ -84,6 +86,24 @@ export function InventoryList({
               </div>
               {items.map((group) => {
                 const date = groupExpiry(group);
+                const countable = group.batches
+                  .filter(
+                    (batch) =>
+                      batch.quantity !== null &&
+                      batch.quantity >= 1 &&
+                      [
+                        'each',
+                        'package',
+                        'piece',
+                        'pieces',
+                        'can',
+                        'bottle',
+                        'bag',
+                        'packet',
+                      ].includes(batch.unit.toLowerCase()),
+                  )
+                  .sort((a, b) => (a.expiresOn ?? '9999').localeCompare(b.expiresOn ?? '9999'))[0];
+
                 const near = date && daysUntil(date) <= 3;
                 return (
                   <div
@@ -123,6 +143,16 @@ export function InventoryList({
                         {group.hasMixedUnits
                           ? `${group.batches.length} batches`
                           : formatQuantity(group.quantity, group.unit)}
+                        {countable && (
+                          <button
+                            type="button"
+                            className="deduct-one"
+                            aria-label={`Use one ${group.product.name}`}
+                            onClick={() => onDeduct(countable)}
+                          >
+                            −1
+                          </button>
+                        )}
                         {group.product.isStaple && (
                           <small
                             className={

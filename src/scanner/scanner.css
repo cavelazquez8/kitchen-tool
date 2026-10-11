@@ -351,3 +351,59 @@
     animation: none;
   }
 }
+
+.scanner__auto-next {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-top: 20px;
+  padding: 16px;
+  border: 1px solid #353e4d;
+  border-radius: 14px;
+  background: #1d232d;
+  cursor: pointer;
+}
+.scanner__auto-next > span {
+  display: grid;
+  gap: 5px;
+}
+.scanner__auto-next strong {
+  color: #e2e9f7;
+  font-size: 13px;
+  font-weight: 550;
+}
+.scanner__auto-next span span {
+  color: #9ba8bf;
+  font-size: 12px;
+  line-height: 1.5;
+}
+.scanner__auto-next input {
+  appearance: none;
+  flex: 0 0 48px;
+  width: 48px;
+  height: 28px;
+  border: 1px solid #526078;
+  border-radius: 999px;
+  background: #394457;
+  position: relative;
+  cursor: pointer;
+}
+.scanner__auto-next input::after {
+  content: '';
+  position: absolute;
+  left: 3px;
+  top: 3px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: #edf2ff;
+}
+.scanner__auto-next input:checked {
+  background: #93cbb5;
+  border-color: #93cbb5;
+}
+.scanner__auto-next input:checked::after {
+  left: 23px;
+  background: #142b22;
+}

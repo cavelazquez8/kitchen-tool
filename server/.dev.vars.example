@@ -1,0 +1,5 @@
+# LOCAL DEVELOPMENT ONLY. Copy to .dev.vars and keep it out of Git.
+# Never use a real key in tests or paste it into chat.
+GEMINI_API_KEY="YOUR_PRIVATE_GOOGLE_AI_STUDIO_KEY"
+MISE_ACCESS_TOKEN="YOUR_RANDOM_32_BYTE_BASE64URL_TOKEN"
+ALLOWED_ORIGIN="http://localhost:5173"

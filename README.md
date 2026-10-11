@@ -1,135 +1,64 @@
-# Mise — Kitchen inventory
+# Mise — Kitchen companion
 
-A touch-friendly kitchen inventory with a dark interface, grocery barcode scanning,
-and Markdown you can paste into Gemini. Works at narrow phone, unfolded, and laptop
-sizes. The first release does not connect to an AI API, Obsidian, or receipt imports.
+A touch-friendly kitchen inventory, recipe library, meal planner, shopping list, and optional Gemini assistant. The dark interface works in Microsoft Edge on a narrow phone, an unfolded device, and a laptop.
 
-## Private hosted copy
+[Open Mise](https://mise-kitchen-cv8.expertroot3.chatgpt.site). Future releases reuse the project in `.openai/hosting.json` and the same URL.
 
-[Open Mise](https://mise-kitchen-cv8.expertroot3.chatgpt.site) in Microsoft Edge.
-This copy uses Sites and starts with browser-only saving. Its identity is recorded
-in `.openai/hosting.json`; future edits reuse that project and the same website URL.
-Firebase sync and the GitHub deployment pipeline below require separate account
-configuration. They are implemented but are not connected in the hosted copy.
+## Everyday use
 
-## Run locally
+- Add foods with in-app autocomplete, scan barcodes, or tap familiar ingredients while shopping.
+- Scanning automatically continues by default. Turn it off in the scanner; the preference stays on this device.
+- Repeated intentional scans ask before adding another package. Unknown products open a complete manual entry form and pause the camera.
+- Keep purchases separate by storage location, unit, purchase date, and expiration date. Countable items have −1 and Undo; Used some handles larger changes.
+- Discover familiar recipes from the free TheMealDB API, add your own, or import pasted recipes. Website import uses published Recipe JSON-LD through the optional backend.
+- Review recorded quantities, cook with step timers, and optionally keep the screen awake. Finish cooking reviews deductions before changing inventory.
+- Save recipes and choose meal-plan portions. Request a shopping list to combine requirements and subtract inventory once.
+- Ask Gemini follow-up questions inside Mise after connecting the optional free-tier backend. Copy for Gemini remains available without a backend.
 
-Use Node 24 LTS and npm 11 or later (`.nvmrc` records the Node major).
+Matching and shopping calculations run locally. Unknown quantities, package contents, and original recipe yields stay unknown until you record them. A generic ingredient name can map a branded product to recipe ingredients. The bundled food/tool catalogue is an autocomplete starter; it is not a comprehensive product database. Barcode suggestions come from Open Food Facts.
+
+TheMealDB provides a modest starter library rather than an exhaustive recipe database. Mise fetches bounded suggestions/search results without crawling the whole service. Attribution and recipe source links remain visible.
+
+## Data and backups
+
+Kitchen data is saved in **this browser only**. There is no active Firebase connection. Another device, browser profile, or website origin has a separate kitchen. Clearing site data removes the local copy.
+
+Settings → Download backup saves inventory, tools, saved recipes, meal plan, shopping list, and conversation. Restoring requires confirmation and replaces the current kitchen. Older inventory-only backups remain supported. Google API keys and device pairing credentials are excluded. Markdown export is a copyable Gemini context document, not a restore format.
+
+## Free Gemini connection
+
+Follow [the setup guide](docs/gemini-setup.md). Your Google API key stays in a Cloudflare Worker secret; the interface stores only a separate personal pairing token. Keep Google billing unlinked and Cloudflare on Workers Free. Consumer Gemini subscriptions do not include Gemini API quota.
+
+Inventory, recipe editing/matching, shopping lists, and backups work without Gemini. Website import and AI extraction require the optional backend. Text import also works locally. Free quotas and small-media limits apply; a successful connection check verifies pairing, and your first question verifies actual model access.
+
+## Run and verify
+
+Use Node 24 and npm 11 or newer.
 
 ```sh
-npm install
+npm ci
+npm ci --prefix server
 npm run dev
 ```
 
-Open `http://localhost:5173`. Without Firebase configuration, inventory is stored in
-**this browser only**. A different device, browser profile, or website origin has a
-different inventory. Clearing site data removes the browser copy. Settings → Download
-backup saves a complete JSON inventory that you can restore on another device; restore
-requires confirmation because it replaces the inventory you are viewing. Markdown
-copy/download is the human-readable Gemini export, not a restore format.
-
-The generated `package-lock.json` is committed. Use `npm ci` for reproducible
-installs. No credentials are needed to use local mode.
-
-## Shared inventory and HTTPS
-
-1. Create a Firebase project on the **Spark** plan; do not enable paid billing.
-2. Register a web app and enable Google sign-in in Authentication.
-3. Create a Standard Firestore database. Keep its initial rules closed until the
-   repository rules are deployed.
-4. Copy `.env.example` to `.env.local` and fill the four `VITE_FIREBASE_` client values
-   from the Firebase app configuration. Restart Vite after changing these values.
-5. Add localhost and your eventual Hosting domain under Authentication → Settings →
-   Authorized domains. Firebase client values are public; security comes from auth
-   and database rules. Never put service-account credentials in a `VITE_` variable.
-6. Run the initial deployment below from your configured account:
-
-```sh
-npx firebase login
-npm run check
-npm run test:rules
-npm run build
-npx firebase deploy --project YOUR_PROJECT_ID --only firestore:rules,hosting
-```
-
-Sign in with the same Google account on each device. Cloud inventory is separate
-from browser inventory. Transfer a browser copy only with the explicit settings
-action; replacing a nonempty cloud inventory requires a separate confirmation.
-Download the existing inventory before replacement if you want a readable copy.
-Signing out returns to
-that device's existing browser copy, not an automatically downloaded cloud copy.
-
-HTTPS is required for phone camera access. Opening the laptop's development server
-over ordinary LAN HTTP will not enable camera scanning on the phone. Use the deployed
-HTTPS website for real-device testing. Typed barcode entry remains available.
-
-Free service quotas apply. Keep billing disabled; exceeding a quota may make the
-service unavailable. No cloud resources are created by installing this repository.
-
-## Tests
+Open `http://localhost:5173`. Camera access on a phone requires HTTPS; use the deployed website for real-device scanning. Typed barcode entry always remains available.
 
 ```sh
 npm run check
 npx playwright install chromium
 npm run test:e2e
-npm run test:rules
 ```
 
-Rules tests use the `demo-kitchen` emulator project and require Java 21+. Browser tests
-cover representative 412px, 896px, and desktop widths; they do not establish exact
-Samsung hardware dimensions or native fold detection. Perform a real-device check
-in Microsoft Edge for camera permissions, touch editing, clipboard copying, folding,
-keyboard appearance, and split-screen resizing. There is no Samsung Internet target.
+The browser suite exercises representative 412px, 896px, and desktop widths. It does not prove exact Galaxy hardware dimensions or native fold detection. Check camera permissions, the Edge keyboard, folding, split screen, clipboard, and wake lock on your actual phone.
 
-For interactive emulator work, run `npm run emulators`, set
-`VITE_USE_FIREBASE_EMULATORS=true` in `.env.local`, and restart the dev server. Emulator
-mode always uses `demo-kitchen`, never production. Emulator addresses target the
-local laptop, so use this mode locally rather than on the phone.
+The previous Firebase adapter and emulator fixtures are retained as inactive code for a potential future sync feature. They do not select the current repository or require account setup. `npm run test:rules` can still test that adapter's rules with Java 21.
 
-## Push updates
+## Updates
 
-Create a GitHub repository and connect this project. The delivery workflow runs
-checks, a production-dependency security audit, emulator rules tests, and browser
-tests for pull requests and main pushes.
-Live deployment remains disabled until Firebase is configured.
+Builds use versioned assets. Releases keep the same website address and never force a reload during editing, scanning, or cooking. Refresh when convenient to load a new release; local kitchen data is stored separately.
 
-In GitHub's **production environment**, configure:
+The Sites source workflow prepares, checks, commits, uploads, and privately publishes this project's release. The GitHub workflow runs checks and browser tests if this repository is connected to GitHub; it does not provision Firebase or deploy to a different host.
 
-- Variables: `FIREBASE_PROJECT_ID`, `VITE_FIREBASE_API_KEY`,
-  `VITE_FIREBASE_AUTH_DOMAIN`, and `VITE_FIREBASE_APP_ID`.
-- Secret: `FIREBASE_SERVICE_ACCOUNT`, containing the Firebase Hosting deployment
-  service-account JSON. Obtain/configure this through Firebase's GitHub integration;
-  never commit or expose the JSON in the browser build.
+`npm run build` also rebuilds the downloadable Worker module from source. Changing the frontend does not require rotating secrets or changing your Worker address. After backend changes, deploy the new Worker module to the same Worker; existing secrets remain in its settings.
 
-The workflow's deployment gate reads the project ID at repository scope, so also set
-the `FIREBASE_PROJECT_ID` **repository variable**. Restrict production deployments to
-main. After the first manual rules deployment, pushes to main deploy the website
-only after all checks pass. Future database rule changes must be tested and deployed
-explicitly with `firebase deploy --only firestore:rules`.
-
-The same website address receives every release. Hashed assets are cached, while
-HTML revalidates; refresh when convenient to receive a new version. The app does not
-force a reload during editing or scanning and does not cache old app code in a
-service worker. Browser/cloud inventory is stored separately from website assets.
-Firebase Hosting's release history supports rolling back the website; keep schema
-changes backward compatible because rolling back assets does not restore data.
-
-References: [Firebase GitHub integration](https://firebase.google.com/docs/hosting/github-integration),
-[Google sign-in](https://firebase.google.com/docs/auth/web/google-signin),
-[Firestore transactions](https://firebase.google.com/docs/firestore/manage-data/transactions).
-
-Barcode product suggestions use Open Food Facts and may be incomplete. Review unknown
-products manually; expiration dates are entered by the user, not inferred from UPCs.
-
-## Dependency maintenance
-
-The production dependency audit currently reports no findings. A scoped gRPC override
-keeps Firebase's Node-side dependency on a patched, compatible major version. CI
-blocks deployment for high or critical production dependency findings.
-
-The latest Firebase CLI still brings development-only audit findings through braces,
-basic-ftp, OpenTelemetry, and uuid. These packages are not included in the browser
-build. Recheck upstream releases during maintenance; do not use `npm audit fix
---force`, whose suggested changes include unsupported downgrades and breaking
-dependency substitutions. Build and emulator tools run only in the development/CI
-environment.
+Keep schemas backward compatible: rolling back website code does not roll back kitchen data. Back up the kitchen before a major change.

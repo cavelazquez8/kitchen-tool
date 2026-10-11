@@ -1,3 +1,4 @@
+import { isRecipe, type Recipe } from '../recipes/types';
 export type StorageLocation = 'fridge' | 'freezer' | 'pantry';
 export type StapleStatus = 'stocked' | 'low' | 'empty';
 
@@ -7,6 +8,7 @@ export interface Product {
   barcode?: string;
   brand?: string;
   isStaple: boolean;
+  ingredientName?: string;
 }
 
 export interface Batch {
@@ -25,10 +27,33 @@ export interface Tool {
   name: string;
 }
 
+export interface ShoppingItem {
+  id: string;
+  name: string;
+  quantity: number | null;
+  unit: string;
+  checked: boolean;
+  status: 'missing' | 'check';
+  note?: string;
+  addedBatchId?: string;
+}
+export interface MealPlanItem {
+  recipeId: string;
+  servings: number | null;
+}
+export interface ChatMessage {
+  id: string;
+  role: 'user' | 'assistant';
+  text: string;
+}
 export interface InventoryState {
   products: Product[];
   batches: Batch[];
   tools: Tool[];
+  recipes?: Recipe[];
+  mealPlan?: MealPlanItem[];
+  shoppingList?: ShoppingItem[];
+  chatHistory?: ChatMessage[];
 }
 
 export interface InventoryGroup {
@@ -95,6 +120,7 @@ export function isInventoryState(value: unknown): value is InventoryState {
       typeof product.isStaple !== 'boolean' ||
       !isOptionalText(product.barcode) ||
       !isOptionalText(product.brand) ||
+      !isOptionalText(product.ingredientName) ||
       productIds.has(product.id)
     )
       return false;
@@ -137,5 +163,58 @@ export function isInventoryState(value: unknown): value is InventoryState {
       return false;
     toolIds.add(tool.id);
   }
+  if (
+    value.recipes !== undefined &&
+    (!Array.isArray(value.recipes) ||
+      !value.recipes.every(isRecipe) ||
+      new Set(value.recipes.map((recipe) => recipe.id)).size !== value.recipes.length)
+  )
+    return false;
+  if (
+    value.mealPlan !== undefined &&
+    (!Array.isArray(value.mealPlan) ||
+      !value.mealPlan.every(
+        (item) =>
+          isRecord(item) &&
+          isNonemptyText(item.recipeId) &&
+          (item.servings === null ||
+            (typeof item.servings === 'number' &&
+              Number.isFinite(item.servings) &&
+              item.servings > 0)),
+      ))
+  )
+    return false;
+  if (
+    value.shoppingList !== undefined &&
+    (!Array.isArray(value.shoppingList) ||
+      !value.shoppingList.every(
+        (item) =>
+          isRecord(item) &&
+          isNonemptyText(item.id) &&
+          isNonemptyText(item.name) &&
+          typeof item.unit === 'string' &&
+          typeof item.checked === 'boolean' &&
+          ['missing', 'check'].includes(item.status as string) &&
+          (item.quantity === null ||
+            (typeof item.quantity === 'number' &&
+              Number.isFinite(item.quantity) &&
+              item.quantity >= 0)) &&
+          isOptionalText(item.note) &&
+          isOptionalText(item.addedBatchId),
+      ))
+  )
+    return false;
+  if (
+    value.chatHistory !== undefined &&
+    (!Array.isArray(value.chatHistory) ||
+      !value.chatHistory.every(
+        (item) =>
+          isRecord(item) &&
+          isNonemptyText(item.id) &&
+          ['user', 'assistant'].includes(item.role as string) &&
+          isNonemptyText(item.text),
+      ))
+  )
+    return false;
   return true;
 }

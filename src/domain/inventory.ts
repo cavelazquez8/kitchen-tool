@@ -67,12 +67,14 @@ function normalizeProduct(product: Product): Product {
   requiredText(product.id, 'Product ID');
   const barcode = product.barcode?.trim();
   const brand = product.brand?.trim();
+  const ingredientName = product.ingredientName?.trim();
   return {
     id: product.id,
     name: requiredText(product.name, 'Item name'),
     isStaple: Boolean(product.isStaple),
     ...(barcode ? { barcode } : {}),
     ...(brand ? { brand } : {}),
+    ...(ingredientName ? { ingredientName } : {}),
   };
 }
 

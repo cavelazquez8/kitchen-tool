@@ -5,3 +5,6 @@ playwright-report
 test-results
 .firebase
 package-lock.json
+
+server/dist
+public/mise-gemini-worker.js

@@ -3,10 +3,14 @@ import { Check, CookingPot, Package, Snowflake, Trash2 } from 'lucide-react';
 import type { StorageLocation } from '../domain/types';
 import { todayDate } from '../domain/inventory';
 import { Modal } from './Modal';
+import { Autocomplete } from './Autocomplete';
+import { Choice } from './Choice';
+import { FOOD_CATALOG } from '../recipes/catalog';
 
 export type ItemDraft = {
   name: string;
   brand: string;
+  ingredientName: string;
   quantity: string;
   unit: string;
   location: StorageLocation;
@@ -25,6 +29,10 @@ export interface ItemEditorProps {
   onRemove: (batchId: string) => void;
   busy: boolean;
   error: string;
+  suggestions?: readonly string[];
+  title?: string;
+  description?: string;
+  submitLabel?: string;
 }
 
 const locationNames: Record<StorageLocation, string> = {
@@ -47,6 +55,10 @@ export function ItemEditor({
   onRemove,
   busy,
   error,
+  suggestions = [],
+  title,
+  description,
+  submitLabel,
 }: ItemEditorProps) {
   return (
     <Modal
@@ -54,72 +66,16 @@ export function ItemEditor({
       onClose={() => {
         if (!busy) onClose();
       }}
-      title={editor?.kind === 'edit' ? 'Edit item' : 'Add an ingredient'}
+      title={title ?? (editor?.kind === 'edit' ? 'Edit item' : 'Add an ingredient')}
       description={
-        editor?.kind === 'edit'
+        description ??
+        (editor?.kind === 'edit'
           ? 'Keep this purchase batch up to date.'
-          : 'A few details. Everything else is optional.'
+          : 'A few details. Everything else is optional.')
       }
       className="item-editor"
     >
       <form onSubmit={onSubmit} className="item-form">
-        <label>
-          Item name
-          <input
-            autoFocus
-            list="common-ingredients"
-            value={draft.name}
-            onChange={(event) => onDraftChange({ ...draft, name: event.target.value })}
-            placeholder="e.g. Carrots"
-            maxLength={120}
-            required
-          />
-          <datalist id="common-ingredients">
-            {[
-              'Apples',
-              'Avocados',
-              'Bananas',
-              'Bell peppers',
-              'Broccoli',
-              'Butter',
-              'Carrots',
-              'Cheddar cheese',
-              'Chicken breast',
-              'Chicken thighs',
-              'Eggs',
-              'Flour',
-              'Garlic',
-              'Ground beef',
-              'Ground turkey',
-              'Lemons',
-              'Lettuce',
-              'Milk',
-              'Mushrooms',
-              'Olive oil',
-              'Onions',
-              'Pasta',
-              'Potatoes',
-              'Rice',
-              'Salmon',
-              'Salt',
-              'Spinach',
-              'Tomatoes',
-              'Yogurt',
-              'Zucchini',
-            ].map((name) => (
-              <option value={name} key={name} />
-            ))}
-          </datalist>
-        </label>
-        <label>
-          Brand <span className="optional">optional</span>
-          <input
-            value={draft.brand}
-            onChange={(event) => onDraftChange({ ...draft, brand: event.target.value })}
-            placeholder="Any brand is fine"
-            maxLength={120}
-          />
-        </label>
         <fieldset className="location-picker">
           <legend>Store in</legend>
           <div>
@@ -137,6 +93,44 @@ export function ItemEditor({
             ))}
           </div>
         </fieldset>
+        <label>
+          Item name
+          <Autocomplete
+            label="Item name"
+            autoFocus
+            value={draft.name}
+            onChange={(name) => onDraftChange({ ...draft, name })}
+            options={[...suggestions, ...FOOD_CATALOG]}
+            placeholder="e.g. Carrots"
+            required
+          />
+        </label>
+        <label>
+          Brand <span className="optional">optional</span>
+          <input
+            value={draft.brand}
+            onChange={(event) => onDraftChange({ ...draft, brand: event.target.value })}
+            placeholder="Any brand is fine"
+            maxLength={120}
+          />
+        </label>
+
+        <details className="item-extra">
+          <summary>Recipe matching</summary>
+          <label>
+            Ingredient name <span className="optional">optional</span>
+            <Autocomplete
+              label="Ingredient name"
+              value={draft.ingredientName}
+              onChange={(ingredientName) => onDraftChange({ ...draft, ingredientName })}
+              options={FOOD_CATALOG}
+              placeholder="e.g. Chicken breast"
+            />
+            <span className="field-note">
+              Use a common ingredient name when the product name is different.
+            </span>
+          </label>
+        </details>
         <div className="form-row">
           <label>
             Quantity
@@ -151,20 +145,13 @@ export function ItemEditor({
           </label>
           <label>
             Unit
-            <input
-              list="quantity-units"
+            <Autocomplete
+              label="Unit"
               value={draft.unit}
-              onChange={(event) => onDraftChange({ ...draft, unit: event.target.value })}
-              maxLength={40}
+              onChange={(unit) => onDraftChange({ ...draft, unit })}
+              options={['each', 'package', 'g', 'kg', 'oz', 'lb', 'mL', 'L', 'cup', 'tbsp', 'tsp']}
               required
             />
-            <datalist id="quantity-units">
-              {['each', 'package', 'g', 'kg', 'oz', 'lb', 'mL', 'L', 'cup', 'tbsp', 'tsp'].map(
-                (unit) => (
-                  <option key={unit} value={unit} />
-                ),
-              )}
-            </datalist>
           </label>
         </div>
         <p className="field-note">Not sure how much? Leave quantity blank.</p>
@@ -203,19 +190,18 @@ export function ItemEditor({
         {draft.isStaple && (
           <label>
             Stock level
-            <select
+            <Choice
+              label="Stock level"
               value={draft.stapleStatus}
-              onChange={(event) =>
-                onDraftChange({
-                  ...draft,
-                  stapleStatus: event.target.value as ItemDraft['stapleStatus'],
-                })
+              onChange={(value) =>
+                onDraftChange({ ...draft, stapleStatus: value as ItemDraft['stapleStatus'] })
               }
-            >
-              <option value="stocked">Enough on hand</option>
-              <option value="low">Running low</option>
-              <option value="empty">Empty</option>
-            </select>
+              options={[
+                { value: 'stocked', label: 'Enough on hand' },
+                { value: 'low', label: 'Running low' },
+                { value: 'empty', label: 'Empty' },
+              ]}
+            />
           </label>
         )}
         {error && (
@@ -239,7 +225,9 @@ export function ItemEditor({
             Cancel
           </button>
           <button type="submit" className="button primary" disabled={busy}>
-            {busy ? 'Saving…' : editor?.kind === 'edit' ? 'Save changes' : 'Add to inventory'}
+            {busy
+              ? 'Saving…'
+              : (submitLabel ?? (editor?.kind === 'edit' ? 'Save changes' : 'Add to inventory'))}
             <Check size={17} />
           </button>
         </div>
