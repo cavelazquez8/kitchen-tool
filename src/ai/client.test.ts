@@ -8,6 +8,8 @@ import {
   generateGeminiAccessToken,
   normalizeGeminiConnection,
   readGeminiConnection,
+  readGeminiConnectionDraft,
+  saveGeminiConnectionDraft,
   saveGeminiConnection,
   sendGeminiChat,
 } from './client';
@@ -22,6 +24,41 @@ beforeEach(() => {
 });
 
 describe('Gemini browser adapter', () => {
+  it('accepts a copied Worker hostname and normalizes surrounding whitespace', () => {
+    expect(
+      normalizeGeminiConnection({
+        url: '  mise.example.workers.dev/  ',
+        token: ` ${connection.token} `,
+      }),
+    ).toEqual(connection);
+    expect(normalizeGeminiConnection({ ...connection, url: ` ${connection.url}/ ` })).toEqual(
+      connection,
+    );
+    expect(() => normalizeGeminiConnection({ ...connection, url: 'example.workers.dev' })).toThrow(
+      'Include the Worker name',
+    );
+  });
+
+  it('remembers unfinished setup without activating it and clears drafts on save or disconnect', () => {
+    const draft = { url: 'mise.example.workers.dev', token: 'unfinished' };
+    saveGeminiConnectionDraft(draft);
+    expect(readGeminiConnectionDraft()).toEqual(draft);
+    expect(readGeminiConnection()).toBeNull();
+    saveGeminiConnection(connection);
+    expect(readGeminiConnectionDraft()).toBeNull();
+    expect(readGeminiConnection()).toEqual(connection);
+    saveGeminiConnectionDraft(draft);
+    clearGeminiConnection();
+    expect(readGeminiConnectionDraft()).toBeNull();
+    expect(readGeminiConnection()).toBeNull();
+  });
+
+  it('never persists a Google API key as an unfinished pairing token', () => {
+    saveGeminiConnectionDraft({ ...connection, token: '  AIza' + 'a'.repeat(35) });
+    expect(readGeminiConnectionDraft()).toEqual({ url: connection.url, token: '' });
+    expect(JSON.stringify(localStorage)).not.toContain('AIza');
+  });
+
   it('stores only the personal connection and can disconnect without touching inventory', () => {
     localStorage.setItem('mise.inventory', 'private inventory');
     saveGeminiConnection(connection);
@@ -38,6 +75,10 @@ describe('Gemini browser adapter', () => {
       'https://mise.example.workers.dev/chat',
       'https://mise.example.workers.dev/?key=secret',
       'https://user:secret@mise.example.workers.dev',
+      'attacker.example',
+      'mise.example.workers.dev.attacker.example',
+      'mise.example.workers.dev/chat',
+      'https://mise.example.workers.dev/#secret',
     ])
       expect(() => normalizeGeminiConnection({ ...connection, url })).toThrow();
     expect(() =>

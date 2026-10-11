@@ -25,6 +25,7 @@ export type {
 } from './protocol';
 
 const CONNECTION_KEY = 'mise.gemini.connection.v1';
+const CONNECTION_DRAFT_KEY = 'mise.gemini.connection-draft.v1';
 const TIMEOUT_MS = 95_000;
 
 export class GeminiError extends Error {
@@ -40,11 +41,16 @@ export class GeminiError extends Error {
 
 export function normalizeGeminiConnection(connection: GeminiConnection): GeminiConnection {
   const token = connection.token.trim();
+  const address = connection.url.trim();
   let url: URL;
   try {
-    url = new URL(connection.url.trim());
+    // Cloudflare commonly displays the hostname without the HTTPS prefix.
+    url = new URL(address.includes('://') ? address : `https://${address}`);
   } catch {
-    throw new GeminiError('settings', 'Enter your Cloudflare Worker URL.');
+    throw new GeminiError(
+      'settings',
+      'Enter your full Worker address, such as https://mise-gemini.your-name.workers.dev.',
+    );
   }
   const local = ['localhost', '127.0.0.1'].includes(url.hostname);
   if (
@@ -61,6 +67,11 @@ export function normalizeGeminiConnection(connection: GeminiConnection): GeminiC
       'Use your HTTPS workers.dev address, without an endpoint, query, or password.',
     );
   }
+  if (!local && url.hostname.split('.').length < 4)
+    throw new GeminiError(
+      'settings',
+      'Include the Worker name before your account name: mise-gemini.your-name.workers.dev.',
+    );
   if (token.startsWith('AIza') || !/^[A-Za-z0-9_-]{32,128}$/.test(token))
     throw new GeminiError(
       'settings',
@@ -82,10 +93,42 @@ export function readGeminiConnection(): GeminiConnection | null {
 
 export function saveGeminiConnection(connection: GeminiConnection): void {
   localStorage.setItem(CONNECTION_KEY, JSON.stringify(normalizeGeminiConnection(connection)));
+  localStorage.removeItem(CONNECTION_DRAFT_KEY);
+}
+
+/** Keep unfinished setup separate from the connection used for actual AI requests. */
+export function readGeminiConnectionDraft(): GeminiConnection | null {
+  try {
+    const stored: unknown = JSON.parse(localStorage.getItem(CONNECTION_DRAFT_KEY) ?? 'null');
+    if (
+      !isRecord(stored) ||
+      typeof stored.url !== 'string' ||
+      typeof stored.token !== 'string' ||
+      stored.url.length > 2048 ||
+      stored.token.length > 128 ||
+      stored.token.trim().startsWith('AIza')
+    )
+      return null;
+    return { url: stored.url, token: stored.token };
+  } catch {
+    return null;
+  }
+}
+
+export function saveGeminiConnectionDraft(connection: GeminiConnection): void {
+  // Pairing tokens may be kept locally; Google's API key must stay in Cloudflare.
+  localStorage.setItem(
+    CONNECTION_DRAFT_KEY,
+    JSON.stringify({
+      url: connection.url.slice(0, 2048),
+      token: connection.token.trim().startsWith('AIza') ? '' : connection.token.slice(0, 128),
+    }),
+  );
 }
 
 export function clearGeminiConnection(): void {
   localStorage.removeItem(CONNECTION_KEY);
+  localStorage.removeItem(CONNECTION_DRAFT_KEY);
 }
 
 export function generateGeminiAccessToken(): string {

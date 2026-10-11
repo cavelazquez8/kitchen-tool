@@ -540,6 +540,96 @@ test('cannot save a scan tray while the next product lookup is pending', async (
   ]);
 });
 
+test('retains Gemini setup after failed checks, returning from chat and reload, then connects with a bare hostname', async ({
+  page,
+}) => {
+  const hostname = 'mise-test.example.workers.dev';
+  const wrongToken = 'a'.repeat(43);
+  const correctToken = 'b'.repeat(43);
+  let healthChecks = 0;
+  let chatRequests = 0;
+  await page.route(`https://${hostname}/**`, (route) => {
+    if (route.request().method() === 'OPTIONS') return route.fulfill({ status: 204 });
+    const paired = route.request().headers().authorization === `Bearer ${correctToken}`;
+    if (route.request().url().endsWith('/health')) {
+      healthChecks++;
+      return route.fulfill({
+        status: paired ? 200 : 401,
+        contentType: 'application/json',
+        body: JSON.stringify(
+          paired
+            ? { ok: true, model: 'gemini-3.5-flash-lite' }
+            : {
+                error: {
+                  code: 'unauthorized',
+                  message: 'The Mise access token is missing or incorrect.',
+                },
+              },
+        ),
+      });
+    }
+    expect(paired).toBe(true);
+    chatRequests++;
+    return route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ message: 'Ready to help with dinner.', recipes: [], warnings: [] }),
+    });
+  });
+  await page.getByRole('button', { name: 'Local only', exact: true }).click();
+  const settings = page.getByRole('dialog', { name: 'Your kitchen, your way' });
+  const address = settings.getByLabel('Backend address', { exact: true });
+  const token = settings.getByLabel('Pairing token', { exact: true });
+  const connect = settings.getByRole('button', { name: 'Save & check connection', exact: true });
+  await address.fill('example.workers.dev');
+  await token.fill(wrongToken);
+  await connect.click();
+  await expect(settings.getByRole('status')).toContainText('Include the Worker name');
+  expect(healthChecks).toBe(0);
+  await address.fill(hostname);
+  await connect.click();
+  await expect(settings.getByRole('status')).toContainText('access token is missing or incorrect');
+  expect(healthChecks).toBe(1);
+  expect(await page.evaluate(() => localStorage.getItem('mise.gemini.connection.v1'))).toBeNull();
+  await settings.getByRole('button', { name: 'Close', exact: true }).click();
+  await navigate(page, 'Gemini');
+  await page
+    .getByRole('textbox', { name: 'Message Gemini', exact: true })
+    .fill('Help with dinner.');
+  await page.getByRole('button', { name: 'Ask Gemini', exact: true }).click();
+  await expect(settings).toBeVisible();
+  await expect(address).toHaveValue(hostname);
+  await expect(token).toHaveValue(wrongToken);
+  expect(chatRequests).toBe(0);
+  await page.reload();
+  await page.getByRole('button', { name: 'Local only', exact: true }).click();
+  await expect(address).toHaveValue(hostname);
+  await expect(token).toHaveValue(wrongToken);
+  const download = page.waitForEvent('download');
+  await settings.getByRole('button', { name: 'Download backup', exact: true }).click();
+  const backup = await readFile((await (await download).path())!, 'utf8');
+  expect(backup).not.toContain(wrongToken);
+  expect(backup).not.toContain(hostname);
+  await token.fill(correctToken);
+  await connect.click();
+  await expect(settings.getByRole('status')).toContainText('Backend connected');
+  await expect(address).toHaveValue(`https://${hostname}`);
+  expect(healthChecks).toBe(2);
+  expect(
+    await page.evaluate(() => localStorage.getItem('mise.gemini.connection-draft.v1')),
+  ).toBeNull();
+  await settings.getByRole('button', { name: 'Close', exact: true }).click();
+  await navigate(page, 'Gemini');
+  await page
+    .getByRole('textbox', { name: 'Message Gemini', exact: true })
+    .fill('Help with dinner.');
+  await page.getByRole('button', { name: 'Ask Gemini', exact: true }).click();
+  await expect(page.getByText('Ready to help with dinner.', { exact: true })).toBeVisible();
+  expect(chatRequests).toBe(1);
+  await page.getByRole('button', { name: 'Local only', exact: true }).click();
+  await expect(settings.getByText(/Connection saved on this device/)).toBeVisible();
+});
+
 test('uses mocked Gemini recipes, keeps follow-up context, bounds history, and excludes pairing from backups', async ({
   page,
 }) => {
