@@ -12,27 +12,28 @@ const FRACTIONS: Record<string, string> = {
   '⅞': '7/8',
 };
 const NUMBER = '(?:\\d+\\s+\\d+\\/\\d+|\\d+\\/\\d+|\\d+(?:\\.\\d+)?)';
-const UNITS: Array<[RegExp, string]> = [
-  [/^(?:fluid ounces?|fl\s*oz)\b/i, 'fl oz'],
-  [/^(?:tablespoons?|tblsp|tbsp|tbs)\b/i, 'tbsp'],
-  [/^(?:teaspoons?|tsp)\b/i, 'tsp'],
-  [/^(?:kilograms?|kg)\b/i, 'kg'],
-  [/^(?:grams?|g)\b/i, 'g'],
-  [/^(?:millilit(?:er|re)s?|ml)\b/i, 'mL'],
-  [/^(?:lit(?:er|re)s?|l)\b/i, 'L'],
-  [/^(?:ounces?|oz)\b/i, 'oz'],
-  [/^(?:pounds?|lbs?)\b/i, 'lb'],
-  [/^cups?\b/i, 'cup'],
-  [/^(?:each|items?|pieces?|counts?|ct)\b/i, 'each'],
-  [/^packages?\b/i, 'package'],
-  [/^cans?\b/i, 'can'],
-  [/^bottles?\b/i, 'bottle'],
-  [/^cartons?\b/i, 'carton'],
-  [/^cloves?\b/i, 'clove'],
-  [/^slices?\b/i, 'slice'],
-  [/^pinch(?:es)?\b/i, 'pinch'],
-  [/^bunch(?:es)?\b/i, 'bunch'],
-  [/^sprigs?\b/i, 'sprig'],
+// Named fields preserve their inferred types in the dashboard's generated JavaScript.
+const UNITS = [
+  { pattern: /^(?:fluid ounces?|fl\s*oz)\b/i, canonical: 'fl oz' },
+  { pattern: /^(?:tablespoons?|tblsp|tbsp|tbs)\b/i, canonical: 'tbsp' },
+  { pattern: /^(?:teaspoons?|tsp)\b/i, canonical: 'tsp' },
+  { pattern: /^(?:kilograms?|kg)\b/i, canonical: 'kg' },
+  { pattern: /^(?:grams?|g)\b/i, canonical: 'g' },
+  { pattern: /^(?:millilit(?:er|re)s?|ml)\b/i, canonical: 'mL' },
+  { pattern: /^(?:lit(?:er|re)s?|l)\b/i, canonical: 'L' },
+  { pattern: /^(?:ounces?|oz)\b/i, canonical: 'oz' },
+  { pattern: /^(?:pounds?|lbs?)\b/i, canonical: 'lb' },
+  { pattern: /^cups?\b/i, canonical: 'cup' },
+  { pattern: /^(?:each|items?|pieces?|counts?|ct)\b/i, canonical: 'each' },
+  { pattern: /^packages?\b/i, canonical: 'package' },
+  { pattern: /^cans?\b/i, canonical: 'can' },
+  { pattern: /^bottles?\b/i, canonical: 'bottle' },
+  { pattern: /^cartons?\b/i, canonical: 'carton' },
+  { pattern: /^cloves?\b/i, canonical: 'clove' },
+  { pattern: /^slices?\b/i, canonical: 'slice' },
+  { pattern: /^pinch(?:es)?\b/i, canonical: 'pinch' },
+  { pattern: /^bunch(?:es)?\b/i, canonical: 'bunch' },
+  { pattern: /^sprigs?\b/i, canonical: 'sprig' },
 ];
 function normalizeFractions(value: string): string {
   return value
@@ -66,7 +67,7 @@ function readMeasure(value: string): ReadMeasure {
   const rest = normalized.slice(prefix.length).trim();
   let unit = 'each';
   let remainder = rest;
-  for (const [pattern, canonical] of UNITS) {
+  for (const { pattern, canonical } of UNITS) {
     const match = rest.match(pattern);
     if (!match) continue;
     unit = canonical;
