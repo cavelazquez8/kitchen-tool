@@ -1,0 +1,918 @@
+{
+  "generatedAt": "2026-10-11T22:10:38.875Z",
+  "pagesConsidered": 3796,
+  "recipesIncluded": 3571,
+  "recipesExcluded": 225,
+  "excludedReasons": {
+    "ingredient table requires manual review": 80,
+    "redirect or unfinished source": 70,
+    "unresolved ingredient section": 4,
+    "unsupported ingredient markup": 2,
+    "missing ingredient or instruction section": 20,
+    "unsupported instruction markup": 32,
+    "non-list ingredient content requires manual review": 11,
+    "multiple ingredient sections require manual review": 6
+  },
+  "excluded": [
+    {
+      "title": "Cookbook:Afghan Bread",
+      "reason": "ingredient table requires manual review"
+    },
+    {
+      "title": "Cookbook:Abacha",
+      "reason": "redirect or unfinished source"
+    },
+    {
+      "title": "Cookbook:Akpu",
+      "reason": "redirect or unfinished source"
+    },
+    {
+      "title": "Cookbook:Afang Soup",
+      "reason": "redirect or unfinished source"
+    },
+    {
+      "title": "Cookbook:Achicha Ede",
+      "reason": "redirect or unfinished source"
+    },
+    {
+      "title": "Cookbook:Achicha Ji",
+      "reason": "redirect or unfinished source"
+    },
+    {
+      "title": "Cookbook:Anise Bread (Penia)",
+      "reason": "ingredient table requires manual review"
+    },
+    {
+      "title": "Cookbook:Amish Friendship Bread",
+      "reason": "ingredient table requires manual review"
+    },
+    {
+      "title": "Cookbook:Algerian White Chicken Vermicelli Soup (Chorba Beida)",
+      "reason": "redirect or unfinished source"
+    },
+    {
+      "title": "Cookbook:Apple Raisin Oat Muffins",
+      "reason": "ingredient table requires manual review"
+    },
+    {
+      "title": "Cookbook:Apple Potato Bread",
+      "reason": "ingredient table requires manual review"
+    },
+    {
+      "title": "Cookbook:Apple Strudel",
+      "reason": "ingredient table requires manual review"
+    },
+    {
+      "title": "Cookbook:Apple Crumb Cake",
+      "reason": "ingredient table requires manual review"
+    },
+    {
+      "title": "Cookbook:Baguette",
+      "reason": "ingredient table requires manual review"
+    },
+    {
+      "title": "Cookbook:Bacon and Cheese Puffs",
+      "reason": "ingredient table requires manual review"
+    },
+    {
+      "title": "Cookbook:Bafa (Cape Verdean Seafood Stew)",
+      "reason": "redirect or unfinished source"
+    },
+    {
+      "title": "Cookbook:Banana Bread I",
+      "reason": "ingredient table requires manual review"
+    },
+    {
+      "title": "Cookbook:Baklava I",
+      "reason": "unresolved ingredient section"
+    },
+    {
+      "title": "Cookbook:Baking Powder Biscuits",
+      "reason": "ingredient table requires manual review"
+    },
+    {
+      "title": "Cookbook:Banana Chocolate Bread Pudding",
+      "reason": "unsupported ingredient markup"
+    },
+    {
+      "title": "Cookbook:Banana Bread II",
+      "reason": "ingredient table requires manual review"
+    },
+    {
+      "title": "Cookbook:Banana Bread III",
+      "reason": "missing ingredient or instruction section"
+    },
+    {
+      "title": "Cookbook:Balangu (Nigerian Spiced Ram Meat)",
+      "reason": "redirect or unfinished source"
+    },
+    {
+      "title": "Cookbook:Banga Soup",
+      "reason": "redirect or unfinished source"
+    },
+    {
+      "title": "Cookbook:Baked Mac N Cheese",
+      "reason": "redirect or unfinished source"
+    },
+    {
+      "title": "Cookbook:Basic Bread Dough",
+      "reason": "ingredient table requires manual review"
+    },
+    {
+      "title": "Cookbook:Basic Pizza Crust",
+      "reason": "ingredient table requires manual review"
+    },
+    {
+      "title": "Cookbook:Baozi (Steamed Yeasted Dumplings)",
+      "reason": "ingredient table requires manual review"
+    },
+    {
+      "title": "Cookbook:Beer Bread",
+      "reason": "ingredient table requires manual review"
+    },
+    {
+      "title": "Cookbook:Biscuits I",
+      "reason": "ingredient table requires manual review"
+    },
+    {
+      "title": "Cookbook:Biscotti",
+      "reason": "ingredient table requires manual review"
+    },
+    {
+      "title": "Cookbook:Boiled Chicken with Broth",
+      "reason": "unsupported instruction markup"
+    },
+    {
+      "title": "Cookbook:Bizcochito (Cinnamon Anise Cookies) II",
+      "reason": "ingredient table requires manual review"
+    },
+    {
+      "title": "Cookbook:Biscuit Mix for Backpacking",
+      "reason": "ingredient table requires manual review"
+    },
+    {
+      "title": "Cookbook:Bobotie",
+      "reason": "redirect or unfinished source"
+    },
+    {
+      "title": "Cookbook:Bife de tartaruga",
+      "reason": "redirect or unfinished source"
+    },
+    {
+      "title": "Cookbook:Breaded Fried Oysters",
+      "reason": "unsupported instruction markup"
+    },
+    {
+      "title": "Cookbook:Bouillabaisse",
+      "reason": "non-list ingredient content requires manual review"
+    },
+    {
+      "title": "Cookbook:Bolinhos de mandioca com mel",
+      "reason": "redirect or unfinished source"
+    },
+    {
+      "title": "Cookbook:Bulgur Bread",
+      "reason": "ingredient table requires manual review"
+    },
+    {
+      "title": "Cookbook:Burrito",
+      "reason": "unresolved ingredient section"
+    },
+    {
+      "title": "Cookbook:Buttermilk Biscuits",
+      "reason": "ingredient table requires manual review"
+    },
+    {
+      "title": "Cookbook:Buchteln (Austrian Sweet Buns)",
+      "reason": "ingredient table requires manual review"
+    },
+    {
+      "title": "Cookbook:Buuz (Mongolian Meat Dumplings)",
+      "reason": "unsupported instruction markup"
+    },
+    {
+      "title": "Cookbook:Bánh Mì",
+      "reason": "non-list ingredient content requires manual review"
+    },
+    {
+      "title": "Cookbook:Calentita (Gibraltarian Chickpea Bread)",
+      "reason": "ingredient table requires manual review"
+    },
+    {
+      "title": "Cookbook:Béchamel Sauce (Basic)",
+      "reason": "unsupported instruction markup"
+    },
+    {
+      "title": "Cookbook:Cake Pan Goop",
+      "reason": "ingredient table requires manual review"
+    },
+    {
+      "title": "Cookbook:Cardamom Bread",
+      "reason": "ingredient table requires manual review"
+    },
+    {
+      "title": "Cookbook:Challah",
+      "reason": "ingredient table requires manual review"
+    },
+    {
+      "title": "Cookbook:Caramel Sauce II",
+      "reason": "unsupported instruction markup"
+    },
+    {
+      "title": "Cookbook:Carrot Cookies",
+      "reason": "ingredient table requires manual review"
+    },
+    {
+      "title": "Cookbook:Cheese and Bacon Rolls",
+      "reason": "ingredient table requires manual review"
+    },
+    {
+      "title": "Cookbook:Chew Bread",
+      "reason": "ingredient table requires manual review"
+    },
+    {
+      "title": "Cookbook:Cheddar and Broccoli Bread Roll",
+      "reason": "ingredient table requires manual review"
+    },
+    {
+      "title": "Cookbook:Chicken Marsala I",
+      "reason": "unsupported instruction markup"
+    },
+    {
+      "title": "Cookbook:Chicken Mull",
+      "reason": "unsupported instruction markup"
+    },
+    {
+      "title": "Cookbook:Chicken Broth II",
+      "reason": "missing ingredient or instruction section"
+    },
+    {
+      "title": "Cookbook:Chipsi mayai",
+      "reason": "redirect or unfinished source"
+    },
+    {
+      "title": "Cookbook:Chocolate Chip Rolls",
+      "reason": "ingredient table requires manual review"
+    },
+    {
+      "title": "Cookbook:Chocolate Chip Coffee Cake",
+      "reason": "ingredient table requires manual review"
+    },
+    {
+      "title": "Cookbook:Chocolate Chip Cookies I",
+      "reason": "multiple ingredient sections require manual review"
+    },
+    {
+      "title": "Cookbook:Chocolate Scotcheroos",
+      "reason": "ingredient table requires manual review"
+    },
+    {
+      "title": "Cookbook:Chocolate Orbit Cake",
+      "reason": "ingredient table requires manual review"
+    },
+    {
+      "title": "Cookbook:Cirdingis (Chechen Meat and Dumplings)",
+      "reason": "missing ingredient or instruction section"
+    },
+    {
+      "title": "Cookbook:Cinnamon Bun",
+      "reason": "ingredient table requires manual review"
+    },
+    {
+      "title": "Cookbook:Chyapa Shutki Bharta",
+      "reason": "ingredient table requires manual review"
+    },
+    {
+      "title": "Cookbook:Colonial Goose",
+      "reason": "non-list ingredient content requires manual review"
+    },
+    {
+      "title": "Cookbook:Cream Wafers",
+      "reason": "ingredient table requires manual review"
+    },
+    {
+      "title": "Cookbook:Crème Brûlée I",
+      "reason": "ingredient table requires manual review"
+    },
+    {
+      "title": "Cookbook:Crotopo Soup",
+      "reason": "unsupported instruction markup"
+    },
+    {
+      "title": "Cookbook:Crème Brûlée II",
+      "reason": "ingredient table requires manual review"
+    },
+    {
+      "title": "Cookbook:Dashi (Japanese Soup Stock)",
+      "reason": "non-list ingredient content requires manual review"
+    },
+    {
+      "title": "Cookbook:Deli Roll Bread",
+      "reason": "ingredient table requires manual review"
+    },
+    {
+      "title": "Cookbook:Deep Fried Urad and Rice Flour Dough Balls (Murukku)",
+      "reason": "missing ingredient or instruction section"
+    },
+    {
+      "title": "Cookbook:Dr. Kitchener's Pudding",
+      "reason": "unsupported instruction markup"
+    },
+    {
+      "title": "Cookbook:Doubles (Trinidadian Bread with Curried Chickpeas)",
+      "reason": "ingredient table requires manual review"
+    },
+    {
+      "title": "Cookbook:Doughnuts (Yeasted)",
+      "reason": "ingredient table requires manual review"
+    },
+    {
+      "title": "Cookbook:Easy Batter Bread",
+      "reason": "ingredient table requires manual review"
+    },
+    {
+      "title": "Cookbook:Easy No-knead Raisin Bread",
+      "reason": "ingredient table requires manual review"
+    },
+    {
+      "title": "Cookbook:Egg Roll",
+      "reason": "unsupported instruction markup"
+    },
+    {
+      "title": "Cookbook:Easy French Bread",
+      "reason": "ingredient table requires manual review"
+    },
+    {
+      "title": "Cookbook:English Muffins",
+      "reason": "ingredient table requires manual review"
+    },
+    {
+      "title": "Cookbook:Eru And Water Fufu",
+      "reason": "redirect or unfinished source"
+    },
+    {
+      "title": "Cookbook:Ewedu Soup (Yoruba Style)",
+      "reason": "redirect or unfinished source"
+    },
+    {
+      "title": "Cookbook:Flaky Pie Crust",
+      "reason": "unsupported instruction markup"
+    },
+    {
+      "title": "Cookbook:Feuerzangenbowle (German Wine Punch)",
+      "reason": "unsupported instruction markup"
+    },
+    {
+      "title": "Cookbook:Fish Biryani",
+      "reason": "redirect or unfinished source"
+    },
+    {
+      "title": "Cookbook:Faten Dankali",
+      "reason": "missing ingredient or instruction section"
+    },
+    {
+      "title": "Cookbook:Fio fio",
+      "reason": "redirect or unfinished source"
+    },
+    {
+      "title": "Cookbook:Focaccia II",
+      "reason": "ingredient table requires manual review"
+    },
+    {
+      "title": "Cookbook:Focaccia I",
+      "reason": "ingredient table requires manual review"
+    },
+    {
+      "title": "Cookbook:Focaccia (Genovese)",
+      "reason": "ingredient table requires manual review"
+    },
+    {
+      "title": "Cookbook:French Bread",
+      "reason": "ingredient table requires manual review"
+    },
+    {
+      "title": "Cookbook:Foithong (Egg Threads in Syrup)",
+      "reason": "missing ingredient or instruction section"
+    },
+    {
+      "title": "Cookbook:Fried Rice",
+      "reason": "non-list ingredient content requires manual review"
+    },
+    {
+      "title": "Cookbook:Gado-gado (Indonesian Salad with Peanut Sauce)",
+      "reason": "redirect or unfinished source"
+    },
+    {
+      "title": "Cookbook:Gazpacho",
+      "reason": "unsupported instruction markup"
+    },
+    {
+      "title": "Cookbook:Garlic Salt",
+      "reason": "redirect or unfinished source"
+    },
+    {
+      "title": "Cookbook:Gravlax",
+      "reason": "unsupported instruction markup"
+    },
+    {
+      "title": "Cookbook:Goong Ten (Raw Shrimp Salad)",
+      "reason": "missing ingredient or instruction section"
+    },
+    {
+      "title": "Cookbook:Githeri",
+      "reason": "redirect or unfinished source"
+    },
+    {
+      "title": "Cookbook:Gingersnaps",
+      "reason": "ingredient table requires manual review"
+    },
+    {
+      "title": "Cookbook:Hamburger",
+      "reason": "multiple ingredient sections require manual review"
+    },
+    {
+      "title": "Cookbook:Hamburger Buns",
+      "reason": "ingredient table requires manual review"
+    },
+    {
+      "title": "Cookbook:Herring Soup",
+      "reason": "unsupported instruction markup"
+    },
+    {
+      "title": "Cookbook:Homemade Biscuit Mix",
+      "reason": "ingredient table requires manual review"
+    },
+    {
+      "title": "Cookbook:Hogao (Colombian Scallion Tomato Sauce)",
+      "reason": "missing ingredient or instruction section"
+    },
+    {
+      "title": "Cookbook:Herb Biscuits",
+      "reason": "ingredient table requires manual review"
+    },
+    {
+      "title": "Cookbook:Hot Chocolate with Cayenne",
+      "reason": "unsupported instruction markup"
+    },
+    {
+      "title": "Cookbook:Hummus (Greek)",
+      "reason": "unresolved ingredient section"
+    },
+    {
+      "title": "Cookbook:Ikokore",
+      "reason": "redirect or unfinished source"
+    },
+    {
+      "title": "Cookbook:Italian Bread",
+      "reason": "ingredient table requires manual review"
+    },
+    {
+      "title": "Cookbook:Karak Chai I",
+      "reason": "missing ingredient or instruction section"
+    },
+    {
+      "title": "Cookbook:Karak Chai II",
+      "reason": "missing ingredient or instruction section"
+    },
+    {
+      "title": "Cookbook:Jollof Rice",
+      "reason": "redirect or unfinished source"
+    },
+    {
+      "title": "Cookbook:Kid-Friendly Pizza",
+      "reason": "missing ingredient or instruction section"
+    },
+    {
+      "title": "Cookbook:Kawlata (Maltese Vegetable and Pork Soup)",
+      "reason": "non-list ingredient content requires manual review"
+    },
+    {
+      "title": "Cookbook:Käsekrainer (Austrian Sausage with Accompaniments)",
+      "reason": "missing ingredient or instruction section"
+    },
+    {
+      "title": "Cookbook:Kunun kanwa",
+      "reason": "redirect or unfinished source"
+    },
+    {
+      "title": "Cookbook:Kunun Zaki",
+      "reason": "redirect or unfinished source"
+    },
+    {
+      "title": "Cookbook:Lettuce Soup",
+      "reason": "unsupported instruction markup"
+    },
+    {
+      "title": "Cookbook:Leaf Masala",
+      "reason": "redirect or unfinished source"
+    },
+    {
+      "title": "Cookbook:Linzer Torte Bar Cookies",
+      "reason": "ingredient table requires manual review"
+    },
+    {
+      "title": "Cookbook:Madeira Honey Cake",
+      "reason": "ingredient table requires manual review"
+    },
+    {
+      "title": "Cookbook:Matar Paneer",
+      "reason": "missing ingredient or instruction section"
+    },
+    {
+      "title": "Cookbook:Matzo",
+      "reason": "non-list ingredient content requires manual review"
+    },
+    {
+      "title": "Cookbook:Matoke and Beef Stew",
+      "reason": "redirect or unfinished source"
+    },
+    {
+      "title": "Cookbook:Mchemsho (Tanzanian cuisine)",
+      "reason": "redirect or unfinished source"
+    },
+    {
+      "title": "Cookbook:Mediterranean Grilled Tuna",
+      "reason": "missing ingredient or instruction section"
+    },
+    {
+      "title": "Cookbook:Mincemeat Tart",
+      "reason": "non-list ingredient content requires manual review"
+    },
+    {
+      "title": "Cookbook:Miyan Ridi (Nigerian Sesame Soup)",
+      "reason": "multiple ingredient sections require manual review"
+    },
+    {
+      "title": "Cookbook:Miso Soup (Traditional)",
+      "reason": "non-list ingredient content requires manual review"
+    },
+    {
+      "title": "Cookbook:Modeling Chocolate",
+      "reason": "ingredient table requires manual review"
+    },
+    {
+      "title": "Cookbook:Moin Moin (Nigerian Bean Pudding)",
+      "reason": "redirect or unfinished source"
+    },
+    {
+      "title": "Cookbook:Mtori (Tanzanian stew)",
+      "reason": "redirect or unfinished source"
+    },
+    {
+      "title": "Cookbook:Msemmen",
+      "reason": "redirect or unfinished source"
+    },
+    {
+      "title": "Cookbook:Mukimo",
+      "reason": "redirect or unfinished source"
+    },
+    {
+      "title": "Cookbook:Mukhbaza",
+      "reason": "redirect or unfinished source"
+    },
+    {
+      "title": "Cookbook:Nigerian Coconut Rice",
+      "reason": "redirect or unfinished source"
+    },
+    {
+      "title": "Cookbook:Mutura",
+      "reason": "redirect or unfinished source"
+    },
+    {
+      "title": "Cookbook:No-Knead Oatmeal Bread",
+      "reason": "ingredient table requires manual review"
+    },
+    {
+      "title": "Cookbook:No-Knead Bread",
+      "reason": "ingredient table requires manual review"
+    },
+    {
+      "title": "Cookbook:Nigerian Ofe Akwu (Palm Fruit Soup)",
+      "reason": "redirect or unfinished source"
+    },
+    {
+      "title": "Cookbook:Nigerian Ewa Agoyin",
+      "reason": "redirect or unfinished source"
+    },
+    {
+      "title": "Cookbook:Nigerian Miyan Giyada",
+      "reason": "redirect or unfinished source"
+    },
+    {
+      "title": "Cookbook:Nigerian Pancakes",
+      "reason": "redirect or unfinished source"
+    },
+    {
+      "title": "Cookbook:Nigerian Okra and Stew soup",
+      "reason": "redirect or unfinished source"
+    },
+    {
+      "title": "Cookbook:Nut Roll",
+      "reason": "ingredient table requires manual review"
+    },
+    {
+      "title": "Cookbook:North Indian Fermented Bread (Batooru)",
+      "reason": "redirect or unfinished source"
+    },
+    {
+      "title": "Cookbook:Olive Ascolane (Stuffed Fried Olives)",
+      "reason": "unsupported ingredient markup"
+    },
+    {
+      "title": "Cookbook:Ofe Onugbu (Bitter Leaf Soup)",
+      "reason": "redirect or unfinished source"
+    },
+    {
+      "title": "Cookbook:Omo tuo",
+      "reason": "redirect or unfinished source"
+    },
+    {
+      "title": "Cookbook:Nshima",
+      "reason": "redirect or unfinished source"
+    },
+    {
+      "title": "Cookbook:Oven Pancakes",
+      "reason": "unsupported instruction markup"
+    },
+    {
+      "title": "Cookbook:Orange Bread",
+      "reason": "ingredient table requires manual review"
+    },
+    {
+      "title": "Cookbook:Penne with Hearty Meat Sauce",
+      "reason": "unsupported instruction markup"
+    },
+    {
+      "title": "Cookbook:Pizza Soup",
+      "reason": "non-list ingredient content requires manual review"
+    },
+    {
+      "title": "Cookbook:Perfect Three Course Dinner",
+      "reason": "multiple ingredient sections require manual review"
+    },
+    {
+      "title": "Cookbook:Pineapple Upside-Down Cake I",
+      "reason": "unsupported instruction markup"
+    },
+    {
+      "title": "Cookbook:Pineapple Bread",
+      "reason": "ingredient table requires manual review"
+    },
+    {
+      "title": "Cookbook:Pinza Mostarda Bolognese",
+      "reason": "ingredient table requires manual review"
+    },
+    {
+      "title": "Cookbook:Policy/Recipe template",
+      "reason": "ingredient table requires manual review"
+    },
+    {
+      "title": "Cookbook:Plain Bagels",
+      "reason": "ingredient table requires manual review"
+    },
+    {
+      "title": "Cookbook:Pot Stickers",
+      "reason": "unsupported instruction markup"
+    },
+    {
+      "title": "Cookbook:Plain Kefir",
+      "reason": "multiple ingredient sections require manual review"
+    },
+    {
+      "title": "Cookbook:Portuguese Sweet Rolls",
+      "reason": "multiple ingredient sections require manual review"
+    },
+    {
+      "title": "Cookbook:Porridge yam",
+      "reason": "redirect or unfinished source"
+    },
+    {
+      "title": "Cookbook:Potato Spelt Oat Burger",
+      "reason": "redirect or unfinished source"
+    },
+    {
+      "title": "Cookbook:Poticza",
+      "reason": "ingredient table requires manual review"
+    },
+    {
+      "title": "Cookbook:Potato Balls",
+      "reason": "redirect or unfinished source"
+    },
+    {
+      "title": "Cookbook:Qabuli (Central Asian Rice Pilaf)",
+      "reason": "redirect or unfinished source"
+    },
+    {
+      "title": "Cookbook:Puerto Rican Chicken Soup (Asopao)",
+      "reason": "non-list ingredient content requires manual review"
+    },
+    {
+      "title": "Cookbook:Pudding with Coconut Topping (Tako)",
+      "reason": "missing ingredient or instruction section"
+    },
+    {
+      "title": "Cookbook:Quick Oat Bread",
+      "reason": "ingredient table requires manual review"
+    },
+    {
+      "title": "Cookbook:Raspberry Cuts",
+      "reason": "redirect or unfinished source"
+    },
+    {
+      "title": "Cookbook:Refried Beans",
+      "reason": "unsupported instruction markup"
+    },
+    {
+      "title": "Cookbook:Rich Biscuits",
+      "reason": "ingredient table requires manual review"
+    },
+    {
+      "title": "Cookbook:Roasted Oysters with Madeira",
+      "reason": "unsupported instruction markup"
+    },
+    {
+      "title": "Cookbook:Roman Soup",
+      "reason": "unsupported instruction markup"
+    },
+    {
+      "title": "Cookbook:Roasted Pork Shoulder (Pernil Asado)",
+      "reason": "missing ingredient or instruction section"
+    },
+    {
+      "title": "Cookbook:Roast Potatoes",
+      "reason": "unsupported instruction markup"
+    },
+    {
+      "title": "Cookbook:Salad Beijing",
+      "reason": "ingredient table requires manual review"
+    },
+    {
+      "title": "Cookbook:Sabaayad",
+      "reason": "redirect or unfinished source"
+    },
+    {
+      "title": "Cookbook:Salted Mustard Greens and Shredded Meat Noodle Soup",
+      "reason": "redirect or unfinished source"
+    },
+    {
+      "title": "Cookbook:Schwarzwälder Kirschtorte (Black Forest Cake)",
+      "reason": "ingredient table requires manual review"
+    },
+    {
+      "title": "Cookbook:Schwarzwälder Kirschtorte (Black Forest Cake) II",
+      "reason": "ingredient table requires manual review"
+    },
+    {
+      "title": "Cookbook:Scorched rice",
+      "reason": "redirect or unfinished source"
+    },
+    {
+      "title": "Cookbook:Seblak",
+      "reason": "redirect or unfinished source"
+    },
+    {
+      "title": "Cookbook:Shahan ful",
+      "reason": "redirect or unfinished source"
+    },
+    {
+      "title": "Cookbook:Shrimp and Sea Bass Ceviche",
+      "reason": "unsupported instruction markup"
+    },
+    {
+      "title": "Cookbook:Shoofly Pie",
+      "reason": "ingredient table requires manual review"
+    },
+    {
+      "title": "Cookbook:Soda Bread",
+      "reason": "ingredient table requires manual review"
+    },
+    {
+      "title": "Cookbook:Slow Cooker Soda Bread with Spring Herbs",
+      "reason": "ingredient table requires manual review"
+    },
+    {
+      "title": "Cookbook:Sombi",
+      "reason": "redirect or unfinished source"
+    },
+    {
+      "title": "Cookbook:South African Curry and Rice",
+      "reason": "redirect or unfinished source"
+    },
+    {
+      "title": "Cookbook:Spinach Mushroom Omelet",
+      "reason": "redirect or unfinished source"
+    },
+    {
+      "title": "Cookbook:Stewed Oysters I",
+      "reason": "unsupported instruction markup"
+    },
+    {
+      "title": "Cookbook:Stollen",
+      "reason": "ingredient table requires manual review"
+    },
+    {
+      "title": "Cookbook:Steamed Tuna Bao Buns",
+      "reason": "redirect or unfinished source"
+    },
+    {
+      "title": "Cookbook:Stir-fried tomato and scrambled eggs",
+      "reason": "redirect or unfinished source"
+    },
+    {
+      "title": "Cookbook:Stracciatella II",
+      "reason": "unsupported instruction markup"
+    },
+    {
+      "title": "Cookbook:Sweet Potato Soup",
+      "reason": "redirect or unfinished source"
+    },
+    {
+      "title": "Cookbook:Supu Ya Ndizi",
+      "reason": "redirect or unfinished source"
+    },
+    {
+      "title": "Cookbook:Swedish Kringle",
+      "reason": "ingredient table requires manual review"
+    },
+    {
+      "title": "Cookbook:Tangerine Jelly",
+      "reason": "redirect or unfinished source"
+    },
+    {
+      "title": "Cookbook:Tahu Gejrot",
+      "reason": "redirect or unfinished source"
+    },
+    {
+      "title": "Cookbook:Toast",
+      "reason": "unsupported instruction markup"
+    },
+    {
+      "title": "Cookbook:Tomato Paste and Ham Sandwiches (Pan Tomaca)",
+      "reason": "missing ingredient or instruction section"
+    },
+    {
+      "title": "Cookbook:Tomato Bredie",
+      "reason": "redirect or unfinished source"
+    },
+    {
+      "title": "Cookbook:Tub Tim Krob (Thai Water Chestnuts in Coconut)",
+      "reason": "unresolved ingredient section"
+    },
+    {
+      "title": "Cookbook:Uppittu (Indian Semolina Porridge)",
+      "reason": "missing ingredient or instruction section"
+    },
+    {
+      "title": "Cookbook:Umm Ali (Egyptian Bread Pudding)",
+      "reason": "missing ingredient or instruction section"
+    },
+    {
+      "title": "Cookbook:Ukwa",
+      "reason": "redirect or unfinished source"
+    },
+    {
+      "title": "Cookbook:Tuwo Dawa",
+      "reason": "redirect or unfinished source"
+    },
+    {
+      "title": "Cookbook:Ugba na Ukpaka",
+      "reason": "redirect or unfinished source"
+    },
+    {
+      "title": "Cookbook:Uturu Oka",
+      "reason": "redirect or unfinished source"
+    },
+    {
+      "title": "Cookbook:Venetian Soup",
+      "reason": "missing ingredient or instruction section"
+    },
+    {
+      "title": "Cookbook:Watergate Salad",
+      "reason": "unsupported instruction markup"
+    },
+    {
+      "title": "Cookbook:Wali Wa Nazi",
+      "reason": "redirect or unfinished source"
+    },
+    {
+      "title": "Cookbook:White Bread",
+      "reason": "ingredient table requires manual review"
+    },
+    {
+      "title": "Cookbook:Whole Wheat Bread",
+      "reason": "ingredient table requires manual review"
+    },
+    {
+      "title": "Cookbook:Yeasted Vanilla Sponge Cake",
+      "reason": "unsupported instruction markup"
+    },
+    {
+      "title": "Cookbook:Xarém (Porridge dish)",
+      "reason": "redirect or unfinished source"
+    },
+    {
+      "title": "Cookbook:Zwiebelrostbraten with Red Wine Onion Gravy",
+      "reason": "unsupported instruction markup"
+    }
+  ]
+}

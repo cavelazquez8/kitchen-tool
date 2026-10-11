@@ -8,3 +8,4 @@ package-lock.json
 
 server/dist
 public/mise-gemini-worker.js
+public/data/wikibooks-recipes.json
