@@ -16,12 +16,13 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "playwright test",
+    "test:worker-runtime": "node scripts/test-worker-runtime.mjs",
     "recipes:update": "node scripts/update-recipe-library.mjs",
     "test:rules": "firebase emulators:exec --project demo-kitchen --only firestore \"vitest run --config vitest.rules.config.ts\"",
     "emulators": "firebase emulators:start --project demo-kitchen --only auth,firestore",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "check": "npm run lint && npm run typecheck && npm test && npm run build"
+    "check": "npm run lint && npm run typecheck && npm test && npm run build && npm run test:worker-runtime"
   },
   "dependencies": {
     "@radix-ui/react-dialog": "^1.1.14",

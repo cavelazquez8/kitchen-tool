@@ -100,12 +100,45 @@ describe('free recipe provider Worker endpoints', () => {
       expect(parsed.searchParams.has(forbidden)).toBe(false);
     expect(String(url)).not.toContain(env.RECIPEAPI_API_KEY);
     expect(options).toMatchObject({
-      headers: { Authorization: `Bearer ${env.RECIPEAPI_API_KEY}` },
-      redirect: 'error',
-      cache: 'no-store',
+      headers: {
+        Authorization: `Bearer ${env.RECIPEAPI_API_KEY}`,
+        'Cache-Control': 'no-cache, no-store',
+        Pragma: 'no-cache',
+      },
+      redirect: 'manual',
+      cf: { cacheTtlByStatus: { '200-599': -1 } },
     });
+    expect(options).not.toHaveProperty('cache');
     expect(fetcher).toHaveBeenCalledTimes(1);
   });
+
+  it.each(['recipeapi', 'spoonacular'] as const)(
+    'blocks %s redirects without forwarding its key to a different host',
+    async (provider) => {
+      const cancel = vi.fn();
+      const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
+        new Response(new ReadableStream<Uint8Array>({ cancel }), {
+          status: 302,
+          headers: { Location: 'https://attacker.example/collect' },
+        }),
+      );
+      const response = await createWorker(fetcher).fetch(
+        request('/recipes/search', { ...input, provider }),
+        env,
+      );
+      expect(response.status).toBe(502);
+      const error = await response.json();
+      expect(error.error.code).toBe('provider_redirect');
+      expect(error.error.message).toContain('did not forward your API key');
+      expect(JSON.stringify(error)).not.toContain(env.RECIPEAPI_API_KEY);
+      expect(JSON.stringify(error)).not.toContain(env.SPOONACULAR_API_KEY);
+      expect(JSON.stringify(error)).not.toContain('attacker.example');
+      expect(fetcher.mock.calls[0][1]?.redirect).toBe('manual');
+      expect(fetcher.mock.calls[0][1]).not.toHaveProperty('cache');
+      expect(fetcher).toHaveBeenCalledTimes(1);
+      expect(cancel).toHaveBeenCalledTimes(1);
+    },
+  );
 
   it('rejects invalid searches, missing keys, and undeclared free plans before contacting providers', async () => {
     const fetcher = vi.fn<typeof fetch>();

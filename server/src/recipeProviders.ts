@@ -9,6 +9,7 @@ import {
 } from '../../src/recipes/providers';
 import { isRecord } from '../../src/ai/protocol';
 import type { Recipe } from '../../src/recipes/types';
+import { workerOutboundOptions } from './outbound';
 
 export interface RecipeProviderEnv {
   RECIPEAPI_API_KEY?: string;
@@ -241,14 +242,23 @@ export async function searchRecipeProvider(
       endpoint.searchParams.set('addRecipeInstructions', 'true');
     }
     const response = await fetcher(endpoint.href, {
-      headers:
+      ...workerOutboundOptions(
         input.provider === 'recipeapi'
           ? { Authorization: `Bearer ${credential}` }
           : { 'x-api-key': credential },
-      redirect: 'error',
-      cache: 'no-store',
-      signal: controller.signal,
+        controller.signal,
+      ),
+      // workerd rejects 'error'; inspect redirects before any credential forwarding.
+      redirect: 'manual',
     });
+    if (response.status >= 300 && response.status < 400) {
+      await response.body?.cancel();
+      throw new RecipeProviderError(
+        502,
+        'provider_redirect',
+        'This recipe source redirected its API request. Mise did not forward your API key. Try again later.',
+      );
+    }
     if (input.provider === 'spoonacular') {
       const used = response.headers.get('X-API-Quota-Used');
       if (used !== null && Number.isFinite(Number(used)))

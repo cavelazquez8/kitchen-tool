@@ -1,6 +1,7 @@
 import { isRecord, parseAiReply } from '../../src/ai/protocol';
 import type { AiReply, AiRecipeDraft } from '../../src/ai/protocol';
 import { parseIngredientLine } from '../../src/recipes/parse';
+import { workerOutboundOptions } from './outbound';
 
 export class WebsiteImportError extends Error {
   constructor(
@@ -136,13 +137,18 @@ async function checkPublicDns(
   for (const type of ['A', 'AAAA']) {
     const response = await fetcher(
       `https://cloudflare-dns.com/dns-query?name=${encodeURIComponent(host)}&type=${type}`,
-      { headers: { Accept: 'application/dns-json' }, redirect: 'error', signal },
+      {
+        ...workerOutboundOptions({ Accept: 'application/dns-json' }, signal),
+        redirect: 'manual',
+      },
     );
-    if (!response.ok)
+    if (!response.ok) {
+      await response.body?.cancel();
       throw new WebsiteImportError(
         'import_dns',
         'Could not verify this recipe website. Paste its recipe text instead.',
       );
+    }
     let value: unknown;
     try {
       value = JSON.parse(await readText(response, 64 * 1024));
@@ -342,13 +348,15 @@ export async function importRecipeWebsite(
     for (let redirect = 0; redirect <= MAX_REDIRECTS; redirect++) {
       await checkPublicDns(url.hostname, fetcher, controller.signal);
       const response = await fetcher(url.href, {
+        ...workerOutboundOptions(
+          {
+            Accept: 'text/html, application/xhtml+xml',
+            'User-Agent': 'MiseRecipeImport/0.1',
+          },
+          controller.signal,
+        ),
         method: 'GET',
         redirect: 'manual',
-        headers: {
-          Accept: 'text/html, application/xhtml+xml',
-          'User-Agent': 'MiseRecipeImport/0.1',
-        },
-        signal: controller.signal,
       });
       if ([301, 302, 303, 307, 308].includes(response.status)) {
         const location = response.headers.get('Location');

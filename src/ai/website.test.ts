@@ -146,6 +146,30 @@ describe('recipe website import', () => {
     expect(options?.redirect).toBe('manual');
     expect(options?.headers).not.toHaveProperty('Authorization');
     expect(options?.headers).not.toHaveProperty('Cookie');
+    for (const [, init] of fetcher.mock.calls) {
+      expect(init).toMatchObject({
+        redirect: 'manual',
+        headers: { 'Cache-Control': 'no-cache, no-store', Pragma: 'no-cache' },
+        cf: { cacheTtlByStatus: { '200-599': -1 } },
+      });
+      expect(init).not.toHaveProperty('cache');
+    }
+  });
+
+  it('refuses a DNS service redirect before contacting its destination or the recipe page', async () => {
+    const cancel = vi.fn();
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(new ReadableStream<Uint8Array>({ cancel }), {
+        status: 302,
+        headers: { Location: 'https://attacker.example/dns' },
+      }),
+    );
+    await expect(
+      importRecipeWebsite('https://recipes.example.com/r', fetcher),
+    ).rejects.toMatchObject({ code: 'import_dns' });
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(fetcher.mock.calls[0][1]?.redirect).toBe('manual');
+    expect(cancel).toHaveBeenCalledTimes(1);
   });
 
   it('blocks private DNS before contacting the recipe site', async () => {
