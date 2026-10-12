@@ -10,7 +10,8 @@ A touch-friendly kitchen inventory, recipe library, meal planner, shopping list,
 - Scanning automatically continues by default. Turn it off in the scanner; the preference stays on this device.
 - Each scan opens a quick review with storage destination, quantity, and optional expiration date. **Add & scan next** saves that purchase immediately; **Undo** removes it. Choose **Bulk scan** to send a batch to one location, optionally adding clear matches automatically. Duplicates, unknown products, and uncertain ingredient identities always require review.
 - Keep purchases separate by storage location, unit, purchase date, and expiration date. Countable items have −1 and Undo; Used some handles larger changes.
-- Browse the free built-in Wikibooks cookbook, search dishes or ingredients, filter by category/cuisine, and load more without losing previous cards. Suggestions rank against your full inventory. Explore more recipes with TheMealDB or optional free RecipeAPI.io and Spoonacular accounts.
+- Choose **Recipe source** to browse your cookbook or search TheMealDB, RecipeAPI.io, or Spoonacular. Local results update as you type; online sources use a clearly named Search button. Availability, category, cuisine, and expiration preferences apply to the displayed recipes, and counts reflect that filtered source.
+- Choose **Recipe collection** for saved favorites, personal imports, your own recipes, or saved AI recipes. Collections combine with availability and text filters. Personal imports include text, website, image, and video imports; API saves remain under saved recipes.
 - Add your own recipes or import pasted recipes. Website import uses published Recipe JSON-LD through the optional backend.
 - Review recorded quantities, cook with step timers, and optionally keep the screen awake. Finish cooking reviews deductions before changing inventory.
 - Save recipes and choose meal-plan portions. Request a shopping list to combine requirements and subtract inventory once.
@@ -23,6 +24,8 @@ Related milk, rice, and fresh/dried herb forms are shown for review; Mise does n
 Food entry includes more than 5,700 locally searched Open Food Facts ingredient names, recent items, and common foods. **Find packaged products** performs an explicit online search for branded products, without a request on every keystroke. See [catalog attribution and updates](docs/food-catalog.md). Kitchen tools retain their separate suggestions and manual entry.
 
 The built-in cookbook is a versioned snapshot of Wikibooks recipes, served with Mise and matched locally without a recipe API key or subscription. It loads only when Recipes is opened. Saved recipes remain available if the collection or online provider cannot load. TheMealDB requests are bounded and user initiated; they do not enumerate its full database.
+
+Online result counts describe recipes loaded by your current search, not the provider's entire database. Changing a search term or source cancels stale results and paging; filter changes apply immediately without spending another API request. **Load more from [source]** requests another page for that same search. Only recipes you save join your personal cookbook.
 
 Wikibooks content is adapted under CC BY-SA 4.0. Recipe details, saved records, and backups preserve contributor attribution, original revision links, and the content license. Recipe photos are not copied from Wikibooks. Unsupported, incomplete, or ambiguous source structures are excluded during ingestion; unknown amounts and yields remain unknown.
 

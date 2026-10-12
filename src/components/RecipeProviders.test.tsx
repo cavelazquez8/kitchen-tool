@@ -6,6 +6,7 @@ import { createEmptyInventory } from '../domain/types';
 import { RECIPE_PROVIDER_INFO, recipeApiToRecipe, spoonacularToRecipe } from '../recipes/providers';
 import { KitchenHub } from './KitchenHub';
 import { RecipeProviderSettings } from './RecipeProviderSettings';
+import { loadLocalRecipes } from '../recipes/localLibrary';
 
 vi.mock('../recipes/localLibrary', () => ({
   loadLocalRecipes: vi.fn().mockResolvedValue([]),
@@ -39,6 +40,59 @@ afterEach(() => {
 });
 
 describe('optional recipe source UI', () => {
+  it('falls back to all inventory when a selected batch disappears without remounting the browser', async () => {
+    const recipe = recipeApiToRecipe({
+      id: 123,
+      name: 'Carrot soup',
+      servings: 2,
+      ingredients: [{ name: 'Carrots', quantity: 100, unit: 'g' }],
+      instructions: ['Simmer.'],
+    })!;
+    const milk = {
+      ...recipe,
+      id: 'manual:milk',
+      title: 'Milk pudding',
+      ingredients: [{ name: 'Milk', quantity: 100, unit: 'g' }],
+      source: { type: 'manual' as const },
+    };
+    vi.mocked(loadLocalRecipes).mockResolvedValueOnce([recipe, milk]);
+    const inventory = {
+      products: [
+        { id: 'carrots', name: 'Carrots', isStaple: false },
+        { id: 'milk', name: 'Milk', isStaple: false },
+      ],
+      batches: ['carrots', 'milk'].map((id) => ({
+        id,
+        productId: id,
+        quantity: 200,
+        unit: 'g',
+        location: 'fridge' as const,
+        purchasedOn: '2026-01-01',
+        expiresOn: null,
+      })),
+      tools: [],
+    };
+    const user = userEvent.setup();
+    const { rerender } = render(
+      <KitchenHub
+        {...common}
+        inventory={inventory}
+        selectedBatchIds={['carrots']}
+        page="recipes"
+      />,
+    );
+    await screen.findByRole('heading', { name: 'Carrot soup' });
+    await user.click(screen.getByText('Refine recipes', { exact: true }));
+    await user.click(screen.getByRole('checkbox', { name: 'Use only selected inventory' }));
+    await user.click(screen.getByRole('button', { name: 'Ready to cook' }));
+    expect(screen.queryByRole('heading', { name: 'Milk pudding' })).not.toBeInTheDocument();
+    rerender(<KitchenHub {...common} inventory={inventory} selectedBatchIds={[]} page="recipes" />);
+    expect(await screen.findByRole('heading', { name: 'Milk pudding' })).toBeVisible();
+    expect(
+      screen.queryByRole('checkbox', { name: 'Use only selected inventory' }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByText(/Showing 2 of 2 recipes/)).toBeVisible();
+  });
   it('checks provider settings only when requested and explains older Workers', async () => {
     const fetcher = vi
       .fn<typeof fetch>()
@@ -108,10 +162,10 @@ describe('optional recipe source UI', () => {
       expect(screen.queryByText('Opening your cookbook…')).not.toBeInTheDocument(),
     );
     expect(fetcher).not.toHaveBeenCalled();
-    await user.click(screen.getByRole('combobox', { name: 'Online recipe source' }));
-    await user.click(screen.getByRole('option', { name: 'Spoonacular · Online discovery' }));
+    await user.click(screen.getByRole('combobox', { name: 'Recipe source' }));
+    await user.click(screen.getByRole('option', { name: 'Spoonacular' }));
     await user.type(screen.getByRole('textbox', { name: 'Find recipes' }), 'soup');
-    await user.click(screen.getByRole('button', { name: 'More recipes online' }));
+    await user.click(screen.getByRole('button', { name: 'Search Spoonacular' }));
     const results = await screen.findByRole('region', { name: 'Spoonacular search results' });
     expect(within(results).getByRole('link', { name: 'Open original recipe' })).toHaveAttribute(
       'href',
@@ -156,10 +210,10 @@ describe('optional recipe source UI', () => {
     await waitFor(() =>
       expect(screen.queryByText('Opening your cookbook…')).not.toBeInTheDocument(),
     );
-    await user.click(screen.getByRole('combobox', { name: 'Online recipe source' }));
-    await user.click(screen.getByRole('option', { name: 'RecipeAPI.io · Free account' }));
+    await user.click(screen.getByRole('combobox', { name: 'Recipe source' }));
+    await user.click(screen.getByRole('option', { name: 'RecipeAPI.io' }));
     await user.type(screen.getByRole('textbox', { name: 'Find recipes' }), 'soup');
-    await user.click(screen.getByRole('button', { name: 'More recipes online' }));
+    await user.click(screen.getByRole('button', { name: 'Search RecipeAPI.io' }));
     const results = await screen.findByRole('region', { name: 'RecipeAPI.io search results' });
     expect(within(results).getByRole('button', { name: 'Save Test-only soup' })).toBeEnabled();
     await user.click(within(results).getByRole('button', { name: 'View recipe' }));
@@ -167,14 +221,25 @@ describe('optional recipe source UI', () => {
     expect(within(detail).getByText('Test-only simmer step')).toBeVisible();
     expect(within(detail).getByText('RecipeAPI.io · recipe 123')).toBeVisible();
     await user.click(within(detail).getByRole('button', { name: 'Close' }));
-    await user.clear(screen.getByRole('textbox', { name: 'Find recipes' }));
-    await user.type(screen.getByRole('textbox', { name: 'Find recipes' }), 'different query');
-    await user.click(screen.getByRole('button', { name: 'Next recipes from this source' }));
+    await user.click(screen.getByRole('button', { name: 'Load more from RecipeAPI.io' }));
     await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(2));
     expect(JSON.parse(String(fetcher.mock.calls[1][1]?.body))).toMatchObject({
       query: 'soup',
       page: 2,
     });
     expect(within(results).getAllByRole('button', { name: 'View recipe' })).toHaveLength(2);
+    await user.clear(screen.getByRole('textbox', { name: 'Find recipes' }));
+    await user.type(screen.getByRole('textbox', { name: 'Find recipes' }), 'different query');
+    expect(within(results).queryByRole('button', { name: 'View recipe' })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: 'Load more from RecipeAPI.io' }),
+    ).not.toBeInTheDocument();
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    await user.click(screen.getByRole('button', { name: 'Search RecipeAPI.io' }));
+    await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(3));
+    expect(JSON.parse(String(fetcher.mock.calls[2][1]?.body))).toMatchObject({
+      query: 'different query',
+      page: 1,
+    });
   });
 });

@@ -1,6 +1,5 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  BookOpen,
   Check,
   Clipboard,
   Plus,
@@ -11,24 +10,13 @@ import {
   Utensils,
   Upload,
   X,
-  ExternalLink,
 } from 'lucide-react';
 import type { InventoryState, ShoppingItem } from '../domain/types';
 import type { InventoryReducer } from '../lib/repository';
 import { generateMarkdown } from '../domain/export';
 import { formatQuantity } from '../domain/inventory';
-import { rankRecipes, matchRecipe, buildShoppingList } from '../recipes/matching';
-import { discoverRecipes, searchRecipes } from '../recipes/library';
-import { searchRecipeProviders } from '../recipes/providerClient';
-import {
-  canPersistProviderRecipe,
-  RECIPE_PROVIDER_INFO,
-  type RecipeProviderId,
-  type RecipeProviderResults,
-  type RecipeProviderSearch,
-} from '../recipes/providers';
-import { canonicalIngredientName } from '../recipes/identity';
-import { loadLocalRecipes, searchLocalRecipes, recipeFacets } from '../recipes/localLibrary';
+import { matchRecipe, buildShoppingList } from '../recipes/matching';
+import { canPersistProviderRecipe } from '../recipes/providers';
 import { isRecipe, type Recipe } from '../recipes/types';
 import {
   normalizeAiRecipe,
@@ -50,7 +38,7 @@ import { Modal } from './Modal';
 import { Autocomplete } from './Autocomplete';
 import { RecipeEditor } from './RecipeEditor';
 import { FinishCooking } from './FinishCooking';
-import { Choice } from './Choice';
+import { RecipeBrowser } from './RecipeBrowser';
 import './recipeProviders.css';
 
 export type HubPage = 'recipes' | 'shopping' | 'assistant';
@@ -73,7 +61,6 @@ const sourceLabels = {
   ai: 'AI-created',
   manual: 'Your recipe',
 };
-const RECIPE_PAGE_SIZE = 24;
 function safeLink(value?: string) {
   try {
     const url = new URL(value ?? '');
@@ -160,24 +147,7 @@ export function KitchenHub({
   onConfigure,
   onNavigate,
 }: Props) {
-  const [catalog, setCatalog] = useState<Recipe[]>([]);
-  const [localCatalog, setLocalCatalog] = useState<Recipe[]>([]);
-  const [query, setQuery] = useState('');
-  const [submittedQuery, setSubmittedQuery] = useState('');
-  const [category, setCategory] = useState('');
-  const [cuisine, setCuisine] = useState('');
-  const [libraryView, setLibraryView] = useState<'kitchen' | 'browse'>('kitchen');
-  const [visibleCount, setVisibleCount] = useState(RECIPE_PAGE_SIZE);
-  const [libraryBusy, setLibraryBusy] = useState(false);
-  const [onlineBusy, setOnlineBusy] = useState(false);
-  const [onlineError, setOnlineError] = useState('');
-  const [onlineSource, setOnlineSource] = useState<'themealdb' | RecipeProviderId>('themealdb');
-  const [providerResults, setProviderResults] = useState<RecipeProviderResults | null>(null);
-  const [providerSearch, setProviderSearch] = useState<RecipeProviderSearch | null>(null);
-  const [libraryError, setLibraryError] = useState('');
   const [error, setError] = useState('');
-  const [filter, setFilter] = useState<'all' | 'ready' | 'close' | 'saved'>('all');
-  const [prioritize, setPrioritize] = useState(false);
   const [useSelection, setUseSelection] = useState(false);
   const [editing, setEditing] = useState<Recipe | null>(null);
   const [editingNotes, setEditingNotes] = useState<readonly string[]>([]);
@@ -199,12 +169,8 @@ export function KitchenHub({
   const [minutes, setMinutes] = useState<Record<string, string>>({});
   const [now, setNow] = useState(Date.now());
   const [awake, setAwake] = useState(false);
-  const libraryRequest = useRef(0);
-  const onlineRequest = useRef(0);
-  const cancelOnlineSearch = useCallback(() => {
-    onlineRequest.current++;
-    setOnlineBusy(false);
-  }, []);
+  const [savedReveal, setSavedReveal] = useState<Recipe | null>(null);
+  const savedRevealHandled = useCallback(() => setSavedReveal(null), []);
   const endRef = useRef<HTMLDivElement>(null);
   const saved = useMemo(() => inventory.recipes ?? [], [inventory.recipes]);
   const plan = inventory.mealPlan ?? [];
@@ -212,7 +178,7 @@ export function KitchenHub({
   const history = inventory.chatHistory ?? [];
   const relevant = useMemo(
     () =>
-      useSelection
+      useSelection && selectedBatchIds.length > 0
         ? {
             ...inventory,
             batches: inventory.batches.filter((batch) => selectedBatchIds.includes(batch.id)),
@@ -220,86 +186,6 @@ export function KitchenHub({
         : inventory,
     [inventory, useSelection, selectedBatchIds],
   );
-  const allRecipes = useMemo(
-    () => [
-      ...new Map(
-        [...localCatalog, ...catalog, ...saved].map((recipe) => [recipe.id, recipe]),
-      ).values(),
-    ],
-    [localCatalog, catalog, saved],
-  );
-  const facets = useMemo(() => recipeFacets(allRecipes), [allRecipes]);
-  const matches = useMemo(() => {
-    const recipes = searchLocalRecipes(allRecipes, submittedQuery, { category, cuisine });
-    const ranked = rankRecipes(recipes, relevant, { prioritizeExpiration: prioritize }).filter(
-      (item) =>
-        filter === 'all' ||
-        (filter === 'ready' && item.status === 'ready') ||
-        (filter === 'close' && item.missingCount <= 2) ||
-        (filter === 'saved' && saved.some((recipe) => recipe.id === item.recipe.id)),
-    );
-    if (libraryView === 'browse' || !relevant.batches.length)
-      ranked.sort((a, b) => a.recipe.title.localeCompare(b.recipe.title));
-    return ranked;
-  }, [
-    allRecipes,
-    relevant,
-    prioritize,
-    submittedQuery,
-    category,
-    cuisine,
-    libraryView,
-    filter,
-    saved,
-  ]);
-  const providerMatches = useMemo(
-    () =>
-      rankRecipes(providerResults?.recipes ?? [], relevant, { prioritizeExpiration: prioritize }),
-    [providerResults, relevant, prioritize],
-  );
-  useEffect(() => {
-    if (!providerResults || providerResults.storage !== 'session') return;
-    if (page !== 'recipes' || onlineSource !== 'spoonacular') {
-      setProviderResults(null);
-      return;
-    }
-    const remaining = (providerResults.expiresAt ?? 0) - Date.now();
-    if (remaining <= 0) {
-      setProviderResults(null);
-      return;
-    }
-    const timer = window.setTimeout(() => setProviderResults(null), remaining);
-    const expire = () => {
-      if ((providerResults.expiresAt ?? 0) <= Date.now()) setProviderResults(null);
-    };
-    document.addEventListener('visibilitychange', expire);
-    return () => {
-      window.clearTimeout(timer);
-      document.removeEventListener('visibilitychange', expire);
-    };
-  }, [providerResults, page, onlineSource]);
-  useEffect(() => {
-    if (page !== 'recipes') return;
-    let active = true;
-    const request = ++libraryRequest.current;
-    setLibraryBusy(true);
-    setLibraryError('');
-    loadLocalRecipes()
-      .then((recipes) => {
-        if (active && request === libraryRequest.current) setLocalCatalog(recipes);
-      })
-      .catch((e) => {
-        if (active && request === libraryRequest.current)
-          setLibraryError(e instanceof Error ? e.message : 'Could not load recipes.');
-      })
-      .finally(() => {
-        if (active && request === libraryRequest.current) setLibraryBusy(false);
-      });
-    return () => {
-      active = false;
-      cancelOnlineSearch();
-    };
-  }, [page, cancelOnlineSearch]);
   useEffect(() => {
     if (!Object.keys(timers).length) return;
     const timer = window.setInterval(() => setNow(Date.now()), 1000);
@@ -356,17 +242,9 @@ export function KitchenHub({
       'Recipe saved.',
     );
     setDetail((current) => (current?.id === recipe.id ? recipe : current));
-    if (reveal) {
-      onlineRequest.current++;
-      setOnlineBusy(false);
-      setFilter('saved');
-      setQuery('');
-      setSubmittedQuery('');
-      setCategory('');
-      setCuisine('');
-      setVisibleCount(RECIPE_PAGE_SIZE);
-    }
+    if (reveal) setSavedReveal(recipe);
   }
+
   function openEditor(recipe: Recipe, notes: readonly string[] = []) {
     setEditingNotes(notes);
     setEditing(recipe);
@@ -380,120 +258,6 @@ export function KitchenHub({
       setChatRecipe(recipes[0]);
     }
     return recipes;
-  }
-  async function loadLibrary(event?: FormEvent, discover = false) {
-    event?.preventDefault();
-    onlineRequest.current++;
-    setOnlineBusy(false);
-    setSubmittedQuery(discover ? '' : query.trim());
-    if (discover) setQuery('');
-    setLibraryView(discover ? 'kitchen' : 'browse');
-    setVisibleCount(RECIPE_PAGE_SIZE);
-    const request = ++libraryRequest.current;
-    setLibraryBusy(true);
-    setLibraryError('');
-    try {
-      const recipes = await loadLocalRecipes();
-      if (request === libraryRequest.current) setLocalCatalog(recipes);
-    } catch (e) {
-      if (request === libraryRequest.current)
-        setLibraryError(e instanceof Error ? e.message : 'Could not load the recipe library.');
-    } finally {
-      if (request === libraryRequest.current) setLibraryBusy(false);
-    }
-  }
-  async function loadOnlineRecipes(nextPage = false) {
-    if (onlineBusy) return;
-    if (onlineSource !== 'themealdb') {
-      const connection = readGeminiConnection();
-      if (!connection) {
-        onConfigure();
-        return;
-      }
-      const active = new Set(
-        relevant.batches
-          .filter((batch) => batch.quantity !== 0 && batch.stapleStatus !== 'empty')
-          .map((batch) => batch.productId),
-      );
-      const ingredients = [
-        ...new Set(
-          relevant.products
-            .filter((product) => active.has(product.id) && !product.isStaple)
-            .map((product) => canonicalIngredientName(product.ingredientName ?? product.name))
-            .filter(Boolean),
-        ),
-      ].slice(0, 60);
-      const input: RecipeProviderSearch =
-        nextPage && providerSearch && providerResults
-          ? { ...providerSearch, page: providerResults.page + 1 }
-          : {
-              provider: onlineSource,
-              query: query.trim(),
-              ...(!query.trim() && ingredients.length ? { ingredients } : {}),
-              page: 1,
-              limit: 10,
-            };
-      if (!input.query && !input.ingredients?.length) {
-        setOnlineError(
-          'Enter a dish or ingredient above, or add groceries to find recipes for your kitchen.',
-        );
-        return;
-      }
-      const request = ++onlineRequest.current;
-      setOnlineBusy(true);
-      setOnlineError('');
-      setLibraryError('');
-      if (!nextPage) setProviderResults(null);
-      try {
-        const result = await searchRecipeProviders(connection, input);
-        if (request !== onlineRequest.current) return;
-        setProviderSearch(input);
-        setProviderResults((current) =>
-          nextPage && current?.provider === result.provider
-            ? {
-                ...result,
-                recipes: [
-                  ...new Map(
-                    [...current.recipes, ...result.recipes].map((recipe) => [recipe.id, recipe]),
-                  ).values(),
-                ],
-                ...(result.expiresAt
-                  ? { expiresAt: Math.min(current.expiresAt ?? result.expiresAt, result.expiresAt) }
-                  : {}),
-                warnings: [...new Set([...current.warnings, ...result.warnings])],
-              }
-            : result,
-        );
-      } catch (e) {
-        if (request === onlineRequest.current)
-          setOnlineError(e instanceof Error ? e.message : 'Could not search this recipe source.');
-      } finally {
-        if (request === onlineRequest.current) setOnlineBusy(false);
-      }
-      return;
-    }
-    const request = ++onlineRequest.current;
-    const term = query.trim();
-    setSubmittedQuery(term);
-    setVisibleCount(RECIPE_PAGE_SIZE);
-    setOnlineBusy(true);
-    setLibraryError('');
-    try {
-      const recipes = term ? await searchRecipes(term) : await discoverRecipes(relevant);
-      if (request !== onlineRequest.current) return;
-      setCatalog((current) => [
-        ...new Map([...current, ...recipes].map((r) => [r.id, r])).values(),
-      ]);
-      if (!recipes.length)
-        setLibraryError(
-          'No additional recipes found. Your built-in and saved recipes are still available.',
-        );
-    } catch (e) {
-      if (request === onlineRequest.current)
-        setLibraryError(e instanceof Error ? e.message : 'Could not search TheMealDB.');
-    } finally {
-      if (request === onlineRequest.current) setOnlineBusy(false);
-    }
   }
   async function ask(prompt = message) {
     if (!prompt.trim() || aiBusy) return;
@@ -661,411 +425,28 @@ export function KitchenHub({
     <div className="kitchen-hub">
       {page === 'recipes' && (
         <>
-          <section className="library-intro">
-            <div>
-              <span className="library-eyebrow">YOUR NEXT GOOD MEAL</span>
-              <h2>Your built-in cookbook.</h2>
-              <p>
-                {localCatalog.length
-                  ? `${localCatalog.length.toLocaleString()} built-in recipes · Free to browse · No account needed`
-                  : 'A free built-in cookbook, matched to your kitchen.'}
-              </p>
-            </div>
-            <BookOpen size={36} strokeWidth={1.3} aria-hidden="true" />
-          </section>
-          <div className="hub-toolbar">
-            <form
-              className="hub-search"
-              onSubmit={(event) => {
-                void loadLibrary(event);
-              }}
-            >
-              <input
-                aria-label="Find recipes"
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                placeholder="Search dishes or ingredients…"
-              />
-              <button className="button secondary" disabled={libraryBusy}>
-                Search library
-              </button>
-            </form>
-            <button
-              className="button secondary"
-              onClick={() => {
-                setImportText('');
-                setImportUrl('');
-                setMedia(null);
-                setImportOpen(true);
-              }}
-            >
-              <Upload size={17} />
-              Import recipe
-            </button>
-            <button className="button primary" onClick={() => openEditor(blankRecipe())}>
-              <Plus size={17} />
-              Your own recipe
-            </button>
-          </div>
-          <div className="library-browse-controls">
-            <div className="library-view" aria-label="Recipe order">
-              {(['kitchen', 'browse'] as const).map((view) => (
-                <button
-                  key={view}
-                  className={libraryView === view ? 'active' : ''}
-                  aria-pressed={libraryView === view}
-                  onClick={() => {
-                    setLibraryView(view);
-                    setVisibleCount(RECIPE_PAGE_SIZE);
-                  }}
-                >
-                  {view === 'kitchen' ? 'For your kitchen' : 'Browse all'}
-                </button>
-              ))}
-            </div>
-          </div>
-          <div className="hub-filters">
-            {(['all', 'ready', 'close', 'saved'] as const).map((value) => (
-              <button
-                className={filter === value ? 'active' : ''}
-                key={value}
-                aria-pressed={filter === value}
-                onClick={() => {
-                  setFilter(value);
-                  setVisibleCount(RECIPE_PAGE_SIZE);
-                }}
-              >
-                {
-                  {
-                    all: 'All recipes',
-                    ready: 'Ready to cook',
-                    close: 'Missing up to 2',
-                    saved: 'Saved recipes',
-                  }[value]
-                }
-              </button>
-            ))}
-          </div>
-          <details className="library-refine">
-            <summary>
-              Refine recipes
-              {category || cuisine ? ` · ${[category, cuisine].filter(Boolean).join(' / ')}` : ''}
-            </summary>
-            <div className="library-browse-controls">
-              <Choice
-                label="Recipe category"
-                value={category}
-                options={[
-                  { value: '', label: 'Every category' },
-                  ...facets.categories.map((name) => ({ value: name, label: name })),
-                ]}
-                onChange={(value) => {
-                  setCategory(value);
-                  setVisibleCount(RECIPE_PAGE_SIZE);
-                }}
-              />
-              {facets.cuisines.length > 0 && (
-                <Choice
-                  label="Recipe cuisine"
-                  value={cuisine}
-                  options={[
-                    { value: '', label: 'Every cuisine' },
-                    ...facets.cuisines.map((name) => ({ value: name, label: name })),
-                  ]}
-                  onChange={(value) => {
-                    setCuisine(value);
-                    setVisibleCount(RECIPE_PAGE_SIZE);
-                  }}
-                />
-              )}
-            </div>
-            <div className="hub-preferences">
-              <label>
-                <input
-                  type="checkbox"
-                  checked={prioritize}
-                  onChange={(e) => setPrioritize(e.target.checked)}
-                />
-                Prioritize expiring ingredients
-              </label>
-              {selectedBatchIds.length > 0 && (
-                <label>
-                  <input
-                    type="checkbox"
-                    checked={useSelection}
-                    onChange={(e) => setUseSelection(e.target.checked)}
-                  />
-                  Use only selected inventory
-                </label>
-              )}
-              <button
-                className="text-button"
-                disabled={libraryBusy}
-                onClick={() => {
-                  setQuery('');
-                  setCategory('');
-                  setCuisine('');
-                  setFilter('all');
-                  void loadLibrary(undefined, true);
-                }}
-              >
-                Refresh suggestions
-              </button>
-            </div>
-          </details>
-          <div className="library-online">
-            <div>
-              <strong>Explore more recipes</strong>
-              <p>Search another source with your dish or ingredients on hand.</p>
-            </div>
-            <div className="recipe-source-actions">
-              <Choice
-                label="Online recipe source"
-                value={onlineSource}
-                options={[
-                  { value: 'themealdb', label: 'TheMealDB · No setup' },
-                  { value: 'recipeapi', label: 'RecipeAPI.io · Free account' },
-                  { value: 'spoonacular', label: 'Spoonacular · Online discovery' },
-                ]}
-                onChange={(value) => {
-                  cancelOnlineSearch();
-                  setOnlineSource(value as typeof onlineSource);
-                  setProviderResults(null);
-                  setProviderSearch(null);
-                  setLibraryError('');
-                  setOnlineError('');
-                }}
-              />
-              <button
-                className="button secondary"
-                disabled={onlineBusy}
-                onClick={() => {
-                  void loadOnlineRecipes();
-                }}
-              >
-                {onlineBusy ? 'Searching…' : 'More recipes online'}
-              </button>
-            </div>
-            {onlineSource !== 'themealdb' && (
-              <div className="recipe-source-note">
-                <span>
-                  {
-                    RECIPE_PROVIDER_INFO.find((provider) => provider.id === onlineSource)
-                      ?.freeAllowance
-                  }
-                </span>
-                <button className="text-button" onClick={onConfigure}>
-                  Set up recipe sources
-                </button>
-              </div>
-            )}
-            {onlineError && (
-              <p className="recipe-source-error" role="alert">
-                {onlineError}
-              </p>
-            )}
-          </div>
-          {providerResults && (
-            <section
-              className="provider-result-section"
-              aria-label={`${RECIPE_PROVIDER_INFO.find((provider) => provider.id === providerResults.provider)?.name} search results`}
-            >
-              <div className="provider-results-heading">
-                <div>
-                  <h3>
-                    From{' '}
-                    {
-                      RECIPE_PROVIDER_INFO.find(
-                        (provider) => provider.id === providerResults.provider,
-                      )?.name
-                    }
-                  </h3>
-                  <p>
-                    {providerResults.recipes.length}{' '}
-                    {providerResults.recipes.length === 1 ? 'recipe' : 'recipes'} · Compared with
-                    your kitchen
-                  </p>
-                </div>
-                <button
-                  className="text-button"
-                  onClick={() => {
-                    cancelOnlineSearch();
-                    setProviderResults(null);
-                  }}
-                >
-                  Clear results
-                </button>
-              </div>
-              {providerResults.warnings.map((warning) => (
-                <p className="field-note" key={warning}>
-                  {warning}
-                </p>
-              ))}
-              <div className="recipe-grid">
-                {providerMatches.map((item) =>
-                  providerResults.storage === 'personal' ? (
-                    <RecipeCard
-                      key={item.recipe.id}
-                      recipe={item.recipe}
-                      inventory={relevant}
-                      saved={saved.some((recipe) => recipe.id === item.recipe.id)}
-                      onOpen={() => {
-                        setDetail(item.recipe);
-                        setDetailServings(item.recipe.servings ? String(item.recipe.servings) : '');
-                      }}
-                      onSave={() => openEditor(item.recipe)}
-                    />
-                  ) : (
-                    <article className="recipe-discovery-card" key={item.recipe.id}>
-                      <span className={`match-badge ${item.status}`}>{labels[item.status]}</span>
-                      <h3>{item.recipe.title}</h3>
-                      <p>
-                        {item.missingCount
-                          ? `${item.missingCount} ingredients short`
-                          : `${item.matchedCount} ingredients on hand`}
-                        {item.uncertainCount ? ' · Check amounts' : ''}
-                      </p>
-                      {item.recipe.source.attribution && (
-                        <small>{item.recipe.source.attribution}</small>
-                      )}
-                      {safeLink(item.recipe.source.url) && (
-                        <a
-                          className="button secondary"
-                          href={item.recipe.source.url}
-                          target="_blank"
-                          rel="noreferrer"
-                        >
-                          Open original recipe <ExternalLink size={16} />
-                        </a>
-                      )}
-                    </article>
-                  ),
-                )}
-              </div>
-              {!providerResults.recipes.length && (
-                <p className="settings-note">
-                  No readable recipes found. Try another dish or ingredient.
-                </p>
-              )}
-              {providerResults.hasMore && (
-                <div className="library-more">
-                  <button
-                    className="button secondary"
-                    disabled={onlineBusy}
-                    onClick={() => {
-                      void loadOnlineRecipes(true);
-                    }}
-                  >
-                    {onlineBusy ? 'Searching…' : 'Next recipes from this source'}
-                  </button>
-                </div>
-              )}
-              {providerResults.provider === 'spoonacular' && (
-                <a
-                  className="field-note"
-                  href="https://spoonacular.com/food-api"
-                  target="_blank"
-                  rel="noreferrer"
-                >
-                  Powered by Spoonacular · Temporary online discovery
-                </a>
-              )}
-            </section>
-          )}
-          {libraryBusy && (
-            <p role="status" className="settings-note">
-              Opening your cookbook…
-            </p>
-          )}
-          {libraryError && (
-            <p role="alert" className="library-error">
-              {libraryError}{' '}
-              {!localCatalog.length && (
-                <button
-                  className="text-button"
-                  onClick={() => {
-                    void loadLibrary();
-                  }}
-                >
-                  Retry cookbook
-                </button>
-              )}
-            </p>
-          )}
-          <div className="library-results" role="status" aria-live="polite">
-            <span>
-              Showing {Math.min(visibleCount, matches.length).toLocaleString()} of{' '}
-              {matches.length.toLocaleString()} recipes
-              {submittedQuery ? ` for “${submittedQuery}”` : ''}
-            </span>
-            {(submittedQuery || category || cuisine || filter !== 'all') && (
-              <button
-                className="text-button"
-                onClick={() => {
-                  setQuery('');
-                  setSubmittedQuery('');
-                  setCategory('');
-                  setCuisine('');
-                  setFilter('all');
-                  setVisibleCount(RECIPE_PAGE_SIZE);
-                  onlineRequest.current++;
-                  setOnlineBusy(false);
-                }}
-              >
-                Clear filters
-              </button>
-            )}
-          </div>
-          <div className="recipe-grid">
-            {matches.slice(0, visibleCount).map((item) => (
-              <RecipeCard
-                key={item.recipe.id}
-                recipe={item.recipe}
-                inventory={relevant}
-                saved={saved.some((r) => r.id === item.recipe.id)}
-                onOpen={() => {
-                  setDetail(item.recipe);
-                  setDetailServings(item.recipe.servings ? String(item.recipe.servings) : '');
-                }}
-                onSave={() => openEditor(item.recipe)}
-              />
-            ))}
-          </div>
-          {visibleCount < matches.length && (
-            <div className="library-more">
-              <button
-                className="button primary"
-                onClick={() => setVisibleCount((count) => count + RECIPE_PAGE_SIZE)}
-              >
-                Load more recipes
-              </button>
-              <small>{(matches.length - visibleCount).toLocaleString()} more to explore</small>
-            </div>
-          )}
-          {!libraryBusy && !matches.length && (
-            <div className="empty-state compact">
-              <BookOpen size={36} />
-              <h2>
-                {filter === 'saved' ? 'Your favorites start here.' : 'Let’s broaden the search.'}
-              </h2>
-              <p>
-                {filter === 'saved'
-                  ? 'Save something you like, import a recipe, or add your own.'
-                  : 'Try a dish or ingredient name, clear the filters, or ask Gemini for a variation.'}
-              </p>
-              <button
-                className="button secondary"
-                onClick={() => {
-                  setCategory('');
-                  setCuisine('');
-                  setFilter('all');
-                  void loadLibrary(undefined, true);
-                }}
-              >
-                Browse the cookbook
-              </button>
-            </div>
-          )}
+          <RecipeBrowser
+            inventory={inventory}
+            relevant={relevant}
+            selectedBatchIds={selectedBatchIds}
+            useSelection={useSelection}
+            onUseSelectionChange={setUseSelection}
+            onOpen={(recipe) => {
+              setDetail(recipe);
+              setDetailServings(recipe.servings ? String(recipe.servings) : '');
+            }}
+            onSave={(recipe) => openEditor(recipe)}
+            onImport={() => {
+              setImportText('');
+              setImportUrl('');
+              setMedia(null);
+              setImportOpen(true);
+            }}
+            onNew={() => openEditor(blankRecipe())}
+            onConfigure={onConfigure}
+            savedReveal={savedReveal}
+            onSavedRevealHandled={savedRevealHandled}
+          />
           <p className="footnote">
             Built-in recipes adapted from{' '}
             <a
@@ -1083,11 +464,8 @@ export function KitchenHub({
             >
               CC BY-SA 4.0
             </a>
-            . Additional recipes from{' '}
-            <a href="https://www.themealdb.com" target="_blank" rel="noreferrer">
-              TheMealDB
-            </a>
-            . Source links stay with saved recipes. Unknown amounts and yields stay flagged.
+            . Source links and attribution stay with saved recipes. Unknown amounts and yields stay
+            flagged.
           </p>
         </>
       )}

@@ -376,8 +376,10 @@ test('searches online recipes, compares quantities, and shows cooking steps', as
   });
   await addItem(page, 'Chicken breast', '500', '', '2026-01-01', 'g');
   await navigate(page, 'Recipes');
+  await page.getByRole('combobox', { name: 'Recipe source', exact: true }).click();
+  await page.getByRole('option', { name: 'TheMealDB', exact: true }).click();
   await page.getByRole('textbox', { name: 'Find recipes', exact: true }).fill('Weeknight chicken');
-  await page.getByRole('button', { name: 'More recipes online', exact: true }).click();
+  await page.getByRole('button', { name: 'Search TheMealDB', exact: true }).click();
   const card = page
     .locator('.recipe-card')
     .filter({ has: page.getByRole('heading', { name: 'Weeknight chicken', exact: true }) });
@@ -472,7 +474,7 @@ test('browses the real bundled cookbook, loads more, and finds a familiar recipe
   test.setTimeout(60_000);
   await navigate(page, 'Recipes');
   await expect(page.locator('.library-intro')).toContainText(/\d[\d,]* built-in recipes/);
-  const recipes = page.locator('.kitchen-hub > .recipe-grid .recipe-card');
+  const recipes = page.locator('.kitchen-hub .recipe-grid .recipe-card');
   await expect(recipes).toHaveCount(24);
   const firstPage = await recipes.locator('h3').allTextContents();
   await page.getByRole('button', { name: 'Load more recipes', exact: true }).click();
@@ -509,10 +511,15 @@ test('keeps local browsing during provider failure and saves licensed recipes in
   await page.route('https://www.themealdb.com/api/**', (route) => route.abort());
   await addItem(page, 'Rice', '50', '', '2026-01-01', 'g');
   await navigate(page, 'Recipes');
-  const recipes = page.locator('.kitchen-hub > .recipe-grid .recipe-card');
+  const recipes = page.locator('.kitchen-hub .recipe-grid .recipe-card');
   await expect(recipes).toHaveCount(24);
-  await page.getByRole('button', { name: 'More recipes online', exact: true }).click();
-  await expect(page.locator('.library-error')).toContainText('unavailable');
+  await page.getByRole('combobox', { name: 'Recipe source', exact: true }).click();
+  await page.getByRole('option', { name: 'TheMealDB', exact: true }).click();
+  await page.getByRole('button', { name: 'Search TheMealDB', exact: true }).click();
+  await expect(page.getByRole('alert')).toContainText('unavailable');
+  await expect(recipes).toHaveCount(0);
+  await page.getByRole('combobox', { name: 'Recipe source', exact: true }).click();
+  await page.getByRole('option', { name: 'Your cookbook', exact: true }).click();
   await expect(recipes).toHaveCount(24);
   await page.getByRole('button', { name: 'Load more recipes', exact: true }).click();
   await expect(recipes).toHaveCount(48);
@@ -528,8 +535,6 @@ test('keeps local browsing during provider failure and saves licensed recipes in
   await page.getByRole('button', { name: 'Clear filters', exact: true }).click();
   await expect(recipes).toHaveCount(24);
   await page.getByRole('textbox', { name: 'Find recipes', exact: true }).fill('Rice dinner 01');
-  await expect(recipes).toHaveCount(24);
-  await page.getByRole('button', { name: 'Search library', exact: true }).click();
   await expect(recipes).toHaveCount(1);
   await recipes.first().getByRole('button', { name: 'View recipe', exact: true }).click();
   const detail = page.getByRole('dialog', { name: 'Rice dinner 01', exact: true });
@@ -564,7 +569,9 @@ test('keeps local browsing during provider failure and saves licensed recipes in
   await expect(page.getByRole('heading', { name: 'Rice dinner 01', exact: true })).toBeVisible();
 });
 
-test('ignores an old online recipe search after a newer local search', async ({ page }) => {
+test('ignores an old online recipe search after returning to the local cookbook', async ({
+  page,
+}) => {
   await mockCookbook(page);
   let release: () => void = () => {};
   const delayed = new Promise<void>((resolve) => {
@@ -573,6 +580,10 @@ test('ignores an old online recipe search after a newer local search', async ({ 
   let requested: () => void = () => {};
   const started = new Promise<void>((resolve) => {
     requested = resolve;
+  });
+  let fulfilled: () => void = () => {};
+  const finished = new Promise<void>((resolve) => {
+    fulfilled = resolve;
   });
   await page.route('https://www.themealdb.com/api/**', async (route) => {
     requested();
@@ -592,23 +603,24 @@ test('ignores an old online recipe search after a newer local search', async ({ 
         ],
       }),
     });
+    fulfilled();
   });
   await navigate(page, 'Recipes');
   await expect(page.locator('.recipe-card')).toHaveCount(24);
   const query = page.getByRole('textbox', { name: 'Find recipes', exact: true });
+  await page.getByRole('combobox', { name: 'Recipe source', exact: true }).click();
+  await page.getByRole('option', { name: 'TheMealDB', exact: true }).click();
   await query.fill('rice');
-  await page.getByRole('button', { name: 'More recipes online', exact: true }).click();
+  await page.getByRole('button', { name: 'Search TheMealDB', exact: true }).click();
   await started;
+  await page.getByRole('combobox', { name: 'Recipe source', exact: true }).click();
+  await page.getByRole('option', { name: 'Your cookbook', exact: true }).click();
   await query.fill('egg');
-  await page.getByRole('button', { name: 'Search library', exact: true }).click();
   await expect(page.locator('.recipe-card')).toHaveCount(20);
-  const lateResponse = page.waitForResponse((response) =>
-    response.url().includes('search.php?s=rice'),
-  );
   release();
-  await (await lateResponse).finished();
+  await finished;
   await page.getByRole('button', { name: 'Clear filters', exact: true }).click();
-  await expect(page.locator('.library-results')).toContainText('of 60 recipes');
+  await expect(page.locator('.library-results')).toContainText(/24.*60/);
   await expect(page.getByRole('heading', { name: 'Old rice search', exact: true })).toHaveCount(0);
 });
 

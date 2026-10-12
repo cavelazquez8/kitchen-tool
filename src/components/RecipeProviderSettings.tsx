@@ -108,8 +108,8 @@ export function RecipeProviderSettings({ onToast }: { onToast: (message: string)
             , replace your Worker code, and deploy. Keep your existing Gemini settings and secrets.
           </li>
           <li>
-            Return here and check recipe sources. In Recipes, choose RecipeAPI.io under Explore more
-            recipes and run a search.
+            Return here and check recipe sources. In Recipes, choose RecipeAPI.io in Recipe source
+            and press Search RecipeAPI.io.
           </li>
         </ol>
         <p className="field-note">

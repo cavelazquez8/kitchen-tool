@@ -22,7 +22,7 @@ async function navigate(page: Page, name: 'Recipes' | 'Inventory') {
   await page.getByRole('button', { name, exact: true }).filter({ visible: true }).first().click();
 }
 async function selectSource(page: Page, label: string) {
-  await page.getByRole('combobox', { name: 'Online recipe source', exact: true }).click();
+  await page.getByRole('combobox', { name: 'Recipe source', exact: true }).click();
   await page.getByRole('option', { name: label, exact: true }).click();
 }
 
@@ -87,15 +87,19 @@ test('saves a selected RecipeAPI recipe with attribution and loads another page'
   await page.goto('/');
   await navigate(page, 'Recipes');
   expect(queries).toHaveLength(0);
-  await selectSource(page, 'RecipeAPI.io · Free account');
+  await selectSource(page, 'RecipeAPI.io');
   await page.getByRole('textbox', { name: 'Find recipes', exact: true }).fill('soup');
-  await page.getByRole('button', { name: 'More recipes online', exact: true }).click();
+  await page.getByRole('button', { name: 'Search RecipeAPI.io', exact: true }).click();
   const results = page.getByRole('region', { name: 'RecipeAPI.io search results' });
   await expect(results.getByRole('heading', { name: 'Test-only carrot soup 1' })).toBeVisible();
   await results.getByRole('button', { name: 'Save Test-only carrot soup 1', exact: true }).click();
   const editor = page.getByRole('dialog', { name: 'Review your recipe' });
   await editor.getByRole('button', { name: 'Save recipe', exact: true }).click();
   await expect(editor).not.toBeVisible();
+  await expect(page.getByRole('combobox', { name: 'Recipe source', exact: true })).toHaveText(
+    'RecipeAPI.io',
+  );
+  await expect(results.getByRole('heading', { name: 'Test-only carrot soup 1' })).toBeVisible();
   const stored = await page.evaluate(() =>
     JSON.parse(localStorage.getItem('kitchen-wrapper.inventory.v1') ?? 'null'),
   );
@@ -114,12 +118,18 @@ test('saves a selected RecipeAPI recipe with attribution and loads another page'
   expect(backup.inventory.recipes[0].source.attribution).toBe('RecipeAPI.io · recipe 123');
   expect(backup.inventory.mealPlan[0].recipeId).toBe('recipeapi:1');
   await settings.getByRole('button', { name: 'Close', exact: true }).click();
-  await page.getByRole('button', { name: 'Next recipes from this source', exact: true }).click();
+  await page.getByRole('button', { name: 'Load more from RecipeAPI.io', exact: true }).click();
   await expect(results.getByRole('heading', { name: 'Test-only carrot soup 2' })).toBeVisible();
   expect(queries).toEqual([
     expect.objectContaining({ query: 'soup', page: 1 }),
     expect.objectContaining({ query: 'soup', page: 2 }),
   ]);
+  await page.getByRole('button', { name: 'Saved recipes', exact: true }).click();
+  await expect(page.getByRole('combobox', { name: 'Recipe source', exact: true })).toHaveText(
+    'Your cookbook',
+  );
+  await expect(page.locator('.kitchen-hub .recipe-grid .recipe-card')).toHaveCount(1);
+  await expect(page.getByRole('heading', { name: 'Test-only carrot soup 1' })).toBeVisible();
 });
 
 test('keeps Spoonacular discovery out of local data and expires it within an hour', async ({
@@ -158,9 +168,9 @@ test('keeps Spoonacular discovery out of local data and expires it within an hou
   await page.goto('/');
   await navigate(page, 'Recipes');
   expect(searches).toBe(0);
-  await selectSource(page, 'Spoonacular · Online discovery');
+  await selectSource(page, 'Spoonacular');
   await page.getByRole('textbox', { name: 'Find recipes', exact: true }).fill('soup');
-  await page.getByRole('button', { name: 'More recipes online', exact: true }).click();
+  await page.getByRole('button', { name: 'Search Spoonacular', exact: true }).click();
   const results = page.getByRole('region', { name: 'Spoonacular search results' });
   await expect(results.getByRole('link', { name: 'Open original recipe' })).toHaveAttribute(
     'href',
@@ -174,13 +184,13 @@ test('keeps Spoonacular discovery out of local data and expires it within an hou
   ).not.toContain('spoonacular:123');
   await navigate(page, 'Inventory');
   await navigate(page, 'Recipes');
-  await expect(results).not.toBeVisible();
-  await selectSource(page, 'Spoonacular · Online discovery');
+  await expect(results.getByRole('link', { name: 'Open original recipe' })).toHaveCount(0);
+  await selectSource(page, 'Spoonacular');
   await page.getByRole('textbox', { name: 'Find recipes', exact: true }).fill('soup');
-  await page.getByRole('button', { name: 'More recipes online', exact: true }).click();
+  await page.getByRole('button', { name: 'Search Spoonacular', exact: true }).click();
   await expect(results).toBeVisible();
   await page.clock.fastForward(3600001);
-  await expect(results).not.toBeVisible();
+  await expect(results.getByRole('link', { name: 'Open original recipe' })).toHaveCount(0);
   expect(searches).toBe(2);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(
     true,

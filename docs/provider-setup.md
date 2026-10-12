@@ -9,7 +9,7 @@ Mise always keeps its built-in Wikibooks collection, your saved recipes, and The
 3. Open your existing `mise-gemini` Worker in Cloudflare. Add a **Secret** named `RECIPEAPI_API_KEY` containing that key.
 4. Add a **Text** variable named `RECIPEAPI_PLAN` with the value `free`.
 5. In Mise settings, download the current `mise-gemini-worker.js`. Replace the Worker's code with that file and deploy. Keep your existing Gemini key, pairing token, allowed origin, and model variables.
-6. Check the additional sources in Mise settings. “Available” means the Worker has a configured key; the first search verifies that the provider accepts it.
+6. Check the additional sources in Mise settings. “Available” means the Worker has a configured key; the first search verifies that the provider accepts it. In Recipes, choose RecipeAPI.io in **Recipe source** and press **Search RecipeAPI.io**.
 
 The documented free allowance is **500 requests per calendar month**, with up to **10 full recipes per request**. Mise sends one request per explicit search/page, with no hidden detail requests, automatic retries, paid scaling, imperial conversion, or translations. Metric quantities are converted locally when compatible units are known.
 
