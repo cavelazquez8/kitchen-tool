@@ -1,5 +1,13 @@
 import { importRecipeWebsite, WebsiteImportError } from './website';
 import {
+  createRecipeProviderState,
+  recipeProviderStatuses,
+  RecipeProviderError,
+  searchRecipeProvider,
+  type RecipeProviderEnv,
+} from './recipeProviders';
+import { parseRecipeProviderSearch } from '../../src/recipes/providers';
+import {
   AI_REPLY_SCHEMA,
   ALLOWED_MODELS,
   DEFAULT_MODEL,
@@ -11,7 +19,7 @@ import {
 } from '../../src/ai/protocol';
 import type { AiChatRequest, AiExtractRequest } from '../../src/ai/protocol';
 
-export interface Env {
+export interface Env extends RecipeProviderEnv {
   GEMINI_API_KEY: string;
   MISE_ACCESS_TOKEN: string;
   ALLOWED_ORIGIN: string;
@@ -366,6 +374,7 @@ export function createWorker(
   state: WorkerState = createWorkerState(),
 ) {
   const importState = createWorkerState();
+  const recipeProviderState = createRecipeProviderState();
   return {
     async fetch(request: Request, env: Env): Promise<Response> {
       const origin = allowedOrigin(request, env);
@@ -400,6 +409,8 @@ export function createWorker(
             'The Mise access token is missing or incorrect. Check AI connection settings.',
           );
         const path = new URL(request.url).pathname;
+        if (path === '/recipe-providers' && request.method === 'GET')
+          return json({ providers: recipeProviderStatuses(env) }, 200, origin);
         if (path === '/health' && request.method === 'GET') {
           const model = env.GEMINI_MODEL || DEFAULT_MODEL;
           if (!(ALLOWED_MODELS as readonly string[]).includes(model))
@@ -422,7 +433,7 @@ export function createWorker(
             origin,
           );
         }
-        if (!['/chat', '/extract', '/import'].includes(path))
+        if (!['/chat', '/extract', '/import', '/recipes/search'].includes(path))
           throw new HttpError(404, 'not_found', 'This endpoint does not exist.');
         if (request.method !== 'POST')
           throw new HttpError(405, 'method', 'This endpoint expects a POST request.');
@@ -439,6 +450,20 @@ export function createWorker(
         } catch (error) {
           if (error instanceof HttpError) throw error;
           throw new HttpError(400, 'invalid_request', 'The request is not valid JSON.');
+        }
+        if (path === '/recipes/search') {
+          const input = parseRecipeProviderSearch(body);
+          if (!input)
+            throw new HttpError(
+              400,
+              'invalid_request',
+              'Choose a supported recipe source and a shorter dish or ingredient search.',
+            );
+          return json(
+            await searchRecipeProvider(input, env, recipeProviderState, fetcher, now),
+            200,
+            origin,
+          );
         }
         if (path === '/import') {
           if (!isRecord(body) || typeof body.url !== 'string' || Object.keys(body).length !== 1)
@@ -463,6 +488,21 @@ export function createWorker(
             : extractContents(input as AiExtractRequest);
         return json(await generate(contents, env, state, fetcher, now), 200, origin);
       } catch (error) {
+        if (error instanceof RecipeProviderError)
+          return json(
+            {
+              error: {
+                code: error.code,
+                message: error.message,
+                ...(error.retryAfterSeconds !== undefined
+                  ? { retryAfterSeconds: error.retryAfterSeconds }
+                  : {}),
+              },
+            },
+            error.status,
+            origin,
+            error.retryAfterSeconds,
+          );
         if (error instanceof WebsiteImportError)
           return json(
             { error: { code: error.code, message: error.message } },

@@ -166,10 +166,10 @@ async function readConnectionResponse(response: Response): Promise<string> {
   }
 }
 
-async function request(
+export async function requestMiseWorker(
   connection: GeminiConnection,
   path: string,
-  body?: AiChatRequest | AiExtractRequest | { url: string },
+  body?: unknown,
   signal?: AbortSignal,
 ): Promise<unknown> {
   const configured = normalizeGeminiConnection(connection);
@@ -250,7 +250,7 @@ export async function checkGeminiConnection(
   connection: GeminiConnection,
   signal?: AbortSignal,
 ): Promise<{ ok: true; model: string }> {
-  const result = await request(connection, '/health', undefined, signal);
+  const result = await requestMiseWorker(connection, '/health', undefined, signal);
   if (!isRecord(result) || result.ok !== true || typeof result.model !== 'string')
     throw new GeminiError('invalid_response', 'This address did not respond as a Mise Worker.');
   return { ok: true, model: result.model };
@@ -267,7 +267,7 @@ export async function sendGeminiChat(
       'invalid_request',
       'Use a shorter message or conversation. Clear older messages if needed.',
     );
-  const result = parseAiReply(await request(connection, '/chat', validated, signal));
+  const result = parseAiReply(await requestMiseWorker(connection, '/chat', validated, signal));
   if (!result)
     throw new GeminiError('invalid_response', 'Gemini returned an answer Mise cannot safely save.');
   return result;
@@ -284,7 +284,7 @@ export async function extractGeminiRecipe(
       'invalid_request',
       'Add recipe text or a supported image/video under 1 MB. A link alone cannot be extracted.',
     );
-  const result = parseAiReply(await request(connection, '/extract', validated, signal));
+  const result = parseAiReply(await requestMiseWorker(connection, '/extract', validated, signal));
   if (!result)
     throw new GeminiError('invalid_response', 'Gemini returned a recipe Mise cannot safely save.');
   return result;
@@ -317,7 +317,9 @@ export async function importGeminiRecipeUrl(
 ): Promise<AiReply> {
   if (!url.trim() || url.length > 2000)
     throw new GeminiError('import_url', 'Enter a complete recipe website link.');
-  const result = parseAiReply(await request(connection, '/import', { url: url.trim() }, signal));
+  const result = parseAiReply(
+    await requestMiseWorker(connection, '/import', { url: url.trim() }, signal),
+  );
   if (!result || !result.recipes.length)
     throw new GeminiError(
       'invalid_response',
