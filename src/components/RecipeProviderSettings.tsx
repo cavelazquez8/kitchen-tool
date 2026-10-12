@@ -1,17 +1,31 @@
 import { useEffect, useRef, useState } from 'react';
 import { BookOpen, Check, ExternalLink } from 'lucide-react';
 import { readGeminiConnection } from '../ai/client';
-import { queryRecipeProviders } from '../recipes/providerClient';
-import { RECIPE_PROVIDER_INFO, type RecipeProviderStatus } from '../recipes/providers';
+import { queryRecipeProviders, searchRecipeProviders } from '../recipes/providerClient';
+import {
+  RECIPE_PROVIDER_INFO,
+  type RecipeProviderId,
+  type RecipeProviderStatus,
+} from '../recipes/providers';
 import './recipeProviders.css';
+
+type SearchCheck = {
+  state: 'pending' | 'success' | 'empty' | 'error';
+  message: string;
+  warnings?: string[];
+};
 
 export function RecipeProviderSettings({ onToast }: { onToast: (message: string) => void }) {
   const [providers, setProviders] = useState<RecipeProviderStatus[] | null>(null);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
+  const [searchChecks, setSearchChecks] = useState<Partial<Record<RecipeProviderId, SearchCheck>>>(
+    {},
+  );
   const controller = useRef<AbortController | null>(null);
   useEffect(() => () => controller.current?.abort(), []);
   async function check() {
+    if (controller.current) return;
     const connection = readGeminiConnection();
     if (!connection) {
       setMessage(
@@ -27,11 +41,71 @@ export function RecipeProviderSettings({ onToast }: { onToast: (message: string)
       const status = await queryRecipeProviders(connection, next.signal);
       if (next.signal.aborted) return;
       setProviders(status);
-      setMessage('Configuration checked. Your first search verifies each API key.');
+      setSearchChecks({});
+      setMessage(
+        'Setup checked without calling the recipe APIs. Use Test search to verify each source with a small request from your free allowance.',
+      );
       onToast('Recipe source settings checked.');
     } catch (error) {
       if (!next.signal.aborted)
         setMessage(error instanceof Error ? error.message : 'Could not check recipe sources.');
+    } finally {
+      if (!next.signal.aborted) setBusy(false);
+      if (controller.current === next) controller.current = null;
+    }
+  }
+  async function testSearch(provider: RecipeProviderId) {
+    if (controller.current) return;
+    const connection = readGeminiConnection();
+    if (!connection) {
+      setSearchChecks((current) => ({
+        ...current,
+        [provider]: {
+          state: 'error',
+          message: 'Connect your Worker in Gemini settings, then test this source again.',
+        },
+      }));
+      return;
+    }
+    const next = new AbortController();
+    controller.current = next;
+    setBusy(true);
+    setSearchChecks((current) => ({
+      ...current,
+      [provider]: { state: 'pending', message: 'Searching for “chicken”…' },
+    }));
+    try {
+      const result = await searchRecipeProviders(
+        connection,
+        { provider, query: 'chicken', page: 1, limit: 1 },
+        next.signal,
+      );
+      if (next.signal.aborted) return;
+      const count = result.recipes.length;
+      setSearchChecks((current) => ({
+        ...current,
+        [provider]: {
+          state: count ? 'success' : 'empty',
+          message: count
+            ? `Search verified · ${count} readable recipe${count === 1 ? '' : 's'} returned.`
+            : result.warnings.some((warning) => warning.includes('omitted'))
+              ? 'Search completed, but no readable recipes were returned. See the source response below.'
+              : 'Search completed · No recipes returned for “chicken”. Try another dish in Recipes.',
+          warnings: result.warnings,
+        },
+      }));
+    } catch (error) {
+      if (!next.signal.aborted)
+        setSearchChecks((current) => ({
+          ...current,
+          [provider]: {
+            state: 'error',
+            message:
+              error instanceof Error
+                ? `Search failed · ${error.message}`
+                : 'Search failed · Could not search this recipe source.',
+          },
+        }));
     } finally {
       if (!next.signal.aborted) setBusy(false);
       if (controller.current === next) controller.current = null;
@@ -53,23 +127,48 @@ export function RecipeProviderSettings({ onToast }: { onToast: (message: string)
       <div className="provider-status-list">
         {RECIPE_PROVIDER_INFO.map((provider) => {
           const status = providers?.find((item) => item.id === provider.id);
+          const searchCheck = searchChecks[provider.id];
           return (
-            <div className="provider-status-row" key={provider.id}>
-              <div>
-                <strong>{provider.name}</strong>
-                <small>{provider.freeAllowance}</small>
+            <div key={provider.id}>
+              <div className="provider-status-row">
+                <div>
+                  <strong>{provider.name}</strong>
+                  <small>{provider.freeAllowance}</small>
+                  {status?.configured && (
+                    <button
+                      className="text-button"
+                      aria-label={`Test ${provider.name} search`}
+                      disabled={busy}
+                      onClick={() => void testSearch(provider.id)}
+                    >
+                      {searchCheck?.state === 'pending' ? 'Testing search…' : 'Test search'}
+                    </button>
+                  )}
+                </div>
+                <span className={status?.configured ? 'provider-configured' : ''}>
+                  {status?.configured ? (
+                    <>
+                      <Check size={14} /> Configured
+                    </>
+                  ) : status ? (
+                    'Needs setup'
+                  ) : (
+                    'Not checked'
+                  )}
+                </span>
               </div>
-              <span className={status?.configured ? 'provider-configured' : ''}>
-                {status?.configured ? (
-                  <>
-                    <Check size={14} /> Available
-                  </>
-                ) : status ? (
-                  'Needs setup'
-                ) : (
-                  'Not checked'
-                )}
-              </span>
+              {searchCheck && (
+                <div
+                  className="settings-note"
+                  role={searchCheck.state === 'error' ? 'alert' : 'status'}
+                  aria-label={`${provider.name} search check`}
+                >
+                  <p>{searchCheck.message}</p>
+                  {searchCheck.warnings?.map((warning) => (
+                    <p key={warning}>{warning}</p>
+                  ))}
+                </div>
+              )}
             </div>
           );
         })}
@@ -81,7 +180,9 @@ export function RecipeProviderSettings({ onToast }: { onToast: (message: string)
           void check();
         }}
       >
-        {busy ? 'Checking sources…' : 'Check recipe sources'}
+        {busy && !Object.values(searchChecks).some((check) => check?.state === 'pending')
+          ? 'Checking sources…'
+          : 'Check recipe sources'}
       </button>
       {message && (
         <p className="settings-note" role="status">

@@ -153,6 +153,10 @@ export function KitchenHub({
   const [editingNotes, setEditingNotes] = useState<readonly string[]>([]);
   const [clearChatOpen, setClearChatOpen] = useState(false);
   const [detail, setDetail] = useState<Recipe | null>(null);
+  const [recipeToDelete, setRecipeToDelete] = useState<Recipe | null>(null);
+  const [deletingRecipe, setDeletingRecipe] = useState(false);
+  const [recipeDeleteError, setRecipeDeleteError] = useState('');
+  const deletionPending = useRef(false);
   const [detailServings, setDetailServings] = useState('');
   const [finishing, setFinishing] = useState<{ recipe: Recipe; servings?: number } | null>(null);
   const [importOpen, setImportOpen] = useState(false);
@@ -243,6 +247,57 @@ export function KitchenHub({
     );
     setDetail((current) => (current?.id === recipe.id ? recipe : current));
     if (reveal) setSavedReveal(recipe);
+  }
+
+  async function deleteRecipe(recipe: Recipe) {
+    if (deletionPending.current) return;
+    deletionPending.current = true;
+    setDeletingRecipe(true);
+    setRecipeDeleteError('');
+    setError('');
+    try {
+      await mutate((state) => {
+        const savedRecipe = state.recipes?.find((item) => item.id === recipe.id);
+        if (
+          !savedRecipe ||
+          savedRecipe.source.type !== 'imported' ||
+          !canPersistProviderRecipe(savedRecipe)
+        )
+          throw new Error(
+            'This recipe is no longer a saved import. Close this review and try again.',
+          );
+        return {
+          ...state,
+          recipes: (state.recipes ?? []).filter((item) => item.id !== recipe.id),
+          ...(state.mealPlan
+            ? { mealPlan: state.mealPlan.filter((item) => item.recipeId !== recipe.id) }
+            : {}),
+        };
+      }, 'Recipe deleted.');
+      setDetail((current) => (current?.id === recipe.id ? null : current));
+      setSavedReveal((current) => (current?.id === recipe.id ? null : current));
+      setChatRecipe((current) => (current?.id === recipe.id ? null : current));
+      setCandidates((current) => current.filter((item) => item.id !== recipe.id));
+      setAwake(false);
+      setTimers((current) =>
+        Object.fromEntries(
+          Object.entries(current).filter(([key]) => !key.startsWith(`${recipe.id}:`)),
+        ),
+      );
+      setMinutes((current) =>
+        Object.fromEntries(
+          Object.entries(current).filter(([key]) => !key.startsWith(`${recipe.id}:`)),
+        ),
+      );
+      setRecipeToDelete(null);
+    } catch (error) {
+      setRecipeDeleteError(
+        error instanceof Error ? error.message : 'Could not delete this recipe.',
+      );
+    } finally {
+      deletionPending.current = false;
+      setDeletingRecipe(false);
+    }
   }
 
   function openEditor(recipe: Recipe, notes: readonly string[] = []) {
@@ -883,6 +938,20 @@ export function KitchenHub({
                   : 'Add to meal plan'}
               </button>
             </div>
+            {detail.source.type === 'imported' &&
+              canPersistProviderRecipe(detail) &&
+              saved.some((recipe) => recipe.id === detail.id) && (
+                <button
+                  className="button destructive full-width"
+                  onClick={() => {
+                    setRecipeDeleteError('');
+                    setRecipeToDelete(detail);
+                  }}
+                >
+                  <Trash2 size={17} />
+                  Delete recipe
+                </button>
+              )}
             {detail.servings ? (
               <label className="recipe-servings">
                 Cooking for
@@ -1047,6 +1116,42 @@ export function KitchenHub({
             </button>
           </>
         )}
+      </Modal>
+      <Modal
+        open={!!recipeToDelete}
+        onClose={() => {
+          if (!deletionPending.current) setRecipeToDelete(null);
+        }}
+        title={recipeToDelete ? `Delete “${recipeToDelete.title}”?` : 'Delete recipe?'}
+        description={
+          recipeToDelete && plan.some((item) => item.recipeId === recipeToDelete.id)
+            ? 'This removes the imported recipe from your library and meal plan.'
+            : 'This removes the imported recipe from your library.'
+        }
+      >
+        {recipeDeleteError && (
+          <p className="form-error" role="alert">
+            {recipeDeleteError}
+          </p>
+        )}
+        <div className="form-footer">
+          <button
+            className="button secondary"
+            disabled={deletingRecipe}
+            onClick={() => setRecipeToDelete(null)}
+          >
+            Keep recipe
+          </button>
+          <button
+            className="button destructive"
+            disabled={deletingRecipe}
+            onClick={() => {
+              if (recipeToDelete) void deleteRecipe(recipeToDelete);
+            }}
+          >
+            {deletingRecipe ? 'Deleting…' : 'Delete recipe'}
+          </button>
+        </div>
       </Modal>
       <Modal
         open={importOpen}

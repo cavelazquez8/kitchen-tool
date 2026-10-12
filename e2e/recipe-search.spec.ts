@@ -443,3 +443,237 @@ test('discards provider responses after typing a new query or choosing another s
     page.getByRole('button', { name: 'Load more from RecipeAPI.io', exact: true }),
   ).toHaveCount(0);
 });
+
+for (const provider of [
+  { id: 'recipeapi', name: 'RecipeAPI.io', storage: 'personal' },
+  { id: 'spoonacular', name: 'Spoonacular', storage: 'session' },
+] as const) {
+  test(`distinguishes a successful empty ${provider.name} search from an initial or failed search`, async ({
+    page,
+  }) => {
+    let requests = 0;
+    await page.route('https://mise.example.workers.dev/recipes/search', async (route) => {
+      requests++;
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          provider: provider.id,
+          storage: provider.storage,
+          recipes: [],
+          page: 1,
+          hasMore: false,
+          warnings: [],
+          ...(provider.storage === 'session' ? { expiresAt: Date.now() + 3600000 } : {}),
+        }),
+      });
+    });
+    await navigateRecipes(page);
+    await choose(page, 'Recipe source', provider.name);
+    await expect(
+      page.getByRole('heading', { name: `Ready to search ${provider.name}.`, exact: true }),
+    ).toBeVisible();
+    await page.getByRole('textbox', { name: 'Find recipes', exact: true }).fill('unusual dish');
+    await page.getByRole('button', { name: `Search ${provider.name}`, exact: true }).click();
+    await expect(
+      page.getByRole('heading', { name: `No recipes found on ${provider.name}.`, exact: true }),
+    ).toBeVisible();
+    await expect(page.locator('.recipe-loaded-note').first()).toHaveText(
+      '0 recipes loaded · 0 match your filters.',
+    );
+    await expect(
+      page.getByRole('heading', { name: 'Search couldn’t finish.', exact: true }),
+    ).toHaveCount(0);
+    await expect(
+      page.getByRole('button', { name: 'Show all loaded recipes', exact: true }),
+    ).toHaveCount(0);
+    expect(requests).toBe(1);
+  });
+
+  test(`reports a failed ${provider.name} search without presenting it as no matches`, async ({
+    page,
+  }) => {
+    await page.route('https://mise.example.workers.dev/recipes/search', async (route) => {
+      await route.fulfill({
+        status: 503,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          error: {
+            code: 'provider_unavailable',
+            message: `${provider.name} could not finish this search. Try again later.`,
+          },
+        }),
+      });
+    });
+    await navigateRecipes(page);
+    await choose(page, 'Recipe source', provider.name);
+    await page.getByRole('textbox', { name: 'Find recipes', exact: true }).fill('rice');
+    await page.getByRole('button', { name: `Search ${provider.name}`, exact: true }).click();
+    await expect(
+      page.getByRole('heading', { name: 'Search couldn’t finish.', exact: true }),
+    ).toBeVisible();
+    await expect(page.getByRole('alert')).toContainText(
+      `${provider.name} could not finish this search. Try again later.`,
+    );
+    await expect(
+      page.getByRole('heading', { name: `No recipes found on ${provider.name}.`, exact: true }),
+    ).toHaveCount(0);
+    await expect(
+      page.getByRole('heading', { name: `Ready to search ${provider.name}.`, exact: true }),
+    ).toHaveCount(0);
+    await expect(page.locator('.recipe-grid article')).toHaveCount(0);
+  });
+}
+
+test('reveals recipes hidden by readiness without changing selected inventory or repeating the search', async ({
+  page,
+}) => {
+  const requests: { provider: string; query: string; ingredients?: string[] }[] = [];
+  await page.route('https://mise.example.workers.dev/recipes/search', async (route) => {
+    requests.push(route.request().postDataJSON());
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        provider: 'recipeapi',
+        storage: 'personal',
+        recipes: [makeRecipe('recipeapi:700', 'Remote egg dish', ['Eggs'])],
+        page: 1,
+        hasMore: false,
+        warnings: [],
+      }),
+    });
+  });
+  await page.getByRole('checkbox', { name: 'Select Rice in Pantry', exact: true }).check();
+  await navigateRecipes(page);
+  await page.getByText('Refine recipes', { exact: true }).click();
+  await page.getByRole('checkbox', { name: 'Use only selected inventory', exact: true }).check();
+  await page.getByRole('button', { name: 'Ready to cook', exact: true }).click();
+  await choose(page, 'Recipe source', 'RecipeAPI.io');
+  await page.getByRole('button', { name: 'Search RecipeAPI.io', exact: true }).click();
+  await expect(
+    page.getByRole('heading', { name: 'Your filters hide these recipes.', exact: true }),
+  ).toBeVisible();
+  await expect(page.locator('.recipe-loaded-note').first()).toHaveText(
+    '1 recipes loaded · 0 match your filters.',
+  );
+  await expectCount(page, 0);
+  await page.getByRole('button', { name: 'Show all loaded recipes', exact: true }).click();
+  await expectCount(page, 1);
+  await expect(cards(page)).toContainText('Remote egg dish');
+  await expect(cards(page)).toContainText('Almost ready');
+  await expect(
+    page.getByRole('checkbox', { name: 'Use only selected inventory', exact: true }),
+  ).toBeChecked();
+  await expect(page.locator('.recipe-loaded-note').first()).toHaveText(
+    '1 recipes loaded · 1 match your filters.',
+  );
+  expect(requests).toEqual([
+    expect.objectContaining({ provider: 'recipeapi', query: '', ingredients: ['rice'] }),
+  ]);
+});
+
+test('explains recipe conversion failures returned by an older Worker instead of calling them no matches', async ({
+  page,
+}) => {
+  const warning = '10 results were omitted because their recipe details could not be read.';
+  await page.route('https://mise.example.workers.dev/recipes/search', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        provider: 'recipeapi',
+        storage: 'personal',
+        recipes: [],
+        page: 1,
+        hasMore: false,
+        warnings: [warning],
+      }),
+    });
+  });
+  await navigateRecipes(page);
+  await choose(page, 'Recipe source', 'RecipeAPI.io');
+  await page.getByRole('textbox', { name: 'Find recipes', exact: true }).fill('rice');
+  await page.getByRole('button', { name: 'Search RecipeAPI.io', exact: true }).click();
+  await expect(
+    page.getByRole('heading', { name: 'Recipe details couldn’t be read.', exact: true }),
+  ).toBeVisible();
+  await expect(page.getByText(warning, { exact: true })).toBeVisible();
+  await expect(
+    page.getByRole('heading', { name: 'No recipes found on RecipeAPI.io.', exact: true }),
+  ).toHaveCount(0);
+  await expect(
+    page.getByRole('heading', { name: 'Your filters hide these recipes.', exact: true }),
+  ).toHaveCount(0);
+});
+
+test('searches Spoonacular with one chosen ingredient while matching the whole inventory and quantities', async ({
+  page,
+}) => {
+  const requests: { provider: string; query: string; ingredients?: string[] }[] = [];
+  const fullInventoryRecipe = makeRecipe('spoonacular:801', 'Remote rice carrot eggs', [
+    'Rice',
+    'Carrots',
+    'Eggs',
+  ]);
+  const shortRecipe = {
+    ...makeRecipe('spoonacular:802', 'Remote large rice dish', ['Rice']),
+    ingredients: [{ name: 'Rice', quantity: 600, unit: 'g' as const }],
+  };
+  await page.route('https://mise.example.workers.dev/recipes/search', async (route) => {
+    requests.push(route.request().postDataJSON());
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        provider: 'spoonacular',
+        storage: 'session',
+        recipes: [fullInventoryRecipe, shortRecipe].map((recipe) => ({
+          ...recipe,
+          source: {
+            type: 'imported',
+            name: 'Spoonacular',
+            url: `https://example.com/${recipe.id.replace(':', '-')}`,
+            attribution: 'Powered by Spoonacular',
+          },
+        })),
+        page: 1,
+        hasMore: false,
+        warnings: [],
+        expiresAt: Date.now() + 3600000,
+      }),
+    });
+  });
+  const inventoryBefore = await page.evaluate(() =>
+    localStorage.getItem('kitchen-wrapper.inventory.v1'),
+  );
+  await navigateRecipes(page);
+  await choose(page, 'Recipe source', 'Spoonacular');
+  await page.getByRole('combobox', { name: 'Start with ingredient', exact: true }).click();
+  await page.getByRole('option', { name: /^rice$/i }).click();
+  await page.getByRole('button', { name: 'Search Spoonacular', exact: true }).click();
+  const discoveryCards = page.locator('.recipe-discovery-card');
+  await expect(discoveryCards).toHaveCount(2);
+  await expect(discoveryCards.filter({ hasText: 'Remote rice carrot eggs' })).toContainText(
+    'Ready to cook',
+  );
+  await expect(discoveryCards.filter({ hasText: 'Remote rice carrot eggs' })).toContainText(
+    '3 ingredients on hand',
+  );
+  await expect(discoveryCards.filter({ hasText: 'Remote large rice dish' })).toContainText(
+    'Almost ready',
+  );
+  await expect(discoveryCards.filter({ hasText: 'Remote large rice dish' })).toContainText(
+    '1 ingredients short',
+  );
+  expect(requests).toEqual([
+    expect.objectContaining({ provider: 'spoonacular', query: '', ingredients: ['rice'] }),
+  ]);
+  await page.getByRole('button', { name: 'Ready to cook', exact: true }).click();
+  await expect(discoveryCards).toHaveCount(1);
+  await expect(discoveryCards).toContainText('Remote rice carrot eggs');
+  expect(requests).toHaveLength(1);
+  expect(await page.evaluate(() => localStorage.getItem('kitchen-wrapper.inventory.v1'))).toBe(
+    inventoryBefore,
+  );
+});

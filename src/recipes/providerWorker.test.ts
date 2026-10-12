@@ -221,4 +221,93 @@ describe('free recipe provider Worker endpoints', () => {
     ).rejects.toMatchObject({ code: 'provider_quota' });
     expect(fetcher).toHaveBeenCalledTimes(1);
   });
+
+  it('requests and reads the documented Spoonacular Complex Search ingredient groups', async () => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          results: [
+            {
+              id: 3,
+              title: 'Test-only garlic soup',
+              servings: 2,
+              usedIngredientCount: 1,
+              missedIngredientCount: 1,
+              usedIngredients: [
+                { name: 'Garlic', amount: 5, unit: 'cloves', original: '5-6 cloves garlic' },
+              ],
+              missedIngredients: [
+                { name: 'Olive oil', amount: 1, unit: 'tbsp', original: '1 tbsp olive oil' },
+              ],
+              unusedIngredients: [{ name: 'Milk', amount: 1, unit: 'cup', original: '1 cup milk' }],
+              analyzedInstructions: [],
+              instructions: '<p>Test-only: simmer the garlic.</p>',
+              sourceUrl: 'https://example.com/test-only',
+            },
+          ],
+          totalResults: 1,
+        }),
+      ),
+    );
+    const state = createRecipeProviderState();
+    const result = await searchRecipeProvider(
+      { ...input, provider: 'spoonacular', ingredients: ['Garlic'] },
+      env,
+      state,
+      fetcher,
+    );
+    expect(result.recipes[0].ingredients.map((ingredient) => ingredient.name)).toEqual([
+      'Garlic',
+      'Olive oil',
+    ]);
+    expect(result.recipes[0].ingredients[0].quantity).toBeNull();
+    expect(result.recipes[0].steps).toEqual(['Test-only: simmer the garlic.']);
+    const endpoint = new URL(String(fetcher.mock.calls[0][0]));
+    expect(endpoint.searchParams.get('fillIngredients')).toBe('true');
+    expect(endpoint.searchParams.get('ignorePantry')).toBe('false');
+    expect(endpoint.searchParams.get('addRecipeInformation')).toBe('true');
+    expect(endpoint.searchParams.get('addRecipeInstructions')).toBe('true');
+    expect(state.spoonacular.dailyPoints).toBeCloseTo(1.85);
+    expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+
+  it('distinguishes unreadable upstream recipes from a successful search with no matches', async () => {
+    const fetcher = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ data: [{ ...recipe, instructions: [] }] })),
+      )
+      .mockResolvedValueOnce(new Response(JSON.stringify({ data: [], meta: { last_page: 1 } })))
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ results: [{ id: 12, title: 'Test-only incomplete' }] })),
+      );
+    const worker = createWorker(fetcher);
+    const unreadable = await worker.fetch(request(), env);
+    expect(unreadable.status).toBe(502);
+    const error = await unreadable.json();
+    expect(error.error.code).toBe('provider_response');
+    expect(error.error.message).toContain('RecipeAPI.io returned 1 recipe');
+    expect(error.error.message).toContain('Update your Cloudflare Worker');
+    const empty = await worker.fetch(request(), env);
+    expect(empty.status).toBe(200);
+    expect(await empty.json()).toMatchObject({ recipes: [], hasMore: false });
+    const spoonacular = await worker.fetch(
+      request('/recipes/search', { ...input, provider: 'spoonacular' }),
+      env,
+    );
+    expect(spoonacular.status).toBe(502);
+    expect((await spoonacular.json()).error.message).toContain('Spoonacular returned 1 recipe');
+  });
+
+  it('reserves the complete Spoonacular search cost before reaching the free daily cap', async () => {
+    const now = Date.parse('2026-10-12T12:00:00Z');
+    const state = createRecipeProviderState();
+    state.spoonacular.day = Math.floor(now / 86400000);
+    state.spoonacular.dailyPoints = 48.2;
+    const fetcher = vi.fn<typeof fetch>();
+    await expect(
+      searchRecipeProvider({ ...input, provider: 'spoonacular' }, env, state, fetcher, () => now),
+    ).rejects.toMatchObject({ status: 429, code: 'provider_quota' });
+    expect(fetcher).not.toHaveBeenCalled();
+  });
 });

@@ -108,6 +108,14 @@
 .provider-status-row > .provider-configured {
   color: #a7d9a6;
 }
+.provider-status-row .text-button {
+  display: block;
+  min-height: 44px;
+  margin-top: 4px;
+}
+.recipe-provider-settings [role='alert'] {
+  color: #efbbb4;
+}
 .provider-setup-guide {
   margin-top: 1rem;
 }

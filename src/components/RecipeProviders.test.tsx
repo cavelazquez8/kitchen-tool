@@ -128,9 +128,177 @@ describe('optional recipe source UI', () => {
     const user = userEvent.setup();
     render(<RecipeProviderSettings onToast={vi.fn()} />);
     await user.click(screen.getByRole('button', { name: 'Check recipe sources' }));
-    expect(await screen.findByText('Available')).toBeVisible();
+    expect(await screen.findByText('Configured')).toBeVisible();
     expect(screen.getByText('Needs setup')).toBeVisible();
-    expect(screen.getByRole('status')).toHaveTextContent('first search verifies');
+    expect(screen.getByRole('status')).toHaveTextContent('without calling the recipe APIs');
+    expect(screen.getByRole('button', { name: 'Test RecipeAPI.io search' })).toBeEnabled();
+    expect(
+      screen.queryByRole('button', { name: 'Test Spoonacular search' }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('verifies a configured source only on request and reports readable recipes', async () => {
+    const recipe = recipeApiToRecipe({
+      id: 100,
+      name: 'Chicken soup',
+      ingredients: [{ name: 'Chicken', quantity: 100, unit: 'g' }],
+      instructions: ['Simmer.'],
+    })!;
+    const fetcher = vi.fn<typeof fetch>().mockImplementation(async (url) =>
+      String(url).endsWith('/recipe-providers')
+        ? new Response(
+            JSON.stringify({
+              providers: RECIPE_PROVIDER_INFO.map((provider) => ({
+                ...provider,
+                configured: true,
+              })),
+            }),
+          )
+        : new Response(
+            JSON.stringify({
+              provider: 'recipeapi',
+              storage: 'personal',
+              recipes: [recipe],
+              page: 1,
+              hasMore: false,
+              warnings: [],
+            }),
+          ),
+    );
+    vi.stubGlobal('fetch', fetcher);
+    const user = userEvent.setup();
+    render(<RecipeProviderSettings onToast={vi.fn()} />);
+    expect(fetcher).not.toHaveBeenCalled();
+    await user.click(screen.getByRole('button', { name: 'Check recipe sources' }));
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    await user.click(screen.getByRole('button', { name: 'Test RecipeAPI.io search' }));
+    expect(
+      await screen.findByRole('status', { name: 'RecipeAPI.io search check' }),
+    ).toHaveTextContent('Search verified · 1 readable recipe returned.');
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    expect(JSON.parse(String(fetcher.mock.calls[1][1]?.body))).toEqual({
+      provider: 'recipeapi',
+      query: 'chicken',
+      page: 1,
+      limit: 1,
+    });
+    expect(
+      screen.queryByRole('status', { name: 'Spoonacular search check' }),
+    ).not.toBeInTheDocument();
+    expect(common.update).not.toHaveBeenCalled();
+  });
+
+  it('keeps test-search results separate for each provider and distinguishes empty records', async () => {
+    const fetcher = vi.fn<typeof fetch>().mockImplementation(async (url, options) => {
+      if (String(url).endsWith('/recipe-providers'))
+        return new Response(
+          JSON.stringify({
+            providers: RECIPE_PROVIDER_INFO.map((provider) => ({ ...provider, configured: true })),
+          }),
+        );
+      const provider = JSON.parse(String(options?.body)).provider;
+      return new Response(
+        JSON.stringify({
+          provider,
+          storage: provider === 'recipeapi' ? 'personal' : 'session',
+          recipes: [],
+          page: 1,
+          hasMore: false,
+          warnings:
+            provider === 'recipeapi'
+              ? ['1 recipe was omitted because complete ingredients could not be read safely.']
+              : [
+                  'Online discovery only. Spoonacular results are not saved or included in backups.',
+                ],
+          ...(provider === 'spoonacular' ? { expiresAt: Date.now() + 3600000 } : {}),
+        }),
+      );
+    });
+    vi.stubGlobal('fetch', fetcher);
+    const user = userEvent.setup();
+    render(<RecipeProviderSettings onToast={vi.fn()} />);
+    await user.click(screen.getByRole('button', { name: 'Check recipe sources' }));
+    await user.click(screen.getByRole('button', { name: 'Test RecipeAPI.io search' }));
+    const recipeApiStatus = await screen.findByRole('status', {
+      name: 'RecipeAPI.io search check',
+    });
+    expect(recipeApiStatus).toHaveTextContent('no readable recipes were returned');
+    expect(recipeApiStatus).toHaveTextContent('complete ingredients could not be read safely');
+    await user.click(screen.getByRole('button', { name: 'Test Spoonacular search' }));
+    expect(
+      await screen.findByRole('status', { name: 'Spoonacular search check' }),
+    ).toHaveTextContent('No recipes returned for “chicken”');
+    expect(recipeApiStatus).toHaveTextContent('no readable recipes were returned');
+    expect(screen.queryByText(/Search verified/)).not.toBeInTheDocument();
+    expect(fetcher).toHaveBeenCalledTimes(3);
+  });
+
+  it('reports provider failures without retrying or losing configured status', async () => {
+    const fetcher = vi.fn<typeof fetch>().mockImplementation(async (url) =>
+      String(url).endsWith('/recipe-providers')
+        ? new Response(
+            JSON.stringify({
+              providers: RECIPE_PROVIDER_INFO.map((provider) => ({
+                ...provider,
+                configured: provider.id === 'recipeapi',
+              })),
+            }),
+          )
+        : new Response(
+            JSON.stringify({
+              error: {
+                code: 'provider_configuration',
+                message: 'This source rejected its API key.',
+              },
+            }),
+            { status: 503 },
+          ),
+    );
+    vi.stubGlobal('fetch', fetcher);
+    const user = userEvent.setup();
+    render(<RecipeProviderSettings onToast={vi.fn()} />);
+    await user.click(screen.getByRole('button', { name: 'Check recipe sources' }));
+    await user.click(screen.getByRole('button', { name: 'Test RecipeAPI.io search' }));
+    expect(
+      await screen.findByRole('alert', { name: 'RecipeAPI.io search check' }),
+    ).toHaveTextContent('Search failed · This source rejected its API key.');
+    expect(screen.getByText('Configured')).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Test RecipeAPI.io search' })).toBeEnabled();
+    expect(fetcher).toHaveBeenCalledTimes(2);
+  });
+
+  it('prevents simultaneous checks and cancels a pending test when settings close', async () => {
+    let searchSignal: AbortSignal | null = null;
+    const fetcher = vi.fn<typeof fetch>().mockImplementation(async (url, options) => {
+      if (String(url).endsWith('/recipe-providers'))
+        return new Response(
+          JSON.stringify({
+            providers: RECIPE_PROVIDER_INFO.map((provider) => ({ ...provider, configured: true })),
+          }),
+        );
+      searchSignal = options?.signal ?? null;
+      return new Promise<Response>((_resolve, reject) => {
+        searchSignal?.addEventListener('abort', () => reject(new Error('Request cancelled.')), {
+          once: true,
+        });
+      });
+    });
+    vi.stubGlobal('fetch', fetcher);
+    const user = userEvent.setup();
+    const { unmount } = render(<RecipeProviderSettings onToast={vi.fn()} />);
+    await user.click(screen.getByRole('button', { name: 'Check recipe sources' }));
+    await user.click(screen.getByRole('button', { name: 'Test RecipeAPI.io search' }));
+    expect(screen.getByRole('status', { name: 'RecipeAPI.io search check' })).toHaveTextContent(
+      'Searching for “chicken”',
+    );
+    expect(screen.getByRole('button', { name: 'Test RecipeAPI.io search' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Test Spoonacular search' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Check recipe sources' })).toBeDisabled();
+    await user.click(screen.getByRole('button', { name: 'Test Spoonacular search' }));
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    expect((searchSignal as AbortSignal | null)?.aborted).toBe(false);
+    unmount();
+    expect((searchSignal as AbortSignal | null)?.aborted).toBe(true);
   });
 
   it('keeps Spoonacular discovery link-only and clears temporary results when leaving recipes', async () => {

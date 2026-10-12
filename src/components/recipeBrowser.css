@@ -130,6 +130,16 @@
   padding: 8px 0;
 }
 
+.recipe-start-ingredient {
+  grid-column: 1 / -1;
+  max-width: 320px;
+  width: 100%;
+}
+
+.recipe-start-ingredient .choice-button {
+  min-height: 48px;
+}
+
 .recipe-browser-actions {
   grid-column: 1 / -1;
   display: flex;

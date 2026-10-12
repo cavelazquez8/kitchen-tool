@@ -150,6 +150,7 @@ export function RecipeBrowser({
   const [online, setOnline] = useState<SourceResults | null>(null);
   const [onlineBusy, setOnlineBusy] = useState(false);
   const [onlineError, setOnlineError] = useState('');
+  const [startIngredient, setStartIngredient] = useState('');
   const localRequest = useRef(0);
   const operation = useRef<{ scope: string; controller: AbortController } | null>(null);
   const saved = useMemo(() => inventory.recipes ?? [], [inventory.recipes]);
@@ -170,7 +171,12 @@ export function RecipeBrowser({
       .sort()
       .slice(0, 60);
   }, [relevant]);
-  const scope = requestScopeKey(source, query, query.trim() ? [] : ingredients);
+  const spoonacularIngredient = ingredients.includes(startIngredient)
+    ? startIngredient
+    : (ingredients[0] ?? '');
+  const searchIngredients =
+    source === 'spoonacular' ? (spoonacularIngredient ? [spoonacularIngredient] : []) : ingredients;
+  const scope = requestScopeKey(source, query, query.trim() ? [] : searchIngredients);
   const currentScope = useRef(scope);
   currentScope.current = scope;
   const results = online?.scope === scope && online.source === source ? online : null;
@@ -305,7 +311,8 @@ export function RecipeBrowser({
     setVisibleCount(PAGE_SIZE);
   }
   function changeQuery(next: string) {
-    if (requestScopeKey(source, next, next.trim() ? [] : ingredients) !== scope) resetOnline();
+    if (requestScopeKey(source, next, next.trim() ? [] : searchIngredients) !== scope)
+      resetOnline();
     setQuery(next);
     setVisibleCount(PAGE_SIZE);
   }
@@ -318,6 +325,13 @@ export function RecipeBrowser({
     onUseSelectionChange(false);
     setVisibleCount(PAGE_SIZE);
     if (source === 'library') changeQuery('');
+  }
+  function showLoadedRecipes() {
+    setCategory('');
+    setCuisine('');
+    setFilter('all');
+    setCollection('all');
+    setVisibleCount(PAGE_SIZE);
   }
   async function searchOnline(nextPage = false) {
     if (source === 'library' || operation.current) return;
@@ -362,7 +376,7 @@ export function RecipeBrowser({
           : {
               provider: source,
               query: query.trim(),
-              ...(!query.trim() ? { ingredients } : {}),
+              ...(!query.trim() ? { ingredients: searchIngredients } : {}),
               page: 1,
               limit: 10,
             };
@@ -410,6 +424,35 @@ export function RecipeBrowser({
     (useSelection && selectedBatchIds.length > 0) ||
     (source === 'library' && !!query.trim());
   const showing = Math.min(visibleCount, matches.length);
+  let emptyHeading = 'No recipes match these filters.';
+  let emptyDescription =
+    'Try another ingredient, clear the filters, or load more from your chosen source.';
+  if (source !== 'library') {
+    if (onlineError && !results) {
+      emptyHeading = 'Search couldn’t finish.';
+      emptyDescription =
+        'The message above explains the problem. Try again or test this source in Settings.';
+    } else if (!results) {
+      emptyHeading = `Ready to search ${sourceName}.`;
+      emptyDescription =
+        'Enter a dish or ingredient above, or leave it blank to search with your kitchen inventory.';
+    } else if (results.recipes.length > 0) {
+      emptyHeading = 'Your filters hide these recipes.';
+      emptyDescription = `${results.recipes.length} recipes were loaded successfully. Show them all to see which ingredients you have and which are missing.`;
+    } else if (results.warnings.some((warning) => warning.includes('omitted'))) {
+      // Older Workers returned a successful empty list after rejecting all provider records.
+      emptyHeading = 'Recipe details couldn’t be read.';
+      emptyDescription =
+        'This source returned recipes, but their details could not be read. Update your Worker from Settings and test the source again.';
+    } else {
+      emptyHeading = `No recipes found on ${sourceName}.`;
+      emptyDescription =
+        'Try a broader dish or a different ingredient. No recipes were returned for this search.';
+    }
+  } else if (filter === 'saved') {
+    emptyHeading = 'Your favorites start here.';
+    emptyDescription = 'Save something you like, import a recipe, or add your own.';
+  }
   return (
     <section className="recipe-browser" aria-label="Recipe browser">
       <section className="library-intro">
@@ -497,7 +540,9 @@ export function RecipeBrowser({
           <span>
             {source === 'library'
               ? 'Results update as you type. Filters apply immediately.'
-              : 'Search when ready. Changing filters uses the recipes already loaded.'}
+              : source === 'spoonacular' && !query.trim() && spoonacularIngredient
+                ? `Search starts with ${spoonacularIngredient}, then compares each recipe with your kitchen.`
+                : 'Search when ready. Changing filters uses the recipes already loaded.'}
           </span>
           {provider && (
             <button className="text-button" onClick={onConfigure}>
@@ -505,6 +550,19 @@ export function RecipeBrowser({
             </button>
           )}
         </div>
+        {source === 'spoonacular' && !query.trim() && ingredients.length > 1 && (
+          <div className="recipe-start-ingredient">
+            <Choice
+              label="Start with ingredient"
+              value={spoonacularIngredient}
+              options={ingredients.map((name) => ({ value: name, label: name }))}
+              onChange={(value) => {
+                resetOnline();
+                setStartIngredient(value);
+              }}
+            />
+          </div>
+        )}
         <div className="recipe-browser-actions">
           <button className="button secondary" onClick={onImport}>
             <Upload size={17} /> Import recipe
@@ -683,7 +741,7 @@ export function RecipeBrowser({
         <div className="library-results" role="status" aria-live="polite">
           <span>
             {source !== 'library' && !results
-              ? `No recipes loaded · ${sourceName}`
+              ? `${onlineError ? 'Search failed' : 'No recipes loaded'} · ${sourceName}`
               : `Showing ${showing.toLocaleString()} of ${matches.length.toLocaleString()} recipes · ${sourceName}`}
             {collection !== 'all' ? ` · ${recipeCollectionLabel(collection)}` : ''}
             {query.trim() && (source === 'library' || results) ? ` for “${query.trim()}”` : ''}
@@ -696,8 +754,7 @@ export function RecipeBrowser({
         </div>
         {source !== 'library' && results && (
           <p className="recipe-loaded-note">
-            {results.recipes.length} recipes loaded from this search. Filters apply to these
-            recipes.
+            {results.recipes.length} recipes loaded · {matches.length} match your filters.
           </p>
         )}
         {results?.warnings.map((warning) => (
@@ -778,25 +835,17 @@ export function RecipeBrowser({
         {!matches.length && !(source === 'library' ? localBusy : onlineBusy) && (
           <div className="empty-state compact">
             <BookOpen size={36} />
-            <h2>
-              {source !== 'library' && !results
-                ? `Ready to search ${sourceName}.`
-                : filter === 'saved'
-                  ? 'Your favorites start here.'
-                  : 'No recipes match these filters.'}
-            </h2>
-            <p>
-              {source !== 'library' && !results
-                ? 'Enter a dish or ingredient above, or leave it blank to search with your kitchen inventory.'
-                : filter === 'saved'
-                  ? 'Save something you like, import a recipe, or add your own.'
-                  : 'Try another ingredient, clear the filters, or load more from your chosen source.'}
-            </p>
-            {hasFilters && (
+            <h2>{emptyHeading}</h2>
+            <p>{emptyDescription}</p>
+            {source !== 'library' && results && results.recipes.length > 0 ? (
+              <button className="button secondary" onClick={showLoadedRecipes}>
+                Show all loaded recipes
+              </button>
+            ) : hasFilters ? (
               <button className="button secondary" onClick={clearFilters}>
                 Clear recipe filters
               </button>
-            )}
+            ) : null}
           </div>
         )}
       </section>

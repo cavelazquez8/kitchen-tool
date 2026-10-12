@@ -167,19 +167,78 @@ export function recipeApiToRecipe(value: unknown): Recipe | null {
   return isRecipe(recipe) ? recipe : null;
 }
 
+function spoonacularIngredients(value: Record<string, unknown>): unknown[] | null {
+  if (value.extendedIngredients !== undefined) {
+    if (!Array.isArray(value.extendedIngredients)) return null;
+    if (value.extendedIngredients.length) return value.extendedIngredients;
+  }
+  // Complex Search's fillIngredients returns recipe ingredients in two groups.
+  // unusedIngredients contains the shopper's leftovers, not ingredients in this recipe.
+  if (!Array.isArray(value.usedIngredients) || !Array.isArray(value.missedIngredients)) return null;
+  for (const [count, ingredients] of [
+    [value.usedIngredientCount, value.usedIngredients],
+    [value.missedIngredientCount, value.missedIngredients],
+  ] as const) {
+    if (count !== undefined && (!Number.isInteger(count) || count !== ingredients.length))
+      return null;
+  }
+  return [...value.usedIngredients, ...value.missedIngredients];
+}
+
+/** Read a bounded source instruction string as text, never executable markup. */
+function plainProviderInstructions(value: unknown): string[] | null {
+  if (typeof value !== 'string' || value.length > 60000) return null;
+  const named: Record<string, string> = {
+    amp: '&',
+    quot: '"',
+    apos: "'",
+    lt: '<',
+    gt: '>',
+    nbsp: ' ',
+  };
+  const decoded = value.replace(
+    /&(#x[0-9a-f]+|#\d+|amp|quot|apos|lt|gt|nbsp);/gi,
+    (_, entity: string) => {
+      if (!entity.startsWith('#')) return named[entity.toLowerCase()] ?? '';
+      const code = entity.toLowerCase().startsWith('#x')
+        ? parseInt(entity.slice(2), 16)
+        : parseInt(entity.slice(1), 10);
+      return Number.isFinite(code) && code > 0 && code <= 0x10ffff
+        ? String.fromCodePoint(code)
+        : '';
+    },
+  );
+  const cleaned = decoded
+    .replace(/<(?:script|style)\b[^>]*>[\s\S]*?<\/(?:script|style)\s*>/gi, '')
+    .replace(/<!--[\s\S]*?-->/g, '');
+  // Incomplete script/style blocks cannot safely become a cooking instruction.
+  if (/<(?:script|style)\b/i.test(cleaned)) return null;
+  const steps = cleaned
+    .replace(/<br\s*\/?\s*>|<\/(?:p|li|div|h[1-6])\s*>/gi, '\n')
+    .replace(/<[^>]*>/g, ' ')
+    .split(/\r?\n/)
+    .map((step) => step.replace(/\s+/g, ' ').trim())
+    .filter(Boolean);
+  return steps.length > 0 && steps.length <= 200 && steps.every((step) => text(step, 3000))
+    ? steps
+    : null;
+}
+
 /** Spoonacular records remain ephemeral. Source ingredients, including ambiguous originals, are preserved. */
 export function spoonacularToRecipe(value: unknown): Recipe | null {
   if (!isRecord(value)) return null;
   const id = positiveId(value.id);
-  if (
-    !id ||
-    !Array.isArray(value.extendedIngredients) ||
-    !Array.isArray(value.analyzedInstructions)
-  )
-    return null;
+  const sourceIngredients = spoonacularIngredients(value);
+  if (!id || !sourceIngredients || sourceIngredients.length > 200) return null;
   const ingredients: Recipe['ingredients'] = [];
-  for (const item of value.extendedIngredients) {
+  for (const item of sourceIngredients) {
     if (!isRecord(item) || !text(item.name, 160)) return null;
+    if (
+      (item.original !== undefined &&
+        (typeof item.original !== 'string' || item.original.trim().length > 1000)) ||
+      (typeof item.unit === 'string' && item.unit.trim().length > 40)
+    )
+      return null;
     const original = text(item.original, 1000);
     const parsed = original ? parseIngredientLine(original) : null;
     const rawAmount = quantity(item.amount);
@@ -195,14 +254,24 @@ export function spoonacularToRecipe(value: unknown): Recipe | null {
       ...(parsed?.optional ? { optional: true } : {}),
     });
   }
-  const steps: string[] = [];
-  for (const section of value.analyzedInstructions) {
-    if (!isRecord(section) || !Array.isArray(section.steps)) return null;
-    if (text(section.name, 180)) steps.push(text(section.name, 180));
-    for (const step of section.steps) {
-      if (!isRecord(step) || !text(step.step, 3000)) return null;
-      steps.push(text(step.step, 3000));
+  let steps: string[] = [];
+  if (value.analyzedInstructions !== undefined) {
+    if (!Array.isArray(value.analyzedInstructions) || value.analyzedInstructions.length > 200)
+      return null;
+    for (const section of value.analyzedInstructions) {
+      if (!isRecord(section) || !Array.isArray(section.steps) || section.steps.length > 200)
+        return null;
+      if (section.steps.length && text(section.name, 180)) steps.push(text(section.name, 180));
+      for (const step of section.steps) {
+        if (!isRecord(step) || !text(step.step, 3000)) return null;
+        steps.push(text(step.step, 3000));
+      }
     }
+  }
+  if (!steps.length) {
+    const fallback = plainProviderInstructions(value.instructions);
+    if (!fallback) return null;
+    steps = fallback;
   }
   const servings = quantity(value.servings);
   if (servings === undefined || (servings !== null && servings > 100)) return null;

@@ -1,5 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 import { readFile } from 'node:fs/promises';
+import { RECIPE_PROVIDER_INFO } from '../src/recipes/providers';
 import type { Recipe } from '../src/recipes/types';
 
 const recipe: Recipe = {
@@ -225,4 +226,96 @@ test('explains updating an older Worker without disturbing the saved Gemini conn
     settings.getByRole('link', { name: 'Download the updated Worker code', exact: true }),
   ).toHaveAttribute('href', '/mise-gemini-worker.js');
   expect(checks).toBe(1);
+});
+
+test('tests configured recipe sources independently without saving their connection-check recipes', async ({
+  page,
+}) => {
+  let checks = 0;
+  const searches: { provider: string; query: string; page: number; limit: number }[] = [];
+  await page.route('https://mise.example.workers.dev/recipe-providers', async (route) => {
+    checks++;
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        providers: RECIPE_PROVIDER_INFO.map((provider) => ({ ...provider, configured: true })),
+      }),
+    });
+  });
+  await page.route('https://mise.example.workers.dev/recipes/search', async (route) => {
+    const input = route.request().postDataJSON();
+    searches.push(input);
+    await route.fulfill(
+      input.provider === 'recipeapi'
+        ? {
+            status: 200,
+            contentType: 'application/json',
+            body: JSON.stringify({
+              provider: 'recipeapi',
+              storage: 'personal',
+              recipes: [recipe],
+              page: 1,
+              hasMore: false,
+              warnings: [],
+            }),
+          }
+        : {
+            status: 503,
+            contentType: 'application/json',
+            body: JSON.stringify({
+              error: {
+                code: 'provider_unavailable',
+                message: 'Spoonacular could not finish this search. Try again later.',
+              },
+            }),
+          },
+    );
+  });
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Local only', exact: true }).click();
+  const settings = page.getByRole('dialog', { name: 'Your kitchen, your way' });
+  expect(searches).toHaveLength(0);
+  expect(checks).toBe(0);
+  await settings.getByRole('button', { name: 'Check recipe sources', exact: true }).click();
+  await expect(settings.getByText('Configured', { exact: true })).toHaveCount(2);
+  expect(checks).toBe(1);
+  expect(searches).toHaveLength(0);
+  const recipeApiButton = settings.getByRole('button', {
+    name: 'Test RecipeAPI.io search',
+    exact: true,
+  });
+  const spoonacularButton = settings.getByRole('button', {
+    name: 'Test Spoonacular search',
+    exact: true,
+  });
+  await expect(recipeApiButton).toBeEnabled();
+  await expect(spoonacularButton).toBeEnabled();
+  await recipeApiButton.click();
+  const recipeApiStatus = settings.getByRole('status', {
+    name: 'RecipeAPI.io search check',
+    exact: true,
+  });
+  await expect(recipeApiStatus).toContainText('Search verified · 1 readable recipe returned.');
+  await spoonacularButton.click();
+  await expect(
+    settings.getByRole('alert', { name: 'Spoonacular search check', exact: true }),
+  ).toContainText('Search failed · Spoonacular could not finish this search. Try again later.');
+  await expect(recipeApiStatus).toContainText('Search verified · 1 readable recipe returned.');
+  await expect(settings.getByText('Configured', { exact: true })).toHaveCount(2);
+  await expect(recipeApiButton).toBeEnabled();
+  await expect(spoonacularButton).toBeEnabled();
+  expect(searches).toEqual([
+    { provider: 'recipeapi', query: 'chicken', page: 1, limit: 1 },
+    { provider: 'spoonacular', query: 'chicken', page: 1, limit: 1 },
+  ]);
+  expect(checks).toBe(1);
+  expect(
+    await page.evaluate(() => localStorage.getItem('kitchen-wrapper.inventory.v1') ?? ''),
+  ).not.toContain(recipe.id);
+  await settings.getByRole('button', { name: 'Close', exact: true }).click();
+  await navigate(page, 'Recipes');
+  await page.getByRole('button', { name: 'Saved recipes', exact: true }).click();
+  await expect(page.getByRole('heading', { name: recipe.title, exact: true })).toHaveCount(0);
+  await expect(page.locator('.kitchen-hub .recipe-grid .recipe-card')).toHaveCount(0);
 });

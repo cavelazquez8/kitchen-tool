@@ -74,6 +74,108 @@ describe('external recipe providers', () => {
     expect(canPersistProviderRecipe({ ...recipe, id: 'renamed:123' })).toBe(false);
   });
 
+  it('reads Complex Search ingredient groups and excludes unused inventory ingredients', () => {
+    const { extendedIngredients, ...record } = spoonacularRecord;
+    const recipe = spoonacularToRecipe({
+      ...record,
+      usedIngredientCount: 1,
+      missedIngredientCount: 1,
+      usedIngredients: [extendedIngredients[0]],
+      missedIngredients: [extendedIngredients[1]],
+      unusedIngredients: [{ name: 'Milk', amount: 1000, unit: 'ml', original: '1 l milk' }],
+    });
+    expect(recipe?.ingredients.map((ingredient) => ingredient.name)).toEqual([
+      'Garlic',
+      'Olive oil',
+    ]);
+    expect(recipe?.ingredients[0]).toMatchObject({
+      quantity: null,
+      original: '5-6 cloves garlic',
+    });
+    expect(recipe?.ingredients[1]).toMatchObject({ quantity: 1, unit: 'tbsp' });
+    expect(
+      spoonacularToRecipe({
+        ...record,
+        extendedIngredients: [],
+        usedIngredients: [extendedIngredients[0]],
+        missedIngredients: [extendedIngredients[1]],
+      })?.ingredients,
+    ).toEqual(recipe?.ingredients);
+  });
+
+  it('rejects partial or malformed Complex Search groups instead of dropping required ingredients', () => {
+    const { extendedIngredients, ...record } = spoonacularRecord;
+    const grouped = {
+      ...record,
+      usedIngredients: [extendedIngredients[0]],
+      missedIngredients: [extendedIngredients[1]],
+    };
+    for (const changes of [
+      { missedIngredients: undefined },
+      { usedIngredients: undefined },
+      { missedIngredients: {} },
+      { usedIngredientCount: 2 },
+      { missedIngredientCount: -1 },
+      { missedIngredientCount: '1' },
+      { missedIngredients: [...grouped.missedIngredients, { name: '', amount: 1, unit: 'g' }] },
+      { missedIngredients: [{ ...extendedIngredients[1], amount: -1 }] },
+      { missedIngredients: [{ ...extendedIngredients[1], original: { guessed: true } }] },
+      { missedIngredients: [{ ...extendedIngredients[1], original: 'x'.repeat(1001) }] },
+      { missedIngredients: [{ ...extendedIngredients[1], unit: 'x'.repeat(41) }] },
+      { extendedIngredients: {} },
+    ])
+      expect(spoonacularToRecipe({ ...grouped, ...changes })).toBeNull();
+  });
+
+  it('uses source instruction text only when analyzed instructions are absent or empty', () => {
+    const instructions =
+      '<ol><li>Test-only: warm the oil &amp; garlic.</li><li>Test-only: simmer.</li></ol>';
+    expect(spoonacularToRecipe({ ...spoonacularRecord, instructions })?.steps).toEqual([
+      'Test fixture: cook the garlic.',
+    ]);
+    for (const analyzedInstructions of [undefined, [], [{ name: 'Method', steps: [] }]])
+      expect(
+        spoonacularToRecipe({ ...spoonacularRecord, analyzedInstructions, instructions })?.steps,
+      ).toEqual(['Test-only: warm the oil & garlic.', 'Test-only: simmer.']);
+    expect(
+      spoonacularToRecipe({
+        ...spoonacularRecord,
+        analyzedInstructions: [],
+        instructions: 'Test-only: warm oil.\nTest-only: simmer.',
+      })?.steps,
+    ).toEqual(['Test-only: warm oil.', 'Test-only: simmer.']);
+  });
+
+  it('rejects unsupported or incomplete instructions even when another field looks usable', () => {
+    for (const analyzedInstructions of [null, {}, [{ steps: [{ step: {} }] }], [{ steps: {} }]])
+      expect(
+        spoonacularToRecipe({
+          ...spoonacularRecord,
+          analyzedInstructions,
+          instructions: 'Test-only: simmer.',
+        }),
+      ).toBeNull();
+    for (const instructions of [
+      '',
+      {},
+      '<script>Test-only script text</script>',
+      '<script>Incomplete script',
+      'x'.repeat(3001),
+      'x'.repeat(60001),
+      Array.from({ length: 201 }, () => 'Test-only step').join('\n'),
+    ])
+      expect(
+        spoonacularToRecipe({ ...spoonacularRecord, analyzedInstructions: [], instructions }),
+      ).toBeNull();
+    expect(
+      spoonacularToRecipe({
+        ...spoonacularRecord,
+        analyzedInstructions: [],
+        instructions: '<script>Discard</script><p>Test-only: simmer &#38; stir.</p>',
+      })?.steps,
+    ).toEqual(['Test-only: simmer & stir.']);
+  });
+
   it('limits searches to documented free operations and rejects override fields', () => {
     expect(
       parseRecipeProviderSearch({

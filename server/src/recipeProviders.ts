@@ -124,8 +124,8 @@ function reserve(state: ProviderCounter, input: RecipeProviderSearch, now: numbe
       'provider_quota',
       'RecipeAPI.io has reached Mise’s 500-request monthly limit. Use the built-in library until next month.',
     );
-  // Complex search with full ingredients and instructions costs 1 + 0.06 points/result.
-  const points = 1 + 0.06 * (input.limit ?? 10);
+  // Complex Search: base + ingredients + recipe information + analyzed instructions.
+  const points = 1 + 0.085 * (input.limit ?? 10);
   if (input.provider === 'spoonacular' && state.dailyPoints + points > 50)
     throw new RecipeProviderError(
       429,
@@ -235,6 +235,8 @@ export async function searchRecipeProvider(
       endpoint.searchParams.set('offset', String((page - 1) * limit));
       endpoint.searchParams.set('number', String(limit));
       endpoint.searchParams.set('instructionsRequired', 'true');
+      endpoint.searchParams.set('fillIngredients', 'true');
+      endpoint.searchParams.set('ignorePantry', 'false');
       endpoint.searchParams.set('addRecipeInformation', 'true');
       endpoint.searchParams.set('addRecipeInstructions', 'true');
     }
@@ -301,6 +303,16 @@ export async function searchRecipeProvider(
       )
       .filter((recipe): recipe is Recipe => recipe !== null);
     const skipped = entries.length - recipes.length;
+    if (entries.length > 0 && recipes.length === 0) {
+      const providerName = RECIPE_PROVIDER_INFO.find(
+        (provider) => provider.id === input.provider,
+      )!.name;
+      throw new RecipeProviderError(
+        502,
+        'provider_response',
+        `${providerName} returned ${entries.length} ${entries.length === 1 ? 'recipe' : 'recipes'}, but Mise could not read complete ingredients and cooking instructions. Update your Cloudflare Worker to the latest Mise version and try another dish.`,
+      );
+    }
     const warnings = skipped
       ? [
           `${skipped} ${skipped === 1 ? 'recipe was' : 'recipes were'} omitted because complete ingredients or instructions could not be read safely.`,
