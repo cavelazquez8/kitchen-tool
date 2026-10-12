@@ -1,4 +1,4 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Locator, type Page } from '@playwright/test';
 import { readFile } from 'node:fs/promises';
 import type { InventoryState } from '../src/domain/types';
 import type { Recipe } from '../src/recipes/types';
@@ -50,12 +50,20 @@ async function addItem(
   await page.getByRole('button', { name: 'Add item', exact: true }).click();
   const editor = page.getByRole('dialog', { name: 'Add an ingredient' });
   await editor.getByRole('combobox', { name: 'Item name', exact: true }).fill(name);
+  if (!((await editor.locator('.food-identity-field').getAttribute('data-confirmed')) === 'true')) {
+    await editor.getByRole('button', { name: 'Use product name', exact: true }).click();
+  }
   await editor.getByLabel('Quantity', { exact: true }).fill(quantity);
   await editor.getByRole('combobox', { name: 'Unit', exact: true }).fill(unit);
   await editor.getByLabel('Purchased', { exact: true }).fill(purchasedOn);
   if (expiresOn) await editor.getByLabel('Expiration', { exact: false }).fill(expiresOn);
   await editor.getByRole('button', { name: 'Add to inventory', exact: true }).click();
   await expect(editor).not.toBeVisible();
+}
+
+async function enterBarcode(scanner: Locator, code: string) {
+  await scanner.getByLabel('Or enter a barcode').fill(code);
+  await scanner.getByRole('button', { name: 'Add', exact: true }).click();
 }
 
 test.beforeEach(async ({ page }) => {
@@ -154,7 +162,7 @@ test('selected export contains only chosen ingredients', async ({ page }) => {
   expect(value).not.toContain('Potatoes');
 });
 
-test('barcode fallback remembers manual names and reviews packages before saving', async ({
+test('barcode fallback remembers manual identities, requires destinations, and confirms repeat packages', async ({
   page,
 }) => {
   let lookups = 0;
@@ -163,39 +171,47 @@ test('barcode fallback remembers manual names and reviews packages before saving
     return route.fulfill({ status: 404, contentType: 'application/json', body: '{}' });
   });
   await page.getByRole('button', { name: 'Scan groceries', exact: true }).click();
-  const scanner = page.getByRole('dialog', { name: 'Stock up, simply' });
-  await scanner.getByLabel('Or enter a barcode').fill('012345678905');
-  await scanner.getByRole('button', { name: 'Add', exact: true }).click();
-  const unknown = page.getByRole('dialog', { name: 'Product not found' });
+  const scanner = page.getByRole('dialog', { name: 'Stock up, simply', exact: true });
+  await enterBarcode(scanner, '012345678905');
+  const unknown = page.getByRole('dialog', { name: 'Product not found', exact: true });
   await expect(unknown).toBeVisible();
   await unknown.getByRole('combobox', { name: 'Item name', exact: true }).fill('Oat milk');
-  await unknown.getByRole('button', { name: 'Add to review', exact: true }).click();
+  await expect(unknown.locator('.grocery-match-confirmed')).toContainText('Oat milk');
+  await unknown.getByRole('button', { name: 'Add & scan next', exact: true }).click();
+  await expect(unknown.getByRole('alert')).toHaveText('Choose where this item will go.');
+  await unknown.getByRole('button', { name: 'Fridge', exact: true }).click();
+  await unknown.getByLabel('Expiration (optional)', { exact: true }).fill('2026-12-01');
+  await unknown.getByRole('button', { name: 'Add & scan next', exact: true }).click();
   await expect(unknown).not.toBeVisible();
-  await scanner.getByLabel('Or enter a barcode').fill('012345678905');
-  await scanner.getByRole('button', { name: 'Add', exact: true }).click();
-  const repeat = page.getByRole('dialog', { name: 'Add another Oat milk?' });
-  await expect(repeat).toBeVisible();
-  await repeat.getByRole('button', { name: 'Skip', exact: true }).click();
-  await expect(scanner.getByLabel('Quantity', { exact: true })).toHaveValue('1');
-  await scanner.getByLabel('Or enter a barcode').fill('012345678905');
-  await scanner.getByRole('button', { name: 'Add', exact: true }).click();
-  await repeat.getByRole('button', { name: 'Add 1 package', exact: true }).click();
-  await expect(scanner.getByLabel('Quantity', { exact: true })).toHaveValue('2');
-  await scanner.getByRole('button', { name: 'Add to inventory', exact: true }).click();
+  expect((await storedKitchen(page)).batches).toHaveLength(1);
+  await enterBarcode(scanner, '012345678905');
+  const repeat = page.getByRole('dialog', { name: 'Add another package?', exact: true });
+  await expect(repeat.getByRole('combobox', { name: 'Item name', exact: true })).toHaveValue(
+    'Oat milk',
+  );
+  await repeat.getByRole('button', { name: 'Skip item', exact: true }).click();
+  expect((await storedKitchen(page)).batches).toHaveLength(1);
+  await enterBarcode(scanner, '012345678905');
+  await expect(repeat.getByLabel('Quantity', { exact: true })).toHaveValue('1');
+  await expect(repeat.getByLabel('Expiration (optional)', { exact: true })).toHaveValue('');
+  await repeat.getByRole('button', { name: 'Fridge', exact: true }).click();
+  await repeat.getByRole('button', { name: 'Add & scan next', exact: true }).click();
+  await expect(repeat).not.toBeVisible();
+  await scanner.getByRole('button', { name: 'Done scanning', exact: true }).click();
+  await expect(scanner).not.toBeVisible();
   await expect(page.locator('.item-quantity')).toHaveText(/^2 package(?:\s*−1)?$/);
   await page.reload();
   await page.getByRole('button', { name: 'Scan groceries', exact: true }).click();
-  await scanner.getByLabel('Or enter a barcode').fill('012345678905');
-  await scanner.getByRole('button', { name: 'Add', exact: true }).click();
-  await repeat.getByRole('button', { name: 'Add 1 package', exact: true }).click();
-  await expect(scanner.getByRole('combobox', { name: 'Item name', exact: true })).toHaveValue(
+  await enterBarcode(scanner, '012345678905');
+  await expect(repeat.getByRole('combobox', { name: 'Item name', exact: true })).toHaveValue(
     'Oat milk',
   );
   expect(lookups).toBe(1);
-  await scanner.getByRole('button', { name: 'Add to inventory', exact: true }).click();
-  await expect(
-    page.getByRole('button', { name: 'Oat milk 2 purchase batches', exact: true }),
-  ).toBeVisible();
+  await repeat.getByRole('button', { name: 'Fridge', exact: true }).click();
+  await repeat.getByRole('button', { name: 'Add & scan next', exact: true }).click();
+  await expect(repeat).not.toBeVisible();
+  await scanner.getByRole('button', { name: 'Done scanning', exact: true }).click();
+  expect((await storedKitchen(page)).batches).toHaveLength(3);
   await expect(page.locator('.item-quantity')).toHaveText(/^3 package(?:\s*−1)?$/);
 });
 
@@ -337,9 +353,7 @@ test('persists the automatic-next scanner preference', async ({ page }) => {
   await expect(autoNext).not.toBeChecked();
 });
 
-test('searches online recipes, compares quantities, and shows cooking steps', async ({
-  page,
-}) => {
+test('searches online recipes, compares quantities, and shows cooking steps', async ({ page }) => {
   await page.route('https://www.themealdb.com/api/**', (route) => {
     const address = new URL(route.request().url());
     const meal = {
@@ -616,25 +630,32 @@ test('keeps different barcodes with the same name and remembers reviewed staple 
     return route.fulfill({ status: 404, contentType: 'application/json', body: '{}' });
   });
   await page.getByRole('button', { name: 'Scan groceries', exact: true }).click();
-  const scanner = page.getByRole('dialog', { name: 'Stock up, simply' });
+  const scanner = page.getByRole('dialog', { name: 'Stock up, simply', exact: true });
   for (const [index, barcode] of ['012345678905', '4006381333931'].entries()) {
-    await scanner.getByLabel('Or enter a barcode').fill(barcode);
-    await scanner.getByRole('button', { name: 'Add', exact: true }).click();
-    const unknown = page.getByRole('dialog', { name: 'Product not found' });
+    await enterBarcode(scanner, barcode);
+    const unknown = page.getByRole('dialog', { name: 'Product not found', exact: true });
     await expect(unknown).toBeVisible();
     await unknown.getByRole('combobox', { name: 'Item name', exact: true }).fill('Pantry salt');
+    await unknown.getByRole('button', { name: 'Use product name', exact: true }).click();
     await unknown.getByRole('button', { name: 'Pantry', exact: true }).click();
     if (index === 0) {
-      await unknown.getByLabel('Quantity', { exact: true }).fill('');
-      await unknown.getByRole('switch', { name: /Keep as a staple/ }).check();
-      await unknown.getByRole('combobox', { name: 'Stock level', exact: true }).click();
-      await unknown.getByRole('option', { name: 'Running low', exact: true }).click();
+      await unknown.getByRole('button', { name: 'Edit details', exact: true }).click();
+      const details = page.getByRole('dialog', { name: 'Edit scanned item', exact: true });
+      await details.getByLabel('Quantity', { exact: true }).fill('');
+      await details.getByRole('switch', { name: /Keep as a staple/ }).check();
+      await details.getByRole('combobox', { name: 'Stock level', exact: true }).click();
+      await page
+        .getByRole('dialog', { name: 'Stock level', exact: true })
+        .getByRole('option', { name: 'Running low', exact: true })
+        .click();
+      await details.getByRole('button', { name: 'Return to review', exact: true }).click();
+      await expect(details).not.toBeVisible();
+      await expect(unknown.getByLabel('Quantity', { exact: true })).toHaveValue('');
     }
-    await unknown.getByRole('button', { name: 'Add to review', exact: true }).click();
+    await unknown.getByRole('button', { name: 'Add & scan next', exact: true }).click();
     await expect(unknown).not.toBeVisible();
   }
-  await expect(scanner.getByRole('combobox', { name: 'Item name', exact: true })).toHaveCount(2);
-  await scanner.getByRole('button', { name: 'Add to inventory', exact: true }).click();
+  await scanner.getByRole('button', { name: 'Done scanning', exact: true }).click();
   const state = await storedKitchen(page);
   expect(state.products).toHaveLength(2);
   expect(new Set(state.products.map((product) => product.barcode))).toEqual(
@@ -651,14 +672,19 @@ test('keeps different barcodes with the same name and remembers reviewed staple 
   await page.reload();
   await page.getByRole('button', { name: 'Scan groceries', exact: true }).click();
   for (const barcode of ['012345678905', '4006381333931']) {
-    await scanner.getByLabel('Or enter a barcode').fill(barcode);
-    await scanner.getByRole('button', { name: 'Add', exact: true }).click();
-    const repeat = page.getByRole('dialog', { name: 'Add another Pantry salt?' });
-    await expect(repeat).toBeVisible();
-    await repeat.getByRole('button', { name: 'Add 1 package', exact: true }).click();
+    await enterBarcode(scanner, barcode);
+    const repeat = page.getByRole('dialog', { name: 'Add another package?', exact: true });
+    await expect(repeat.getByRole('combobox', { name: 'Item name', exact: true })).toHaveValue(
+      'Pantry salt',
+    );
+    await expect(repeat.getByLabel('Quantity', { exact: true })).toHaveValue('1');
+    await repeat.getByRole('button', { name: 'Pantry', exact: true }).click();
+    await repeat.getByRole('button', { name: 'Add & scan next', exact: true }).click();
+    await expect(repeat).not.toBeVisible();
   }
-  await expect(scanner.getByRole('combobox', { name: 'Item name', exact: true })).toHaveCount(2);
   expect(lookups).toBe(2);
+  expect((await storedKitchen(page)).batches).toHaveLength(4);
+  await scanner.getByRole('button', { name: 'Done scanning', exact: true }).click();
 });
 
 test('quick-add keeps a weighted ingredient unit and asks for its new amount', async ({ page }) => {
@@ -680,7 +706,7 @@ test('quick-add keeps a weighted ingredient unit and asks for its new amount', a
   expect(state.batches.map((batch) => batch.quantity)).toEqual([500, null]);
 });
 
-test('cannot save a scan tray while the next product lookup is pending', async ({ page }) => {
+test('locks barcode entry during lookup and saves only reviewed purchases', async ({ page }) => {
   let release: () => void = () => {};
   const delayed = new Promise<void>((resolve) => {
     release = resolve;
@@ -699,30 +725,121 @@ test('cannot save a scan tray while the next product lookup is pending', async (
     });
   });
   await page.getByRole('button', { name: 'Scan groceries', exact: true }).click();
-  const scanner = page.getByRole('dialog', { name: 'Stock up, simply' });
-  await scanner.getByLabel('Or enter a barcode').fill('012345678905');
-  await scanner.getByRole('button', { name: 'Add', exact: true }).click();
-  await expect(scanner.getByRole('combobox', { name: 'Item name', exact: true })).toHaveValue(
+  const scanner = page.getByRole('dialog', { name: 'Stock up, simply', exact: true });
+  await enterBarcode(scanner, '012345678905');
+  const review = page.getByRole('dialog', { name: 'Review scanned item', exact: true });
+  await expect(review.getByRole('combobox', { name: 'Item name', exact: true })).toHaveValue(
     'Oat milk',
   );
-  await scanner.getByLabel('Or enter a barcode').fill('4006381333931');
-  await scanner.getByRole('button', { name: 'Add', exact: true }).click();
+  await review.getByRole('button', { name: 'Fridge', exact: true }).click();
+  await review.getByRole('button', { name: 'Add & scan next', exact: true }).click();
+  await expect(review).not.toBeVisible();
+  await enterBarcode(scanner, '4006381333931');
   await expect.poll(() => pendingStarted).toBe(true);
   try {
-    await expect(
-      scanner.getByRole('button', { name: 'Add to inventory', exact: true }),
-    ).toBeDisabled();
-    await expect(scanner).toBeVisible();
+    await expect(scanner.getByRole('button', { name: 'Add', exact: true })).toBeDisabled();
+    expect((await storedKitchen(page)).products.map((product) => product.name)).toEqual([
+      'Oat milk',
+    ]);
+    expect((await storedKitchen(page)).batches).toHaveLength(1);
   } finally {
     release();
   }
-  await expect(scanner.getByRole('combobox', { name: 'Item name', exact: true })).toHaveCount(2);
-  await scanner.getByRole('button', { name: 'Add to inventory', exact: true }).click();
-  await expect(scanner).not.toBeVisible();
+  await expect(review.getByRole('combobox', { name: 'Item name', exact: true })).toHaveValue(
+    'Rice',
+  );
+  expect((await storedKitchen(page)).batches).toHaveLength(1);
+  await review.getByRole('button', { name: 'Pantry', exact: true }).click();
+  await review.getByRole('button', { name: 'Add & scan next', exact: true }).click();
+  await expect(review).not.toBeVisible();
+  await scanner.getByRole('button', { name: 'Done scanning', exact: true }).click();
   expect((await storedKitchen(page)).products.map((product) => product.name)).toEqual([
     'Oat milk',
     'Rice',
   ]);
+  expect((await storedKitchen(page)).batches).toHaveLength(2);
+});
+
+test('bulk scanning remembers its destination, adds clear matches automatically, and reviews duplicates and unknown products', async ({
+  page,
+}) => {
+  let lookups = 0;
+  await page.route('https://world.openfoodfacts.org/api/**', (route) => {
+    lookups++;
+    return route.request().url().includes('0012345678905')
+      ? route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ product: { product_name: 'Rice', quantity: '500 g' } }),
+        })
+      : route.fulfill({ status: 404, contentType: 'application/json', body: '{}' });
+  });
+  await page.getByRole('button', { name: 'Scan groceries', exact: true }).click();
+  const scanner = page.getByRole('dialog', { name: 'Stock up, simply', exact: true });
+  await scanner.getByRole('button', { name: 'Bulk scan', exact: true }).click();
+  await scanner.getByRole('button', { name: 'Freezer', exact: true }).click();
+  await scanner.getByRole('checkbox', { name: /Add clear matches automatically/ }).check();
+  await enterBarcode(scanner, '012345678905');
+  await expect(scanner.locator('.grocery-recent-row strong')).toHaveText('Rice');
+  await expect(
+    page.getByRole('dialog', { name: 'Review scanned item', exact: true }),
+  ).not.toBeVisible();
+  expect((await storedKitchen(page)).batches[0]).toMatchObject({
+    quantity: 500,
+    unit: 'g',
+    location: 'freezer',
+  });
+  await scanner.getByRole('button', { name: 'Done scanning', exact: true }).click();
+  await page.getByRole('button', { name: 'Show batches for Rice', exact: true }).click();
+  await page.getByRole('button', { name: 'Used some', exact: true }).click();
+  await page.getByRole('spinbutton').fill('450');
+  await page.getByRole('button', { name: 'Update quantity', exact: true }).click();
+  await expect.poll(async () => (await storedKitchen(page)).batches[0].quantity).toBe(50);
+  await expect(page.getByRole('dialog', { name: 'Update Rice', exact: true })).not.toBeVisible();
+  await page.getByRole('button', { name: 'Scan groceries', exact: true }).click();
+  await enterBarcode(scanner, '012345678905');
+  const duplicate = page.getByRole('dialog', { name: 'Add another package?', exact: true });
+  await expect(duplicate.getByLabel('Quantity', { exact: true })).toHaveValue('500');
+  await expect(duplicate.getByRole('combobox', { name: 'Unit', exact: true })).toHaveValue('g');
+  await expect(duplicate.getByRole('button', { name: 'Freezer', exact: true })).toHaveAttribute(
+    'aria-pressed',
+    'true',
+  );
+  await duplicate.getByRole('button', { name: 'Add & scan next', exact: true }).click();
+  await expect(duplicate).not.toBeVisible();
+  await enterBarcode(scanner, '4006381333931');
+  const unknown = page.getByRole('dialog', { name: 'Product not found', exact: true });
+  await expect(unknown.getByRole('button', { name: 'Freezer', exact: true })).toHaveAttribute(
+    'aria-pressed',
+    'true',
+  );
+  await unknown
+    .getByRole('combobox', { name: 'Item name', exact: true })
+    .fill('Frozen vegetable blend');
+  await unknown.getByRole('button', { name: 'Use product name', exact: true }).click();
+  await unknown.getByLabel('Expiration (optional)', { exact: true }).fill('2027-01-01');
+  await unknown.getByRole('button', { name: 'Add & scan next', exact: true }).click();
+  await expect(unknown).not.toBeVisible();
+  expect((await storedKitchen(page)).batches.map((batch) => batch.location)).toEqual([
+    'freezer',
+    'freezer',
+    'freezer',
+  ]);
+  expect(lookups).toBe(2);
+  await scanner.getByRole('button', { name: 'Done scanning', exact: true }).click();
+  await page.reload();
+  await page.getByRole('button', { name: 'Scan groceries', exact: true }).click();
+  await expect(scanner.getByRole('button', { name: 'Bulk scan', exact: true })).toHaveAttribute(
+    'aria-pressed',
+    'true',
+  );
+  await expect(scanner.getByRole('button', { name: 'Freezer', exact: true })).toHaveAttribute(
+    'aria-pressed',
+    'true',
+  );
+  await expect(
+    scanner.getByRole('checkbox', { name: /Add clear matches automatically/ }),
+  ).toBeChecked();
 });
 
 test('retains Gemini setup after failed checks, returning from chat and reload, then connects with a bare hostname', async ({

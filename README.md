@@ -8,19 +8,25 @@ A touch-friendly kitchen inventory, recipe library, meal planner, shopping list,
 
 - Add foods with in-app autocomplete, scan barcodes, or tap familiar ingredients while shopping.
 - Scanning automatically continues by default. Turn it off in the scanner; the preference stays on this device.
-- Repeated intentional scans ask before adding another package. Unknown products open a complete manual entry form and pause the camera.
+- Each scan opens a quick review with storage destination, quantity, and optional expiration date. **Add & scan next** saves that purchase immediately; **Undo** removes it. Choose **Bulk scan** to send a batch to one location, optionally adding clear matches automatically. Duplicates, unknown products, and uncertain ingredient identities always require review.
 - Keep purchases separate by storage location, unit, purchase date, and expiration date. Countable items have −1 and Undo; Used some handles larger changes.
-- Browse the free built-in Wikibooks cookbook, search dishes or ingredients, filter by category/cuisine, and load more without losing previous cards. Suggestions rank against your full inventory. TheMealDB remains an optional source for additional online recipes.
+- Browse the free built-in Wikibooks cookbook, search dishes or ingredients, filter by category/cuisine, and load more without losing previous cards. Suggestions rank against your full inventory. Explore more recipes with TheMealDB or optional free RecipeAPI.io and Spoonacular accounts.
 - Add your own recipes or import pasted recipes. Website import uses published Recipe JSON-LD through the optional backend.
 - Review recorded quantities, cook with step timers, and optionally keep the screen awake. Finish cooking reviews deductions before changing inventory.
 - Save recipes and choose meal-plan portions. Request a shopping list to combine requirements and subtract inventory once.
 - Ask Gemini follow-up questions inside Mise after connecting the optional free-tier backend. Copy for Gemini remains available without a backend.
 
-Matching and shopping calculations run locally. Unknown quantities, package contents, and original recipe yields stay unknown until you record them. A generic ingredient name can map a branded product to recipe ingredients. The bundled food/tool catalogue is an autocomplete starter; it is not a comprehensive product database. Barcode suggestions come from Open Food Facts.
+Matching and shopping calculations run locally. Unknown quantities, package contents, and original recipe yields stay unknown until you record them. Clear ingredient names are recognized; ambiguous branded foods require a confirmed generic ingredient name or an explicit **Use product name** choice. Barcode identities and reviewed original package sizes are remembered separately from remaining stock. Matching never guesses a package's weight or a mass/volume conversion.
+
+Related milk, rice, and fresh/dried herb forms are shown for review; Mise does not assume substitutions or compare their quantities.
+
+Food entry includes more than 5,700 locally searched Open Food Facts ingredient names, recent items, and common foods. **Find packaged products** performs an explicit online search for branded products, without a request on every keystroke. See [catalog attribution and updates](docs/food-catalog.md). Kitchen tools retain their separate suggestions and manual entry.
 
 The built-in cookbook is a versioned snapshot of Wikibooks recipes, served with Mise and matched locally without a recipe API key or subscription. It loads only when Recipes is opened. Saved recipes remain available if the collection or online provider cannot load. TheMealDB requests are bounded and user initiated; they do not enumerate its full database.
 
 Wikibooks content is adapted under CC BY-SA 4.0. Recipe details, saved records, and backups preserve contributor attribution, original revision links, and the content license. Recipe photos are not copied from Wikibooks. Unsupported, incomplete, or ambiguous source structures are excluded during ingestion; unknown amounts and yields remain unknown.
+
+See [optional free recipe-source setup](docs/provider-setup.md). Provider keys stay in Worker secrets. RecipeAPI.io allows selected personal-library saves with attribution. Spoonacular results are temporary discovery links, expire within one hour, and never enter saved recipes, meal plans, Gemini context, or backups. The existing Gemini Worker needs the updated downloadable code before these optional endpoints work.
 
 ## Data and backups
 

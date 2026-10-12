@@ -4,7 +4,6 @@ import {
   ArrowDownToLine,
   ArrowRight,
   Check,
-  CheckCheck,
   ChevronDown,
   ChevronRight,
   CircleHelp,
@@ -56,17 +55,19 @@ import { generateMarkdown } from './domain/export';
 import { getInventoryRepository } from './lib/repository';
 import { buildInventoryBackup } from './lib/backup';
 import { useInventoryRepository } from './lib/useInventoryRepository';
-import { Scanner } from './scanner/Scanner';
-import { lookupProduct } from './scanner/lookup';
+import { GroceryScannerSession } from './scanner/GroceryScannerSession';
+import { suggestIngredientIdentity } from './recipes/identity';
+import { matchingShoppingItem } from './scanner/stock';
 import { Modal } from './components/Modal';
 import { ItemEditor, type ItemDraft } from './components/ItemEditor';
 import { InventoryList } from './components/InventoryList';
 import { groupExpiry, isSoon } from './components/inventoryPresentation';
 import { Autocomplete } from './components/Autocomplete';
 import { Choice } from './components/Choice';
-import { FOOD_CATALOG, TOOL_CATALOG } from './recipes/catalog';
+import { TOOL_CATALOG } from './recipes/catalog';
 import { KitchenHub, type HubPage } from './components/KitchenHub';
 import { GeminiSettings } from './components/GeminiSettings';
+import { RecipeProviderSettings } from './components/RecipeProviderSettings';
 
 const locationNames: Record<StorageLocation, string> = {
   fridge: 'Fridge',
@@ -76,21 +77,6 @@ const locationNames: Record<StorageLocation, string> = {
 type Filter = 'all' | 'soon' | 'undated';
 type Page = 'inventory' | 'tools' | HubPage;
 type Editor = { kind: 'add' } | { kind: 'edit'; batchId: string };
-type ScanEntry = {
-  id: string;
-  barcode: string;
-  name: string;
-  brand: string;
-  quantity: number | null;
-  unit: string;
-  purchasedOn: string;
-  ingredientName?: string;
-  isStaple?: boolean;
-  stapleStatus?: ItemDraft['stapleStatus'];
-  location: StorageLocation;
-  expiresOn: string;
-  note?: string;
-};
 
 function newDraft(): ItemDraft {
   return {
@@ -107,9 +93,13 @@ function newDraft(): ItemDraft {
   };
 }
 function draftFor(batch: Batch, product: Product): ItemDraft {
+  const identity = suggestIngredientIdentity(product.name, { brand: product.brand });
+  const ingredientName =
+    product.ingredientName ?? (identity.confidence === 'clear' ? identity.candidates[0] : '');
   return {
     name: product.name,
-    ingredientName: product.ingredientName ?? '',
+    ingredientName,
+    ingredientConfirmed: !!product.ingredientName || identity.confidence === 'clear',
     brand: product.brand ?? '',
     quantity: batch.quantity === null ? '' : String(batch.quantity),
     unit: batch.unit,
@@ -143,11 +133,8 @@ export default function App() {
   const [exportOpen, setExportOpen] = useState(false);
   const [exportSelected, setExportSelected] = useState(false);
   const [scannerOpen, setScannerOpen] = useState(false);
-  const [scanEntries, setScanEntries] = useState<ScanEntry[]>([]);
-  const [scanError, setScanError] = useState('');
-  const [scanInProgress, setScanInProgress] = useState(false);
-  const scanOperation = useRef<{ session: number; controller: AbortController } | null>(null);
   const scanSaving = useRef(false);
+  const [scannerShopping, setScannerShopping] = useState(false);
   const [usedBatch, setUsedBatch] = useState<string | null>(null);
   const [usageMode, setUsageMode] = useState<'used' | 'remaining'>('used');
   const [usageAmount, setUsageAmount] = useState('');
@@ -155,14 +142,6 @@ export default function App() {
   const [toolName, setToolName] = useState('');
   const [toolToDelete, setToolToDelete] = useState<string | null>(null);
   const [backupToImport, setBackupToImport] = useState<InventoryState | null>(null);
-  const [unknownScan, setUnknownScan] = useState<string | null>(null);
-  const pendingScan = useRef<{
-    barcode: string;
-    resolve: (entry: ScanEntry | false) => void;
-  } | null>(null);
-  const [repeatScan, setRepeatScan] = useState<{ name: string; inTray: boolean } | null>(null);
-  const repeatResolver = useRef<((confirmed: boolean) => void) | null>(null);
-  const scanSession = useRef(0);
   const undoPending = useRef(false);
   const pendingShoppingId = useRef<string | undefined>(undefined);
   const [undoDeduction, setUndoDeduction] = useState<{
@@ -178,18 +157,6 @@ export default function App() {
     const timer = window.setTimeout(() => setToast(''), 5500);
     return () => window.clearTimeout(timer);
   }, [toast]);
-  useEffect(
-    () => () => {
-      pendingScan.current?.resolve(false);
-      pendingScan.current = null;
-      repeatResolver.current?.(false);
-      repeatResolver.current = null;
-      scanOperation.current?.controller.abort();
-      scanOperation.current = null;
-      scanSession.current++;
-    },
-    [],
-  );
   const groups = useMemo(() => groupInventory(inventory), [inventory]);
   const visibleGroups = useMemo(
     () =>
@@ -254,26 +221,15 @@ export default function App() {
     }
   }
   function closeEditor() {
-    pendingScan.current?.resolve(false);
-    pendingScan.current = null;
     pendingShoppingId.current = undefined;
-    setUnknownScan(null);
     setEditor(null);
   }
-  function decideRepeat(confirmed: boolean) {
-    const resolve = repeatResolver.current;
-    repeatResolver.current = null;
-    setRepeatScan(null);
-    resolve?.(confirmed);
-  }
   function closeScanner() {
-    scanSession.current++;
-    scanOperation.current?.controller.abort();
-    scanOperation.current = null;
-    setScanInProgress(false);
-    if (pendingScan.current) closeEditor();
-    decideRepeat(false);
-    setScannerOpen(false);
+    if (!scanSaving.current) setScannerOpen(false);
+  }
+  function openScanner() {
+    setScannerShopping(page === 'shopping');
+    setScannerOpen(true);
   }
   function openAdd() {
     pendingShoppingId.current = undefined;
@@ -310,6 +266,7 @@ export default function App() {
       name: previous?.name ?? name,
       brand: previous?.brand ?? '',
       ingredientName: previous?.ingredientName ?? name,
+      ingredientConfirmed: true,
       quantity: recordedQuantity === null ? '' : String(recordedQuantity),
       unit: recordedUnit,
       location: batch?.location ?? 'fridge',
@@ -355,25 +312,12 @@ export default function App() {
       setFormError('Enter valid purchase and expiration dates.');
       return;
     }
-    if (pendingScan.current) {
-      const { barcode, resolve } = pendingScan.current;
-      pendingScan.current = null;
-      resolve({
-        id: nextId(),
-        barcode,
-        name,
-        brand: draft.brand.trim(),
-        quantity,
-        unit: draft.unit.trim(),
-        purchasedOn: draft.purchasedOn,
-        ingredientName: draft.ingredientName.trim() || undefined,
-        isStaple: draft.isStaple,
-        stapleStatus: draft.isStaple ? draft.stapleStatus : undefined,
-        location: draft.location,
-        expiresOn: draft.expiresOn,
-      });
-      setUnknownScan(null);
-      setEditor(null);
+    const identity = suggestIngredientIdentity(name, { brand: draft.brand });
+    const ingredientName =
+      draft.ingredientName.trim() ||
+      (identity.confidence === 'clear' ? identity.candidates[0] : '');
+    if (!ingredientName || (!draft.ingredientConfirmed && identity.confidence !== 'clear')) {
+      setFormError('Confirm the ingredient for recipe matching, or choose Use product name.');
       return;
     }
     const productId = nextId(),
@@ -388,7 +332,7 @@ export default function App() {
           if (!batch) throw new Error('This batch was removed on another device.');
           let next = updateProduct(state, batch.productId, {
             name,
-            ingredientName: draft.ingredientName.trim() || undefined,
+            ingredientName,
             brand: draft.brand.trim() || undefined,
             isStaple: draft.isStaple,
           });
@@ -411,16 +355,14 @@ export default function App() {
         const product: Product = matching ?? {
           id: productId,
           name,
-          ...(draft.ingredientName.trim() ? { ingredientName: draft.ingredientName.trim() } : {}),
+          ingredientName,
           ...(draft.brand.trim() ? { brand: draft.brand.trim() } : {}),
           isStaple,
         };
         const next = matching
           ? updateProduct(state, matching.id, {
               isStaple,
-              ...(draft.ingredientName.trim()
-                ? { ingredientName: draft.ingredientName.trim() }
-                : {}),
+              ingredientName,
             })
           : addProduct(state, product);
         const added = addBatch(next, {
@@ -433,7 +375,12 @@ export default function App() {
           expiresOn: draft.expiresOn || null,
           ...(isStaple ? { stapleStatus: draft.stapleStatus } : {}),
         });
-        return shoppingId
+        return shoppingId &&
+          matchingShoppingItem(
+            state,
+            { ...draft, ingredientName, ingredientConfirmed: true },
+            shoppingId,
+          ) === shoppingId
           ? {
               ...added,
               shoppingList: added.shoppingList?.map((item) =>
@@ -493,184 +440,6 @@ export default function App() {
       setToast(error instanceof Error ? error.message : 'Could not read this backup.');
     }
     if (fileInput.current) fileInput.current.value = '';
-  }
-  async function handleScanBarcode(code: string): Promise<boolean> {
-    if (scanOperation.current || scanSaving.current) return false;
-    const operation = { session: scanSession.current, controller: new AbortController() };
-    scanOperation.current = operation;
-    setScanInProgress(true);
-    try {
-      return await scanBarcode(code, operation.controller.signal);
-    } finally {
-      if (scanOperation.current === operation) {
-        scanOperation.current = null;
-        setScanInProgress(false);
-      }
-    }
-  }
-  async function scanBarcode(code: string, signal: AbortSignal): Promise<boolean> {
-    setScanError('');
-    const session = scanSession.current;
-    const existing = inventory.products.find((product) => product.barcode === code);
-    const inTray = scanEntries.find((entry) => entry.barcode === code);
-    if (existing || inTray) {
-      const confirmed = await new Promise<boolean>((resolve) => {
-        repeatResolver.current = resolve;
-        setRepeatScan({ name: inTray?.name ?? existing!.name, inTray: !!inTray });
-      });
-      if (!confirmed || session !== scanSession.current) return false;
-      if (
-        inTray &&
-        inTray.quantity !== null &&
-        ['each', 'package'].includes(inTray.unit.toLowerCase())
-      ) {
-        setScanEntries((entries) =>
-          entries.map((entry) =>
-            entry.id === inTray.id
-              ? { ...entry, quantity: entry.quantity === null ? null : entry.quantity + 1 }
-              : entry,
-          ),
-        );
-        return true;
-      }
-    }
-    const result = existing || inTray ? null : await lookupProduct(code, signal);
-    if (session !== scanSession.current) return false;
-    if (result && result.status !== 'found') {
-      const entry = await new Promise<ScanEntry | false>((resolve) => {
-        pendingScan.current = { barcode: code, resolve };
-        setUnknownScan(
-          result.status === 'unavailable'
-            ? 'Product lookup is unavailable. Enter this item’s details and Mise will remember its barcode.'
-            : 'We couldn’t find this barcode. Enter this item’s details and Mise will remember it next time.',
-        );
-        setDraft({
-          ...newDraft(),
-          quantity: '1',
-          unit: 'package',
-          location: location === 'all' ? 'fridge' : location,
-        });
-        setFormError('');
-        setEditor({ kind: 'add' });
-      });
-      if (!entry || session !== scanSession.current) return false;
-      setScanEntries((entries) => [...entries, entry]);
-      return true;
-    }
-    const previousBatch =
-      existing &&
-      inventory.batches
-        .filter((batch) => batch.productId === existing.id)
-        .sort((a, b) => b.purchasedOn.localeCompare(a.purchasedOn))[0];
-    setScanEntries((entries) => [
-      ...entries,
-      {
-        id: nextId(),
-        barcode: code,
-        name:
-          existing?.name ?? inTray?.name ?? (result?.status === 'found' ? result.product.name : ''),
-        brand:
-          existing?.brand ??
-          inTray?.brand ??
-          (result?.status === 'found' ? (result.product.brand ?? '') : ''),
-        ingredientName: existing?.ingredientName ?? inTray?.ingredientName,
-        quantity: 1,
-        unit: 'package',
-        purchasedOn: todayDate(),
-        location:
-          inTray?.location ?? previousBatch?.location ?? (location === 'all' ? 'fridge' : location),
-        expiresOn: '',
-      },
-    ]);
-    return true;
-  }
-  function updateScan(id: string, patch: Partial<ScanEntry>) {
-    setScanEntries((entries) =>
-      entries.map((entry) => (entry.id === id ? { ...entry, ...patch } : entry)),
-    );
-  }
-  async function saveScan() {
-    if (!scanEntries.length || scanSaving.current) return;
-    if (scanOperation.current) {
-      setScanError('Finish reviewing the current item before adding your groceries.');
-      return;
-    }
-    if (
-      scanEntries.some(
-        (entry) =>
-          !entry.name.trim() ||
-          !entry.unit.trim() ||
-          (entry.quantity !== null && (!Number.isFinite(entry.quantity) || entry.quantity < 0)) ||
-          !isDateOnly(entry.purchasedOn) ||
-          entry.purchasedOn > todayDate() ||
-          !!(entry.expiresOn && !isDateOnly(entry.expiresOn)),
-      )
-    ) {
-      setScanError(
-        'Give each item a name, unit, valid dates, and a quantity of zero or more—or leave it unknown.',
-      );
-      return;
-    }
-    scanSaving.current = true;
-    const entries = scanEntries.map((entry) => ({
-      ...entry,
-      productId: nextId(),
-      batchId: nextId(),
-    }));
-    setBusy(true);
-    try {
-      await repository.update((state) =>
-        entries.reduce((next, entry) => {
-          const existing =
-            next.products.find((product) => product.barcode === entry.barcode) ??
-            next.products.find(
-              (product) =>
-                (!product.barcode || product.barcode === entry.barcode) &&
-                product.name.toLowerCase() === entry.name.trim().toLowerCase() &&
-                (product.brand ?? '').toLowerCase() === entry.brand.trim().toLowerCase(),
-            );
-          const product: Product = {
-            id: existing?.id ?? entry.productId,
-            name: entry.name.trim(),
-            ...(entry.ingredientName?.trim() || existing?.ingredientName
-              ? { ingredientName: entry.ingredientName?.trim() || existing?.ingredientName }
-              : {}),
-            ...(entry.brand.trim() ? { brand: entry.brand.trim() } : {}),
-            barcode: entry.barcode,
-            isStaple: existing?.isStaple || entry.isStaple || false,
-          };
-          const updated = existing
-            ? updateProduct(next, existing.id, {
-                name: product.name,
-                brand: product.brand,
-                barcode: entry.barcode,
-                ingredientName: product.ingredientName,
-                isStaple: product.isStaple,
-              })
-            : addProduct(next, product);
-          return addBatch(updated, {
-            id: entry.batchId,
-            productId: product.id,
-            location: entry.location,
-            quantity: entry.quantity,
-            unit: entry.unit,
-            purchasedOn: entry.purchasedOn,
-            expiresOn: entry.expiresOn || null,
-            ...(product.isStaple
-              ? { stapleStatus: entry.stapleStatus ?? ('stocked' as const) }
-              : {}),
-          });
-        }, state),
-      );
-      closeScanner();
-      setScanEntries([]);
-      setToast('Groceries added. You’re all stocked up.');
-    } catch (error) {
-      setScanError(error instanceof Error ? error.message : 'Could not add groceries. Try again.');
-    } finally {
-      scanSaving.current = false;
-      setBusy(false);
-    }
   }
   async function saveUsage(event: FormEvent) {
     event.preventDefault();
@@ -736,136 +505,6 @@ export default function App() {
     if (saved) setUndoDeduction(null);
     undoPending.current = false;
   }
-  const scanPackageCount = scanEntries.reduce(
-    (sum, entry) =>
-      sum +
-      (entry.quantity !== null && ['each', 'package'].includes(entry.unit.toLowerCase())
-        ? entry.quantity
-        : 1),
-    0,
-  );
-  const scanTray = (
-    <div className="scan-tray">
-      <div className="tray-title">
-        <h3>Quick review</h3>
-        <span>
-          {scanEntries.length} {scanEntries.length === 1 ? 'item' : 'items'}
-        </span>
-      </div>
-      {!scanEntries.length && (
-        <div className="tray-empty">
-          <Package size={28} />
-          <p>Your scanned groceries will appear here.</p>
-          <span>Check names, storage, and dates before adding.</span>
-        </div>
-      )}
-      {scanEntries.map((entry) => (
-        <div className="scan-entry" key={entry.id}>
-          <div className="scan-entry-top">
-            <label>
-              Item name
-              <Autocomplete
-                label="Item name"
-                value={entry.name}
-                placeholder="What did you scan?"
-                options={[...inventory.products.map((product) => product.name), ...FOOD_CATALOG]}
-                onChange={(name) => updateScan(entry.id, { name })}
-              />
-            </label>
-            <button
-              className="icon-button"
-              aria-label={`Remove ${entry.name || 'scanned item'}`}
-              onClick={() =>
-                setScanEntries((items) => items.filter((item) => item.id !== entry.id))
-              }
-            >
-              <X size={18} />
-            </button>
-          </div>
-          {entry.note && <p className="field-note">{entry.note}</p>}
-          <label>
-            Store in
-            <Choice
-              label={`Store ${entry.name || 'scanned item'} in`}
-              value={entry.location}
-              onChange={(value) => updateScan(entry.id, { location: value as StorageLocation })}
-              options={Object.entries(locationNames).map(([value, label]) => ({ value, label }))}
-            />
-          </label>
-          <div className="form-row">
-            <label>
-              Quantity
-              <input
-                type="number"
-                min="0"
-                step="any"
-                value={entry.quantity ?? ''}
-                placeholder="Unknown"
-                onChange={(event) =>
-                  updateScan(entry.id, {
-                    quantity: event.target.value === '' ? null : Number(event.target.value),
-                  })
-                }
-              />
-            </label>
-            <label>
-              Unit
-              <Autocomplete
-                label="Unit"
-                value={entry.unit}
-                options={[
-                  'package',
-                  'each',
-                  'g',
-                  'kg',
-                  'oz',
-                  'lb',
-                  'mL',
-                  'L',
-                  'cup',
-                  'tbsp',
-                  'tsp',
-                ]}
-                onChange={(unit) => updateScan(entry.id, { unit })}
-              />
-            </label>
-          </div>
-          <label>
-            Purchased
-            <input
-              type="date"
-              value={entry.purchasedOn}
-              max={todayDate()}
-              onChange={(event) => updateScan(entry.id, { purchasedOn: event.target.value })}
-            />
-          </label>
-          <label>
-            Expiration <span className="optional">optional</span>
-            <input
-              type="date"
-              value={entry.expiresOn}
-              onChange={(event) => updateScan(entry.id, { expiresOn: event.target.value })}
-            />
-          </label>
-        </div>
-      ))}
-      {scanError && (
-        <p className="form-error" role="alert">
-          {scanError}
-        </p>
-      )}
-      <button
-        className="button primary full-width"
-        disabled={!scanEntries.length || isSaving || scanInProgress}
-        onClick={() => {
-          void saveScan();
-        }}
-      >
-        <CheckCheck size={18} />
-        {isSaving ? 'Saving…' : 'Add to inventory'}
-      </button>
-    </div>
-  );
 
   return (
     <div className="app-shell">
@@ -1034,8 +673,7 @@ export default function App() {
                 <button
                   className="button secondary"
                   onClick={() => {
-                    setScanError('');
-                    setScannerOpen(true);
+                    openScanner();
                   }}
                 >
                   <ScanLine size={19} />
@@ -1056,7 +694,7 @@ export default function App() {
               update={(reducer) => repository.update(reducer)}
               onToast={setToast}
               onQuickAdd={quickAdd}
-              onScan={() => setScannerOpen(true)}
+              onScan={openScanner}
               onConfigure={() => setSettingsOpen(true)}
               onNavigate={setPage}
             />
@@ -1217,7 +855,7 @@ export default function App() {
                       <Plus size={18} />
                       Add your first item
                     </button>
-                    <button className="text-button" onClick={() => setScannerOpen(true)}>
+                    <button className="text-button" onClick={openScanner}>
                       <ScanLine size={16} />
                       Or scan your groceries
                       <ArrowRight size={15} />
@@ -1394,7 +1032,7 @@ export default function App() {
           >
             <Sparkles size={20} /> Gemini
           </button>
-          <button className="mobile-scan" onClick={() => setScannerOpen(true)}>
+          <button className="mobile-scan" onClick={openScanner}>
             <ScanLine size={23} />
             Scan
           </button>
@@ -1411,9 +1049,6 @@ export default function App() {
         onDraftChange={setDraft}
         onClose={closeEditor}
         suggestions={inventory.products.map((product) => product.name)}
-        title={unknownScan ? 'Product not found' : undefined}
-        description={unknownScan ?? undefined}
-        submitLabel={unknownScan ? 'Add to review' : undefined}
         onSubmit={(event) => {
           void saveItem(event);
         }}
@@ -1636,6 +1271,7 @@ export default function App() {
           </p>
         </div>
         <GeminiSettings onToast={setToast} />
+        <RecipeProviderSettings onToast={setToast} />
         <div className="settings-section">
           <h3>Keep a backup</h3>
           <p className="settings-note">
@@ -1734,40 +1370,25 @@ export default function App() {
       </Modal>
       <Modal
         open={scannerOpen}
-        onClose={() => {
-          if (!isSaving) closeScanner();
-        }}
+        onClose={closeScanner}
         title="Stock up, simply"
-        description="One intentional scan adds one package. Review everything before saving."
+        description="Review each purchase, or bulk scan into one location."
         className="scanner-modal"
       >
         {scannerOpen && (
-          <Scanner
-            onAdd={handleScanBarcode}
+          <GroceryScannerSession
+            inventory={inventory}
+            update={(reducer) => repository.update(reducer)}
             onClose={closeScanner}
-            tray={scanTray}
-            packageCount={scanPackageCount}
+            onToast={setToast}
+            onSavingChange={(saving) => {
+              scanSaving.current = saving;
+              setBusy(saving);
+            }}
+            defaultLocation={location === 'all' ? 'fridge' : location}
+            shoppingContext={scannerShopping}
           />
         )}
-      </Modal>
-      <Modal
-        open={!!repeatScan}
-        onClose={() => decideRepeat(false)}
-        title={`Add another ${repeatScan?.name ?? 'item'}?`}
-        description={
-          repeatScan?.inTray
-            ? 'This item is already in your review. Add one more package?'
-            : 'You already have this item. Add a new package with its own purchase and expiration dates?'
-        }
-      >
-        <div className="form-footer">
-          <button className="button secondary" onClick={() => decideRepeat(false)}>
-            Skip
-          </button>
-          <button className="button primary" onClick={() => decideRepeat(true)}>
-            Add 1 package
-          </button>
-        </div>
       </Modal>
       {toast && (
         <div className="toast" role="status">

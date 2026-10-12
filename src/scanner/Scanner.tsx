@@ -9,6 +9,8 @@ export interface ScannerProps {
   onClose: () => void;
   tray?: ReactNode;
   packageCount?: number;
+  controls?: ReactNode;
+  successMessage?: string;
 }
 
 export const AUTO_NEXT_PREFERENCE_KEY = 'mise:scanner:auto-next:v1';
@@ -42,7 +44,14 @@ function currentPosture(): DevicePosture | undefined {
   return (navigator as Navigator & { devicePosture?: DevicePosture }).devicePosture;
 }
 
-export function Scanner({ onAdd, onClose, tray, packageCount = 0 }: ScannerProps) {
+export function Scanner({
+  onAdd,
+  onClose,
+  tray,
+  packageCount = 0,
+  controls,
+  successMessage = 'Package added to your review.',
+}: ScannerProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const controlsRef = useRef<{ stop: () => void } | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -104,35 +113,36 @@ export function Scanner({ onAdd, onClose, tray, packageCount = 0 }: ScannerProps
     return () => document.removeEventListener('visibilitychange', onVisibilityChange);
   }, [stopCamera]);
 
-  const addCode = useCallback(async (normalizedCode: string) => {
-    if (busyRef.current) return;
-    busyRef.current = true;
-    setBusy(true);
-    setFormError('');
-    setFeedback('Finding this item…');
-    try {
-      const added = await onAddRef.current(normalizedCode);
-      if (mountedRef.current) {
-        setFeedback(
-          added === false
-            ? 'Item not added. You can scan again when ready.'
-            : 'Package added to your review.',
-        );
-        if (added !== false) setCode('');
+  const addCode = useCallback(
+    async (normalizedCode: string) => {
+      if (busyRef.current) return;
+      busyRef.current = true;
+      setBusy(true);
+      setFormError('');
+      setFeedback('Finding this item…');
+      try {
+        const added = await onAddRef.current(normalizedCode);
+        if (mountedRef.current) {
+          setFeedback(
+            added === false ? 'Item not added. You can scan again when ready.' : successMessage,
+          );
+          if (added !== false) setCode('');
+        }
+      } catch (error) {
+        if (mountedRef.current) {
+          setFeedback('');
+          setFormError(
+            error instanceof Error ? error.message : 'This item couldn’t be added. Try again.',
+          );
+        }
+      } finally {
+        gateRef.current.resetObservations();
+        busyRef.current = false;
+        if (mountedRef.current) setBusy(false);
       }
-    } catch (error) {
-      if (mountedRef.current) {
-        setFeedback('');
-        setFormError(
-          error instanceof Error ? error.message : 'This item couldn’t be added. Try again.',
-        );
-      }
-    } finally {
-      gateRef.current.resetObservations();
-      busyRef.current = false;
-      if (mountedRef.current) setBusy(false);
-    }
-  }, []);
+    },
+    [successMessage],
+  );
 
   const startCamera = async () => {
     stopCamera();
@@ -253,7 +263,7 @@ export function Scanner({ onAdd, onClose, tray, packageCount = 0 }: ScannerProps
         <div>
           <span className="scanner__eyebrow">GROCERY CHECK-IN</span>
           <h2>Scan your groceries</h2>
-          <p>One scan, one package. Review everything before adding it.</p>
+          <p>Scan a package, choose its home, and keep going.</p>
         </div>
         <button
           type="button"
@@ -267,6 +277,7 @@ export function Scanner({ onAdd, onClose, tray, packageCount = 0 }: ScannerProps
           <X size={22} />
         </button>
       </header>
+      {controls}
       <div className="scanner__layout">
         <div className="scanner__capture">
           <div className={`scanner__preview${!armed ? ' scanner__preview--captured' : ''}`}>

@@ -13,9 +13,9 @@ cover-sized, unfolded, and desktop viewports without claiming native posture sup
 - Purchases retain separate quantities, purchase dates, and entered expiration dates.
 - Unknown quantity is `null`, distinct from zero. Dates are date-only strings.
 - Staples remain stocked until manually marked low/empty. No automatic shopping.
-- Barcode scans default to automatic next-item capture with repeated-frame suppression. Repeat items require confirmation; unknown products require a details form.
+- Barcode scans default to automatic next-item capture with repeated-frame suppression. Quick review commits each purchase immediately, with destination and optional expiration visible. Bulk mode can remember one destination; optional automatic saves apply only to clear new products. Repeat items, unknown products, and uncertain identities require confirmation. Original package quantities remain separate from a batch's remaining stock.
 - Gemini supports copied Markdown and an optional free-tier API behind an authenticated Cloudflare Worker. No Firebase setup, receipt imports, or Obsidian in this release. API secrets stay server-side; local pairing credentials never enter backups.
-- Recipe browsing uses the bundled Wikibooks collection with optional TheMealDB searches. Preserve per-recipe attribution, license, source revision links, and original ingredient measures in details and backups. Ingestion must reject incomplete/unsupported structures rather than silently drop required ingredients. Never invent yields or quantities.
+- Recipe browsing uses the bundled Wikibooks collection with optional TheMealDB, RecipeAPI.io, and Spoonacular searches. Preserve per-recipe attribution, license, source revision links, and original ingredient measures in details and backups. Ingestion must reject incomplete/unsupported structures rather than silently drop required ingredients. Never invent yields or quantities. RecipeAPI selected personal saves retain attribution; Spoonacular is transient source-link discovery only and must expire within one hour, with no persistent records or AI copying. Additional provider keys stay server-side and require explicit free-plan configuration.
 - Distinguish browser-only storage from signed-in cloud sync. Never imply local sync.
 - Do not overwrite existing cloud data unless the user explicitly confirms replacement.
 - Keep unfinished edits and scan sessions through responsive layout changes.
@@ -42,9 +42,9 @@ the changes and state any untested behavior honestly.
 - `npm run emulators`: local auth and Firestore; use demo project only.
 - `npm run format`: format edited source; do not claim this is a test.
 
-Deployment is configured for GitHub main pushes after checks pass. Firebase/GitHub
-account setup is required before that workflow can deliver updates. Avoid forced
-reloads, unnecessary service workers, and destructive data migrations.
+The GitHub workflow runs checks and uploads build artifacts when the repository is
+connected; it does not deploy the private site. Avoid forced reloads, unnecessary
+service workers, and destructive data migrations.
 
 The private hosted copy uses Sites. Reuse the project ID in `.openai/hosting.json`
 and apply the Sites skill for source synchronization and publication. Preserve its
