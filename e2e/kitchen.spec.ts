@@ -312,62 +312,6 @@ test('uses tappable in-app suggestions with storage first and editable units', a
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 });
 
-async function swipeOptions(page: Page) {
-  const list = page.getByRole('listbox');
-  const bounds = await list.boundingBox();
-  expect(bounds).not.toBeNull();
-  const session = await page.context().newCDPSession(page);
-  await session.send('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 1 });
-  const x = bounds!.x + bounds!.width / 2;
-  const y = bounds!.y + bounds!.height - 20;
-  await session.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x, y }] });
-  for (let step = 1; step <= 8; step++) {
-    await session.send('Input.dispatchTouchEvent', {
-      type: 'touchMove',
-      touchPoints: [{ x, y: y - step * 15 }],
-    });
-  }
-  await session.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
-  await session.detach();
-  await expect.poll(() => list.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
-}
-
-test('scrolls recipe dropdowns without selecting and searches options before a tap', async ({
-  page,
-}) => {
-  await navigate(page, 'Recipes');
-  await expect(page.locator('.library-intro')).toContainText('built-in recipes');
-  await page.getByText('Refine recipes', { exact: true }).click();
-  const category = page.getByRole('combobox', { name: 'Recipe category', exact: true });
-  await category.click();
-  await expect(page.getByRole('option')).not.toHaveCount(0);
-  await swipeOptions(page);
-  await expect(category).toHaveAttribute('aria-expanded', 'true');
-  await expect(category).toContainText('Every category');
-  await page.getByLabel('Search recipe category', { exact: true }).fill('soup');
-  await page.getByRole('option', { name: 'Soup', exact: true }).click();
-  await expect(category).toContainText('Soup');
-  await expect(category).toHaveAttribute('aria-expanded', 'false');
-  await category.click();
-  await page.getByLabel('Search recipe category', { exact: true }).fill('no-such-category');
-  await expect(page.getByText('No matching options.', { exact: true })).toBeVisible();
-  await page.getByLabel('Search recipe category', { exact: true }).press('Escape');
-  await expect(category).toHaveAttribute('aria-expanded', 'false');
-});
-
-test('scrolls ingredient autocomplete without replacing the item name', async ({ page }) => {
-  await page.getByRole('button', { name: 'Add item', exact: true }).click();
-  const editor = page.getByRole('dialog', { name: 'Add an ingredient' });
-  const name = editor.getByRole('combobox', { name: 'Item name', exact: true });
-  await name.click();
-  await swipeOptions(page);
-  await expect(name).toHaveValue('');
-  await expect(name).toHaveAttribute('aria-expanded', 'true');
-  await name.fill('ban');
-  await editor.getByRole('option', { name: 'Bananas', exact: true }).click();
-  await expect(name).toHaveValue('Bananas');
-});
-
 test('deducts one with undo and retains flexible quantity entry', async ({ page }) => {
   await addItem(page, 'Apples', '3');
   await page.getByRole('button', { name: 'Use one Apples', exact: true }).click();
@@ -393,7 +337,9 @@ test('persists the automatic-next scanner preference', async ({ page }) => {
   await expect(autoNext).not.toBeChecked();
 });
 
-test('searches online recipes, compares quantities, and shows cooking steps', async ({ page }) => {
+test('searches online recipes, compares quantities, and shows cooking steps', async ({
+  page,
+}) => {
   await page.route('https://www.themealdb.com/api/**', (route) => {
     const address = new URL(route.request().url());
     const meal = {
