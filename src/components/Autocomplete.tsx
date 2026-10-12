@@ -1,4 +1,5 @@
-import { useId, useState, type KeyboardEvent } from 'react';
+import { useCallback, useId, useState, type KeyboardEvent } from 'react';
+import { useOptionPopup } from './useOptionPopup';
 
 interface Props {
   value: string;
@@ -23,6 +24,11 @@ export function Autocomplete({
   const id = useId();
   const [open, setOpen] = useState(false);
   const [active, setActive] = useState(-1);
+  const close = useCallback(() => {
+    setOpen(false);
+    setActive(-1);
+  }, []);
+  const popup = useOptionPopup(open, close);
   const matches = [...new Set(options)]
     .filter((option) => option.toLowerCase().includes(value.trim().toLowerCase()))
     .slice(0, 8);
@@ -50,7 +56,7 @@ export function Autocomplete({
     }
   }
   return (
-    <span className="autocomplete">
+    <span className="autocomplete" ref={popup.container} onBlur={popup.blur}>
       <input
         role="combobox"
         aria-label={label}
@@ -65,10 +71,6 @@ export function Autocomplete({
         value={value}
         placeholder={placeholder}
         onFocus={() => setOpen(true)}
-        onBlur={() => {
-          setOpen(false);
-          setActive(-1);
-        }}
         onChange={(event) => {
           onChange(event.target.value);
           setOpen(true);
@@ -77,7 +79,13 @@ export function Autocomplete({
         onKeyDown={key}
       />
       {open && matches.length > 0 && (
-        <span id={id} role="listbox" className="autocomplete-options">
+        <span
+          id={id}
+          role="listbox"
+          className={`autocomplete-options ${popup.placement.above ? 'options-above' : ''}`}
+          style={{ maxHeight: popup.placement.maxHeight }}
+          {...popup.interaction}
+        >
           {matches.map((option, index) => (
             <span
               key={option}
@@ -85,12 +93,10 @@ export function Autocomplete({
               role="option"
               aria-selected={active === index}
               className={active === index ? 'active' : ''}
-              onPointerDown={(event) => {
-                event.preventDefault();
-                choose(option);
-              }}
               onMouseDown={(event) => event.preventDefault()}
-              onClick={() => choose(option)}
+              onClick={(event) => {
+                if (popup.canSelect(event)) choose(option);
+              }}
             >
               {option}
             </span>
