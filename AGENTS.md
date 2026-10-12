@@ -36,6 +36,9 @@ Use small commits describing complete changes. Preserve the npm lockfile; use `n
 after the first installation. Before reporting completion, run checks appropriate to
 the changes and state any untested behavior honestly.
 
+Parallel browser-test processes must use separate Playwright output directories so
+one process cannot delete another process's active traces.
+
 ## Commands
 
 - `npm run dev`: local interface.

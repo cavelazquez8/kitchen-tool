@@ -1,10 +1,12 @@
 import {
   ChevronDown,
   ChevronRight,
+  CircleHelp,
   CookingPot,
   Ellipsis,
   Minus,
   Package,
+  Plus,
   Search,
   Snowflake,
 } from 'lucide-react';
@@ -23,6 +25,7 @@ import {
   groupExpiry,
   stapleCaption,
 } from './inventoryPresentation';
+import './inventory-polish.css';
 
 const locationIcons = {
   fridge: <Package size={17} />,
@@ -39,6 +42,7 @@ export interface InventoryListProps {
   onEdit: (batch: Batch, product: Product) => void;
   onUse: (batch: Batch) => void;
   onDeduct: (batch: Batch) => void;
+  onAddOne: (batch: Batch) => void;
   onClearFilters: () => void;
 }
 
@@ -51,6 +55,7 @@ export function InventoryList({
   onEdit,
   onUse,
   onDeduct,
+  onAddOne,
   onClearFilters,
 }: InventoryListProps) {
   return (
@@ -86,23 +91,37 @@ export function InventoryList({
               </div>
               {items.map((group) => {
                 const date = groupExpiry(group);
-                const countable = group.batches
+                const countableBatches = group.batches
                   .filter(
                     (batch) =>
                       batch.quantity !== null &&
-                      batch.quantity >= 1 &&
                       [
                         'each',
+                        'item',
+                        'items',
+                        'count',
+                        'ct',
                         'package',
+                        'packages',
                         'piece',
                         'pieces',
                         'can',
+                        'cans',
                         'bottle',
+                        'bottles',
+                        'carton',
+                        'cartons',
                         'bag',
+                        'bags',
                         'packet',
-                      ].includes(batch.unit.toLowerCase()),
+                        'packets',
+                      ].includes(batch.unit.trim().toLowerCase()),
                   )
-                  .sort((a, b) => (a.expiresOn ?? '9999').localeCompare(b.expiresOn ?? '9999'))[0];
+                  .sort((a, b) => (a.expiresOn ?? '9999').localeCompare(b.expiresOn ?? '9999'));
+                const countable =
+                  countableBatches.find(
+                    (batch) => batch.quantity !== null && batch.quantity >= 1,
+                  ) ?? countableBatches[0];
 
                 const near = date && daysUntil(date) <= 3;
                 return (
@@ -120,38 +139,68 @@ export function InventoryList({
                           onChange={() => onToggleSelected(group)}
                         />
                       </label>
-                      <button
-                        className="item-main"
-                        onClick={() => onToggleGroup(group.id)}
-                        aria-expanded={expanded === group.id}
-                      >
-                        <span className="food-icon" aria-hidden="true">
-                          {foodIcon(group.product.name)}
-                        </span>
-                        <span className="item-name">
-                          <strong>{group.product.name}</strong>
-                          <small>
-                            {group.product.brand ? `${group.product.brand} · ` : ''}
-                            {group.batches.length > 1
-                              ? `${group.batches.length} purchase batches`
-                              : `Bought ${dateLabel(group.batches[0].purchasedOn)}`}
-                            {group.product.isStaple && <span className="staple-tag">Staple</span>}
-                          </small>
-                        </span>
-                      </button>
-                      <span className="item-quantity">
-                        {group.hasMixedUnits
-                          ? `${group.batches.length} batches`
-                          : formatQuantity(group.quantity, group.unit)}
-                        {countable && (
+                      <div className="item-main">
+                        <button
+                          className="item-summary"
+                          onClick={() => onToggleGroup(group.id)}
+                          aria-expanded={expanded === group.id}
+                        >
+                          <span className="food-icon" aria-hidden="true">
+                            {foodIcon(group.product.name)}
+                          </span>
+                          <span className="item-name">
+                            <strong>{group.product.name}</strong>
+                            <small>
+                              {group.product.brand ? `${group.product.brand} · ` : ''}
+                              {group.batches.length > 1
+                                ? `${group.batches.length} purchase batches`
+                                : `Bought ${dateLabel(group.batches[0].purchasedOn)}`}
+                              {group.product.isStaple && <span className="staple-tag">Staple</span>}
+                            </small>
+                          </span>
+                        </button>
+                        {!group.product.ingredientName?.trim() && (
                           <button
                             type="button"
-                            className="deduct-one"
-                            aria-label={`Use one ${group.product.name}`}
-                            onClick={() => onDeduct(countable)}
+                            className="recipe-match-indicator"
+                            aria-label={`Set recipe match for ${group.product.name}`}
+                            title="Recipe matching ingredient name is missing. Set it for clearer matches."
+                            onClick={() => onEdit(group.batches[0], group.product)}
                           >
-                            −1
+                            <CircleHelp size={15} aria-hidden="true" />
                           </button>
+                        )}
+                      </div>
+                      <span className="item-quantity">
+                        <span className="quantity-text">
+                          {group.hasMixedUnits
+                            ? `${group.batches.length} batches`
+                            : formatQuantity(group.quantity, group.unit)}
+                        </span>
+                        {countable && (
+                          <span
+                            className="quantity-stepper"
+                            role="group"
+                            aria-label={`Quick quantity for ${group.product.name}`}
+                          >
+                            <button
+                              type="button"
+                              aria-label={`Use one ${group.product.name}`}
+                              title={`Use 1 ${countable.unit} from the earliest dated available batch`}
+                              disabled={countable.quantity === null || countable.quantity < 1}
+                              onClick={() => onDeduct(countable)}
+                            >
+                              <Minus size={16} aria-hidden="true" />
+                            </button>
+                            <button
+                              type="button"
+                              aria-label={`Add one ${group.product.name}`}
+                              title={`Add 1 ${countable.unit} to this purchase batch`}
+                              onClick={() => onAddOne(countable)}
+                            >
+                              <Plus size={16} aria-hidden="true" />
+                            </button>
+                          </span>
                         )}
                         {group.product.isStaple && (
                           <small
@@ -202,6 +251,31 @@ export function InventoryList({
                               </small>
                             </div>
                             <div className="batch-actions">
+                              {batch.quantity !== null && (
+                                <span
+                                  className="quantity-stepper"
+                                  role="group"
+                                  aria-label={`Quantity for ${group.product.name}, bought ${dateLabel(batch.purchasedOn)}`}
+                                >
+                                  <button
+                                    type="button"
+                                    aria-label={`Use 1 ${batch.unit || 'item'} of ${group.product.name}`}
+                                    title={`Use 1 ${batch.unit || 'item'}`}
+                                    disabled={batch.quantity < 1}
+                                    onClick={() => onDeduct(batch)}
+                                  >
+                                    <Minus size={16} aria-hidden="true" />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    aria-label={`Add 1 ${batch.unit || 'item'} to ${group.product.name}`}
+                                    title={`Add 1 ${batch.unit || 'item'}`}
+                                    onClick={() => onAddOne(batch)}
+                                  >
+                                    <Plus size={16} aria-hidden="true" />
+                                  </button>
+                                </span>
+                              )}
                               <button onClick={() => onUse(batch)}>
                                 <Minus size={15} />
                                 Used some

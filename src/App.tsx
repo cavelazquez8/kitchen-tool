@@ -148,6 +148,7 @@ export default function App() {
     batchId: string;
     unit: string;
     message: string;
+    restore: 1 | -1;
   } | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
   const exportText = useRef<HTMLTextAreaElement>(null);
@@ -482,12 +483,32 @@ export default function App() {
         ),
       message,
     );
-    if (saved) setUndoDeduction({ batchId: batch.id, unit: batch.unit, message });
+    if (saved) setUndoDeduction({ batchId: batch.id, unit: batch.unit, message, restore: 1 });
+  }
+  async function addOne(batch: Batch) {
+    const name =
+      inventory.products.find((product) => product.id === batch.productId)?.name ?? 'item';
+    const message = `Added one ${name}.`;
+    const saved = await act(
+      () =>
+        repository.update((state) => {
+          const current = state.batches.find((item) => item.id === batch.id);
+          if (!current || current.quantity === null)
+            throw new Error('Set the remaining quantity before adjusting it.');
+          return setBatchRemaining(
+            state,
+            current.id,
+            current.quantity + convertQuantity(1, batch.unit, current.unit),
+          );
+        }),
+      message,
+    );
+    if (saved) setUndoDeduction({ batchId: batch.id, unit: batch.unit, message, restore: -1 });
   }
   async function undoLastDeduction() {
     if (!undoDeduction || undoPending.current) return;
     undoPending.current = true;
-    const { batchId, unit } = undoDeduction;
+    const { batchId, unit, restore } = undoDeduction;
     const saved = await act(
       () =>
         repository.update((state) => {
@@ -497,7 +518,7 @@ export default function App() {
           return setBatchRemaining(
             state,
             batchId,
-            batch.quantity + convertQuantity(1, unit, batch.unit),
+            batch.quantity + restore * convertQuantity(1, unit, batch.unit),
           );
         }),
       'Quantity restored.',
@@ -872,6 +893,9 @@ export default function App() {
                       onEdit={openEdit}
                       onDeduct={(batch) => {
                         void deductOne(batch);
+                      }}
+                      onAddOne={(batch) => {
+                        void addOne(batch);
                       }}
                       onUse={(batch) => {
                         setUsedBatch(batch.id);

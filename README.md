@@ -13,6 +13,10 @@ A touch-friendly kitchen inventory, recipe library, meal planner, shopping list,
 - Choose **Recipe source** to browse your cookbook or search TheMealDB, RecipeAPI.io, or Spoonacular. Local results update as you type; online sources use a clearly named Search button. Availability, category, cuisine, and expiration preferences apply to the displayed recipes, and counts reflect that filtered source.
 - Optional sources show **Configured** after a setup check; **Test search** verifies a small live request. Empty states distinguish failed searches, no upstream matches, and results hidden by filters. Blank Spoonacular searches start with one chosen inventory ingredient and compare results with the rest of your kitchen.
 - Open an imported recipe and choose **Delete recipe** to remove it from your personal library after confirmation. Any matching meal-plan entry is removed at the same time.
+- Remove any recipe from **Saved recipes** using its trash button. Bundled cookbook recipes stay available in the cookbook after their saved copy is removed.
+- Use **Add to Gemini** on recipe cards or details to attach multiple recipes without leaving the browser. Review or remove attachments in Gemini before sending a message.
+- Adjust recorded inventory quantities with **+ / −** and Undo; unknown amounts stay manual. A small matching icon marks items whose recipe matching ingredient name needs review.
+- **Clear all** under What to buy removes the shopping list after confirmation. Quick shopping entry keeps its scanner and searchable ingredient field without suggested-item chips.
 - Choose **Recipe collection** for saved favorites, personal imports, your own recipes, or saved AI recipes. Collections combine with availability and text filters. Personal imports include text, website, image, and video imports; API saves remain under saved recipes.
 - Add your own recipes or import pasted recipes. Website import uses published Recipe JSON-LD through the optional backend.
 - Review recorded quantities, cook with step timers, and optionally keep the screen awake. Finish cooking reviews deductions before changing inventory.
@@ -32,6 +36,8 @@ Online result counts describe recipes loaded by your current search, not the pro
 Wikibooks content is adapted under CC BY-SA 4.0. Recipe details, saved records, and backups preserve contributor attribution, original revision links, and the content license. Recipe photos are not copied from Wikibooks. Unsupported, incomplete, or ambiguous source structures are excluded during ingestion; unknown amounts and yields remain unknown.
 
 See [optional free recipe-source setup](docs/provider-setup.md). Provider keys stay in Worker secrets. RecipeAPI.io allows selected personal-library saves with attribution. Spoonacular results are temporary discovery links, expire within one hour, and never enter saved recipes, meal plans, Gemini context, or backups. The existing Gemini Worker needs the updated downloadable code before these optional endpoints work.
+
+The downloadable Worker uses request options accepted by Cloudflare, including older dashboard compatibility dates. `npm run check` now runs the built Worker in workerd with intercepted upstream responses to check both providers and website imports without real keys or network access. Copying JavaScript into Cloudflare does not apply this repository's Wrangler settings.
 
 ## Data and backups
 

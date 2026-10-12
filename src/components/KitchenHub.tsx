@@ -40,6 +40,7 @@ import { RecipeEditor } from './RecipeEditor';
 import { FinishCooking } from './FinishCooking';
 import { RecipeBrowser } from './RecipeBrowser';
 import './recipeProviders.css';
+import './kitchenPolish.css';
 
 export type HubPage = 'recipes' | 'shopping' | 'assistant';
 interface Props {
@@ -166,7 +167,10 @@ export function KitchenHub({
   const [aiBusy, setAiBusy] = useState(false);
   const [message, setMessage] = useState('');
   const [candidates, setCandidates] = useState<Recipe[]>([]);
-  const [chatRecipe, setChatRecipe] = useState<Recipe | null>(null);
+  const [chatRecipes, setChatRecipes] = useState<Recipe[]>([]);
+  const [clearShoppingOpen, setClearShoppingOpen] = useState(false);
+  const [clearingShopping, setClearingShopping] = useState(false);
+  const [clearShoppingError, setClearShoppingError] = useState('');
   const [shoppingName, setShoppingName] = useState('');
   const [manualShoppingName, setManualShoppingName] = useState('');
   const [timers, setTimers] = useState<Record<string, number>>({});
@@ -260,11 +264,14 @@ export function KitchenHub({
         const savedRecipe = state.recipes?.find((item) => item.id === recipe.id);
         if (
           !savedRecipe ||
-          savedRecipe.source.type !== 'imported' ||
+          savedRecipe.source.type !== recipe.source.type ||
+          savedRecipe.title !== recipe.title ||
           !canPersistProviderRecipe(savedRecipe)
         )
           throw new Error(
-            'This recipe is no longer a saved import. Close this review and try again.',
+            recipe.source.type === 'imported'
+              ? 'This recipe is no longer a saved import. Close this review and try again.'
+              : 'This saved recipe changed. Close this review and try again.',
           );
         return {
           ...state,
@@ -276,7 +283,7 @@ export function KitchenHub({
       }, 'Recipe deleted.');
       setDetail((current) => (current?.id === recipe.id ? null : current));
       setSavedReveal((current) => (current?.id === recipe.id ? null : current));
-      setChatRecipe((current) => (current?.id === recipe.id ? null : current));
+      setChatRecipes((current) => current.filter((item) => item.id !== recipe.id));
       setCandidates((current) => current.filter((item) => item.id !== recipe.id));
       setAwake(false);
       setTimers((current) =>
@@ -304,13 +311,31 @@ export function KitchenHub({
     setEditingNotes(notes);
     setEditing(recipe);
   }
+  function addToGemini(recipe: Recipe): boolean {
+    if (!canPersistProviderRecipe(recipe)) {
+      setError('Open the original website to use this temporary discovery recipe.');
+      return false;
+    }
+    if (chatRecipes.some((item) => item.id === recipe.id)) return true;
+    const next = [...chatRecipes, recipe];
+    if (next.map(recipeContext).join('\n\n').length > 12000) {
+      setError(
+        'These recipes are too long to send together. Remove a recipe from Gemini context first.',
+      );
+      onToast('Gemini context is full. Remove a recipe to add another.');
+      return false;
+    }
+    setChatRecipes(next);
+    onToast('Recipe added to Gemini context.');
+    return true;
+  }
   function reviewReply(reply: AiReply) {
     const recipes = reply.recipes.map((draft) =>
       normalizeAiRecipe(draft, crypto.randomUUID(), { type: 'ai', name: 'Gemini' }),
     );
     if (recipes.length) {
       setCandidates(recipes);
-      setChatRecipe(recipes[0]);
+      setChatRecipes((current) => (current.length ? current : [recipes[0]]));
     }
     return recipes;
   }
@@ -333,7 +358,7 @@ export function KitchenHub({
       const reply = await sendGeminiChat(connection, {
         message: prompt.trim(),
         inventory: boundedInventoryContext(generateMarkdown(relevant, { includeTools: true })),
-        ...(chatRecipe ? { recipe: recipeContext(chatRecipe) } : {}),
+        ...(chatRecipes.length ? { recipe: chatRecipes.map(recipeContext).join('\n\n') } : {}),
         history: boundedChatHistory(history),
       });
       const assistant = {
@@ -464,18 +489,6 @@ export function KitchenHub({
         ...(detail.servings && detailServings ? { servings: Number(detailServings) } : {}),
       })
     : null;
-  const quickFoods = [
-    ...new Set([
-      ...inventory.products.map((product) => product.name),
-      'Bananas',
-      'Carrots',
-      'Onions',
-      'Tomatoes',
-      'Apples',
-      'Eggs',
-    ]),
-  ].slice(0, 8);
-
   return (
     <div className="kitchen-hub">
       {page === 'recipes' && (
@@ -491,6 +504,12 @@ export function KitchenHub({
               setDetailServings(recipe.servings ? String(recipe.servings) : '');
             }}
             onSave={(recipe) => openEditor(recipe)}
+            onRemoveSaved={(recipe) => {
+              setRecipeDeleteError('');
+              setRecipeToDelete(recipe);
+            }}
+            onAddToGemini={addToGemini}
+            geminiRecipeIds={chatRecipes.map((recipe) => recipe.id)}
             onImport={() => {
               setImportText('');
               setImportUrl('');
@@ -530,38 +549,12 @@ export function KitchenHub({
             <div className="hub-section-title">
               <div>
                 <h2>Quick add while you shop</h2>
-                <p>Scan packaged foods or tap a familiar ingredient.</p>
+                <p>Scan packaged foods or search for an ingredient.</p>
               </div>
               <button className="button secondary" onClick={onScan}>
                 <ScanLine size={18} />
                 Scan
               </button>
-            </div>
-            <div className="quick-foods">
-              {quickFoods.map((name) => (
-                <button
-                  key={name}
-                  onClick={() => {
-                    const product = inventory.products.find((p) => p.name === name);
-                    const batch = inventory.batches.find((b) => b.productId === product?.id);
-                    const unit = batch?.unit ?? 'each';
-                    const countable = [
-                      'each',
-                      'piece',
-                      'pieces',
-                      'package',
-                      'can',
-                      'bottle',
-                      'bag',
-                      'packet',
-                    ].includes(unit.toLowerCase());
-                    onQuickAdd(name, countable ? 1 : null, unit);
-                  }}
-                >
-                  <Plus size={16} />
-                  {name}
-                </button>
-              ))}
             </div>
             <form
               className="hub-search"
@@ -657,7 +650,20 @@ export function KitchenHub({
           <section className="shopping-panel">
             <div className="hub-section-title">
               <h2>What to buy</h2>
-              <span>{shopping.filter((item) => !item.checked).length} remaining</span>
+              <div className="shopping-list-actions">
+                <span>{shopping.filter((item) => !item.checked).length} remaining</span>
+                {shopping.length > 0 && (
+                  <button
+                    className="text-button"
+                    onClick={() => {
+                      setClearShoppingError('');
+                      setClearShoppingOpen(true);
+                    }}
+                  >
+                    Clear all
+                  </button>
+                )}
+              </div>
             </div>
             <form
               className="hub-search"
@@ -809,23 +815,6 @@ export function KitchenHub({
                 Use only selected inventory
               </label>
             )}
-            {chatRecipe && (
-              <span>
-                Recipe context: {chatRecipe.title}
-                <button
-                  className="text-button"
-                  onClick={() => {
-                    setDetail(chatRecipe);
-                    setDetailServings(chatRecipe.servings ? String(chatRecipe.servings) : '');
-                  }}
-                >
-                  View recipe
-                </button>
-                <button className="text-button" onClick={() => setChatRecipe(null)}>
-                  Clear
-                </button>
-              </span>
-            )}
             <button className="text-button" onClick={onConfigure}>
               Connection settings
             </button>
@@ -839,6 +828,38 @@ export function KitchenHub({
               </button>
             )}
           </div>
+          {chatRecipes.length > 0 && (
+            <section className="gemini-recipe-context" aria-label="Gemini recipe context">
+              <div className="hub-section-title">
+                <h3>Recipes in context · {chatRecipes.length}</h3>
+                <button className="text-button" onClick={() => setChatRecipes([])}>
+                  Clear recipes
+                </button>
+              </div>
+              {chatRecipes.map((recipe) => (
+                <div className="gemini-context-row" key={recipe.id}>
+                  <button
+                    className="text-button"
+                    onClick={() => {
+                      setDetail(recipe);
+                      setDetailServings(recipe.servings ? String(recipe.servings) : '');
+                    }}
+                  >
+                    {recipe.title}
+                  </button>
+                  <button
+                    className="icon-button"
+                    aria-label={`Remove ${recipe.title} from Gemini context`}
+                    onClick={() =>
+                      setChatRecipes((current) => current.filter((item) => item.id !== recipe.id))
+                    }
+                  >
+                    <X size={17} />
+                  </button>
+                </div>
+              ))}
+            </section>
+          )}
           <div className="chat-history" aria-label="Gemini conversation">
             {history.map((item) => (
               <div key={item.id} className={`chat-message ${item.role}`}>
@@ -937,9 +958,18 @@ export function KitchenHub({
                   ? 'Update meal plan'
                   : 'Add to meal plan'}
               </button>
+              <button
+                className="button secondary"
+                disabled={chatRecipes.some((recipe) => recipe.id === detail.id)}
+                onClick={() => addToGemini(detail)}
+              >
+                <Sparkles size={17} />
+                {chatRecipes.some((recipe) => recipe.id === detail.id)
+                  ? 'Added to Gemini'
+                  : 'Add to Gemini'}
+              </button>
             </div>
-            {detail.source.type === 'imported' &&
-              canPersistProviderRecipe(detail) &&
+            {canPersistProviderRecipe(detail) &&
               saved.some((recipe) => recipe.id === detail.id) && (
                 <button
                   className="button destructive full-width"
@@ -949,7 +979,7 @@ export function KitchenHub({
                   }}
                 >
                   <Trash2 size={17} />
-                  Delete recipe
+                  {detail.source.type === 'imported' ? 'Delete recipe' : 'Remove saved recipe'}
                 </button>
               )}
             {detail.servings ? (
@@ -1105,7 +1135,7 @@ export function KitchenHub({
             <button
               className="button secondary full-width"
               onClick={() => {
-                setChatRecipe(detail);
+                if (!addToGemini(detail)) return;
                 setDetail(null);
                 onNavigate('assistant');
                 onToast('Recipe attached. Ask Gemini your cooking question.');
@@ -1122,11 +1152,17 @@ export function KitchenHub({
         onClose={() => {
           if (!deletionPending.current) setRecipeToDelete(null);
         }}
-        title={recipeToDelete ? `Delete “${recipeToDelete.title}”?` : 'Delete recipe?'}
+        title={
+          recipeToDelete
+            ? recipeToDelete.source.type === 'imported'
+              ? `Delete “${recipeToDelete.title}”?`
+              : `Remove “${recipeToDelete.title}” from saved recipes?`
+            : 'Remove recipe?'
+        }
         description={
           recipeToDelete && plan.some((item) => item.recipeId === recipeToDelete.id)
-            ? 'This removes the imported recipe from your library and meal plan.'
-            : 'This removes the imported recipe from your library.'
+            ? 'This removes the saved recipe from your library and meal plan.'
+            : 'This removes the saved recipe from your library.'
         }
       >
         {recipeDeleteError && (
@@ -1149,7 +1185,11 @@ export function KitchenHub({
               if (recipeToDelete) void deleteRecipe(recipeToDelete);
             }}
           >
-            {deletingRecipe ? 'Deleting…' : 'Delete recipe'}
+            {deletingRecipe
+              ? 'Removing…'
+              : recipeToDelete?.source.type === 'imported'
+                ? 'Delete recipe'
+                : 'Remove recipe'}
           </button>
         </div>
       </Modal>
@@ -1259,12 +1299,52 @@ export function KitchenHub({
                 .then(() => {
                   setClearChatOpen(false);
                   setCandidates([]);
-                  setChatRecipe(null);
+                  setChatRecipes([]);
                 })
                 .catch(() => {});
             }}
           >
             Clear conversation
+          </button>
+        </div>
+      </Modal>
+      <Modal
+        open={clearShoppingOpen}
+        onClose={() => {
+          if (!clearingShopping) setClearShoppingOpen(false);
+        }}
+        title="Clear shopping list?"
+        description={`Remove all ${shopping.length} items, including checked items, from What to buy.`}
+      >
+        {clearShoppingError && (
+          <p className="form-error" role="alert">
+            {clearShoppingError}
+          </p>
+        )}
+        <div className="form-footer">
+          <button
+            className="button secondary"
+            disabled={clearingShopping}
+            onClick={() => setClearShoppingOpen(false)}
+          >
+            Keep list
+          </button>
+          <button
+            className="button destructive"
+            disabled={clearingShopping}
+            onClick={() => {
+              setClearingShopping(true);
+              void mutate((state) => ({ ...state, shoppingList: [] }), 'Shopping list cleared.')
+                .then(() => setClearShoppingOpen(false))
+                .catch((error) =>
+                  setClearShoppingError(
+                    error instanceof Error ? error.message : 'Could not clear the list.',
+                  ),
+                )
+                .finally(() => setClearingShopping(false));
+            }}
+          >
+            {clearingShopping ? 'Clearing…' : 'Clear all items'}
           </button>
         </div>
       </Modal>

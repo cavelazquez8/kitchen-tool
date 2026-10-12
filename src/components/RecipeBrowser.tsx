@@ -1,5 +1,16 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { BookOpen, Check, ExternalLink, Plus, Search, Upload, Utensils, X } from 'lucide-react';
+import {
+  BookOpen,
+  Check,
+  ExternalLink,
+  Plus,
+  Search,
+  Sparkles,
+  Trash2,
+  Upload,
+  Utensils,
+  X,
+} from 'lucide-react';
 import type { InventoryState } from '../domain/types';
 import type { Recipe } from '../recipes/types';
 import type { RecipeMatch } from '../recipes/matching';
@@ -58,11 +69,17 @@ function RecipeCard({
   saved,
   onOpen,
   onSave,
+  onAddToGemini,
+  inGeminiContext,
+  onRemoveSaved,
 }: {
   match: RecipeMatch;
   saved: boolean;
   onOpen: () => void;
   onSave: () => void;
+  onAddToGemini: () => void;
+  inGeminiContext: boolean;
+  onRemoveSaved?: () => void;
 }) {
   const recipe = match.recipe;
   return (
@@ -103,6 +120,20 @@ function RecipeCard({
             {saved ? <Check size={18} /> : <Plus size={18} />}
           </button>
         </div>
+        <div className="recipe-card-secondary-actions">
+          <button className="text-button" disabled={inGeminiContext} onClick={onAddToGemini}>
+            <Sparkles size={15} /> {inGeminiContext ? 'Added to Gemini' : 'Add to Gemini'}
+          </button>
+          {onRemoveSaved && (
+            <button
+              className="icon-button"
+              aria-label={`Remove ${recipe.title} from saved recipes`}
+              onClick={onRemoveSaved}
+            >
+              <Trash2 size={16} />
+            </button>
+          )}
+        </div>
       </div>
     </article>
   );
@@ -116,6 +147,9 @@ export function RecipeBrowser({
   onUseSelectionChange,
   onOpen,
   onSave,
+  onRemoveSaved,
+  onAddToGemini,
+  geminiRecipeIds,
   onImport,
   onNew,
   onConfigure,
@@ -129,6 +163,9 @@ export function RecipeBrowser({
   onUseSelectionChange: (enabled: boolean) => void;
   onOpen: (recipe: Recipe) => void;
   onSave: (recipe: Recipe) => void;
+  onRemoveSaved: (recipe: Recipe) => void;
+  onAddToGemini: (recipe: Recipe) => void;
+  geminiRecipeIds: readonly string[];
   onImport: () => void;
   onNew: () => void;
   onConfigure: () => void;
@@ -795,6 +832,13 @@ export function RecipeBrowser({
                 saved={saved.some((recipe) => recipe.id === match.recipe.id)}
                 onOpen={() => onOpen(match.recipe)}
                 onSave={() => onSave(match.recipe)}
+                onAddToGemini={() => onAddToGemini(match.recipe)}
+                inGeminiContext={geminiRecipeIds.includes(match.recipe.id)}
+                onRemoveSaved={
+                  saved.some((recipe) => recipe.id === match.recipe.id)
+                    ? () => onRemoveSaved(match.recipe)
+                    : undefined
+                }
               />
             ),
           )}
