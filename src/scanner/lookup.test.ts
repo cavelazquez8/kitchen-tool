@@ -67,6 +67,8 @@ describe('product suggestions', () => {
         name: 'Peanut butter',
         brand: 'Example',
         packageSize: '16 oz',
+        packageQuantity: { quantity: 16, unit: 'oz' },
+        ingredientIdentity: { candidates: ['Peanut butter'], confidence: 'clear' },
         source: 'open-food-facts',
       },
     });
@@ -81,6 +83,40 @@ describe('product suggestions', () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(null, { status: 404 })));
     const { lookupProduct } = await import('./lookup');
     expect(await lookupProduct('3017620422003')).toEqual({ status: 'not-found' });
+  });
+
+  it('returns generic/category metadata for review without confirming an ingredient or multipack weight', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            product: {
+              product_name: 'Example supper sauce',
+              brands: 'Example',
+              generic_name_en: 'Tomato sauce',
+              categories_tags: ['en:pasta-sauces'],
+              quantity: '6 x 100g',
+            },
+          }),
+          { status: 200 },
+        ),
+      ),
+    );
+    const { lookupProduct } = await import('./lookup');
+    const result = await lookupProduct('3017620422003');
+    expect(result).toMatchObject({
+      status: 'found',
+      product: {
+        name: 'Example supper sauce',
+        genericName: 'Tomato sauce',
+        ingredientIdentity: { confidence: 'review', candidates: ['Tomato sauce', 'Pasta sauce'] },
+      },
+    });
+    if (result.status === 'found') {
+      expect(result.product).not.toHaveProperty('ingredientName');
+      expect(result.product.packageQuantity).toBeUndefined();
+    }
   });
 
   it('preserves remembered suggestions across reloads when new products are looked up', async () => {

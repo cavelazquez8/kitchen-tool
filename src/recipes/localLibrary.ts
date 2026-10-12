@@ -1,5 +1,6 @@
 import { canonicalIngredientName } from './matching';
 import { isRecipe, type Recipe } from './types';
+import { parseIngredientLine } from './parse';
 
 const COLLECTION_URL = '/data/wikibooks-recipes.json';
 const MAX_COLLECTION_BYTES = 20 * 1024 * 1024;
@@ -65,7 +66,7 @@ export async function loadLocalRecipes(fetcher: typeof fetch = fetch): Promise<R
         !payload.recipes.every(isRecipe)
       )
         throw new Error(LOAD_ERROR);
-      cachedRecipes = uniqueRecipes(payload.recipes);
+      cachedRecipes = uniqueRecipes(payload.recipes.map(repairCollectionArtifacts));
       return cachedRecipes;
     } catch {
       throw new Error(LOAD_ERROR);
@@ -79,6 +80,24 @@ export async function loadLocalRecipes(fetcher: typeof fetch = fetch): Promise<R
   } finally {
     pendingRecipes = null;
   }
+}
+
+/** Repair known older ingestion artifacts only while loading the built-in collection.
+ * Personal edits are never re-parsed from their historical original wording. */
+function repairCollectionArtifacts(recipe: Recipe): Recipe {
+  if (recipe.source.type !== 'wikibooks') return recipe;
+  let changed = false;
+  const ingredients = recipe.ingredients.map((ingredient) => {
+    if (!ingredient.original || !/^(?:sticks?|ea\.?)\s*\(/i.test(ingredient.name))
+      return ingredient;
+    const parsed = parseIngredientLine(ingredient.original);
+    if (parsed.quantity !== ingredient.quantity && ingredient.quantity !== null) return ingredient;
+    if (!['stick', 'each'].includes(parsed.unit) || /^(?:sticks?|ea\.?)\s*\(/i.test(parsed.name))
+      return ingredient;
+    changed = true;
+    return { ...ingredient, name: parsed.name, unit: parsed.unit };
+  });
+  return changed ? { ...recipe, ingredients } : recipe;
 }
 
 /** Keep the first version of each ID, letting callers deliberately prefer personal edits. */

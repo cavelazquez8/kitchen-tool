@@ -53,6 +53,14 @@ export function buildInventoryBackup(state: InventoryState): InventoryBackup {
       ...(product.barcode === undefined ? {} : { barcode: product.barcode }),
       ...(product.brand === undefined ? {} : { brand: product.brand }),
       ...(product.ingredientName === undefined ? {} : { ingredientName: product.ingredientName }),
+      ...(product.packageQuantity === undefined
+        ? {}
+        : {
+            packageQuantity: {
+              quantity: product.packageQuantity.quantity,
+              unit: product.packageQuantity.unit,
+            },
+          }),
     })),
     batches: state.batches.map((batch) => ({
       id: batch.id,

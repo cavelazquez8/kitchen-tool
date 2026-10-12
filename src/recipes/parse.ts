@@ -1,4 +1,5 @@
 import type { Recipe, RecipeIngredient } from './types';
+import { convertQuantity } from '../domain/inventory';
 
 const FRACTIONS: Record<string, string> = {
   '¼': '1/4',
@@ -10,21 +11,32 @@ const FRACTIONS: Record<string, string> = {
   '⅜': '3/8',
   '⅝': '5/8',
   '⅞': '7/8',
+  '⅕': '1/5',
+  '⅖': '2/5',
+  '⅗': '3/5',
+  '⅘': '4/5',
+  '⅙': '1/6',
+  '⅚': '5/6',
 };
-const NUMBER = '(?:\\d+\\s+\\d+\\/\\d+|\\d+\\/\\d+|\\d+(?:\\.\\d+)?)';
+const NUMBER = '(?:\\d+\\s+\\d+\\s*\\/\\s*\\d+|\\d+\\s*\\/\\s*\\d+|\\d+(?:\\.\\d+)?|\\.\\d+)';
 // Named fields preserve their inferred types in the dashboard's generated JavaScript.
 const UNITS = [
   { pattern: /^(?:fluid ounces?|fl\s*oz)\b/i, canonical: 'fl oz' },
+  { pattern: /^T(?:\.|\b)\s*/, canonical: 'tbsp' },
+  { pattern: /^t(?:\.|\b)\s*/, canonical: 'tsp' },
   { pattern: /^(?:tablespoons?|tblsp|tbsp|tbs)\b/i, canonical: 'tbsp' },
   { pattern: /^(?:teaspoons?|tsp)\b/i, canonical: 'tsp' },
   { pattern: /^(?:kilograms?|kg)\b/i, canonical: 'kg' },
   { pattern: /^(?:grams?|g)\b/i, canonical: 'g' },
   { pattern: /^(?:millilit(?:er|re)s?|ml)\b/i, canonical: 'mL' },
+  { pattern: /^(?:decilit(?:er|re)s?|dl)\b/i, canonical: 'dL' },
+  { pattern: /^(?:centilit(?:er|re)s?|cl)\b/i, canonical: 'cL' },
   { pattern: /^(?:lit(?:er|re)s?|l)\b/i, canonical: 'L' },
   { pattern: /^(?:ounces?|oz)\b/i, canonical: 'oz' },
   { pattern: /^(?:pounds?|lbs?)\b/i, canonical: 'lb' },
-  { pattern: /^cups?\b/i, canonical: 'cup' },
-  { pattern: /^(?:each|items?|pieces?|counts?|ct)\b/i, canonical: 'each' },
+  { pattern: /^(?:cups?|c)\b/i, canonical: 'cup' },
+  { pattern: /^(?:each|ea|items?|pieces?|counts?|ct)\b/i, canonical: 'each' },
+  { pattern: /^sticks?\b/i, canonical: 'stick' },
   { pattern: /^packages?\b/i, canonical: 'package' },
   { pattern: /^cans?\b/i, canonical: 'can' },
   { pattern: /^bottles?\b/i, canonical: 'bottle' },
@@ -38,14 +50,17 @@ const UNITS = [
 function normalizeFractions(value: string): string {
   return value
     .replace(
-      /[¼½¾⅓⅔⅛⅜⅝⅞]/g,
+      /[¼½¾⅓⅔⅛⅜⅝⅞⅕⅖⅗⅘⅙⅚]/g,
       (fraction, offset: number) =>
         `${offset > 0 && /\d/.test(value[offset - 1]) ? ' ' : ''}${FRACTIONS[fraction]}`,
     )
     .replace(/⁄/g, '/')
+    .replace(/^(\d{1,3}(?:,\d{3})+)(?=\s|[a-z.]|$)/i, (number) => number.replace(/,/g, ''))
+    .replace(/^(\d+),(\d{1,2})(?=\s|[a-z]|$)/i, '$1.$2')
     .trim();
 }
 function numberValue(value: string): number | null {
+  value = value.replace(/\s*\/\s*/g, '/');
   const parts = value.trim().split(/\s+/);
   const fraction = parts.at(-1)!;
   if (!fraction.includes('/')) return Number(value);
@@ -74,7 +89,30 @@ function readMeasure(value: string): ReadMeasure {
     remainder = rest.slice(match[0].length).replace(/^\.?\s*/, '');
     break;
   }
-  return { quantity: range ? null : numberValue(number[0]), unit, rest: remainder };
+  let quantity = range ? null : numberValue(number[0]);
+  // Explicit alternative equivalents annotate the first measure; they never
+  // imply a mass/volume conversion for inventory quantities.
+  if (
+    !['can', 'package', 'bottle', 'carton'].includes(unit) &&
+    !/^\([^)]*\)\s*(?:cans?|packages?|bottles?|cartons?)\b/i.test(remainder)
+  )
+    remainder = remainder.replace(
+      /^\(\s*\d+(?:\.\d+)?\s*(?:g|kg|oz|lb|ml|l|fl\s*oz)(?:\s*[/,;]\s*\d+(?:\.\d+)?\s*(?:g|kg|oz|lb|ml|l|fl\s*oz))*\s*\)\s*/i,
+      '',
+    );
+  if (/^(?:plus|\+)\s*/i.test(remainder)) {
+    const extra = readMeasure(remainder.replace(/^(?:plus|\+)\s*/i, ''));
+    try {
+      quantity =
+        quantity === null || extra.quantity === null
+          ? null
+          : quantity + convertQuantity(extra.quantity, extra.unit, unit);
+    } catch {
+      quantity = null;
+    }
+    remainder = extra.rest;
+  }
+  return { quantity, unit, rest: remainder };
 }
 
 /** Keep ambiguous/ranged/package-size measures unknown rather than inventing an amount. */
@@ -97,7 +135,7 @@ export function parseMeasure(value: string): {
 }
 
 export function parseIngredientLine(line: string): RecipeIngredient {
-  const original = line.trim().replace(/^[-•*]\s*/, '');
+  const original = line.trim().replace(/^(?:[-*]\s+|•\s*)/, '');
   let parsed = readMeasure(original);
   // A can/package size is explicit source text, but not an inventory conversion.
   // Keep it for review instead of treating the first number as an item count.
@@ -113,7 +151,21 @@ export function parseIngredientLine(line: string): RecipeIngredient {
       rest: parsed.rest.replace(/^(?:large|medium|small)\s+/i, ''),
     };
   }
+  // Approximate/heaped/scant amounts cannot support an exact shopping shortage.
+  if (/^(?:about|approximately|approx\.?|roughly)\s+/i.test(original)) {
+    parsed = {
+      ...readMeasure(original.replace(/^(?:about|approximately|approx\.?|roughly)\s+/i, '')),
+      quantity: null,
+    };
+  }
+  if (/^(?:heaped|heaping|scant|generous|level)\s+/i.test(parsed.rest)) {
+    const measure = readMeasure(
+      `1 ${parsed.rest.replace(/^(?:heaped|heaping|scant|generous|level)\s+/i, '')}`,
+    );
+    parsed = { ...measure, quantity: null };
+  }
   const name = (parsed.quantity !== null || parsed.unit ? parsed.rest : original)
+    .replace(/^of\s+/i, '')
     .replace(
       /,\s*(?:(?:finely|roughly|thinly|freshly)\s+)?(?:chopped|sliced|minced|diced|grated|crushed|peeled|drained|rinsed)(?:\s+and\s+(?:chopped|sliced|minced|diced|grated|crushed|peeled))*$/i,
       '',
@@ -122,7 +174,7 @@ export function parseIngredientLine(line: string): RecipeIngredient {
     .trim();
   return {
     name: name || original,
-    quantity: parsed.quantity,
+    quantity: /\s+or\s+/i.test(name) || /^[−-]\d/.test(original) ? null : parsed.quantity,
     unit: parsed.unit,
     original,
     ...(/\boptional\b/i.test(original) ? { optional: true } : {}),

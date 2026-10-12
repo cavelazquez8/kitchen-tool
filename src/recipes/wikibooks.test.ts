@@ -164,7 +164,7 @@ describe('Wikibooks recipe ingestion', () => {
     '1 scant tablespoon flour',
     '1 heaped cup flour',
     'About 1 cup flour',
-    '20 g + 20 g flour',
+    '20 g + 1 cup flour',
     '2 x 400 g flour',
     '3 cooking spoons flour',
   ])('keeps ambiguous measure %j unknown', (ingredient) => {
@@ -173,6 +173,18 @@ describe('Wikibooks recipe ingestion', () => {
     );
     expect(recipe?.ingredients[0].quantity).toBeNull();
     expect(recipe?.ingredients[0].original).toBe(ingredient);
+  });
+
+  it('adds explicit compatible measures instead of dropping either amount', () => {
+    const recipe = parseWikibooksRecipe(
+      page('==Ingredients==\n*20 g + 20 g flour\n==Procedure==\n#Mix.'),
+    );
+    expect(recipe?.ingredients[0]).toMatchObject({
+      name: 'flour',
+      quantity: 40,
+      unit: 'g',
+      original: '20 g + 20 g flour',
+    });
   });
 
   it('does not collect a nested instruction section as ingredients', () => {

@@ -170,6 +170,117 @@ describe('quantity-aware recipe matching', () => {
       canonicalIngredientName('Chicken thigh'),
     );
   });
+
+  it('matches a confirmed branded identity against prepared recipe names using recorded net contents', () => {
+    const state = inventory('Example Organic Carrots', [{ quantity: 500, unit: 'g' }]);
+    state.products[0].ingredientName = 'Carrots';
+    state.products[0].packageQuantity = { quantity: 500, unit: 'g' };
+    const prepared = recipe(300, 'g', 'Carrots, finely chopped');
+    expect(matchRecipe(prepared, state, options).ingredients[0]).toMatchObject({
+      status: 'available',
+      available: 500,
+    });
+    state.batches[0].quantity = 100;
+    expect(matchRecipe(prepared, state, options).ingredients[0]).toMatchObject({
+      status: 'short',
+      available: 100,
+      shortage: 200,
+    });
+    // The saved original package size must not replenish a partly used batch.
+    expect(state.products[0].packageQuantity.quantity).toBe(500);
+  });
+
+  it('does not substitute a scanned flavored product or a different ingredient family', () => {
+    expect(
+      matchRecipe(recipe(100, 'g', 'Chicken'), inventory('Example chicken flavored soup'), options)
+        .ingredients[0].status,
+    ).toBe('missing');
+    expect(
+      matchRecipe(recipe(100, 'g', 'Milk'), inventory('Almond milk'), options).ingredients[0]
+        .status,
+    ).toBe('missing');
+    expect(
+      matchRecipe(recipe(100, 'g', 'All-purpose flour'), inventory('Rice flour'), options)
+        .ingredients[0].status,
+    ).toBe('missing');
+  });
+
+  it.each([
+    ['Milk', 'Whole milk'],
+    ['Fresh basil', 'Dried basil'],
+    ['Rice', 'Jasmine rice'],
+  ])('shows %s versus %s as a possible match requiring ingredient review', (needed, stocked) => {
+    const dish = recipe(100, 'g', needed);
+    const state = inventory(stocked, [{ quantity: 1000, unit: 'g' }]);
+    const result = matchRecipe(dish, state, options);
+    expect(result.status).toBe('check');
+    expect(result.ingredients[0]).toMatchObject({
+      status: 'check',
+      available: null,
+      shortage: null,
+    });
+    expect(result.ingredients[0].reason).toContain('Quantities have not been compared');
+    expect(buildShoppingList([{ recipe: dish }], state, options).items[0]).toMatchObject({
+      name: needed,
+      quantity: null,
+      available: null,
+      status: 'check',
+    });
+    state.batches[0].quantity = 0;
+    expect(matchRecipe(dish, state, options).ingredients[0].status).toBe('missing');
+    state.batches[0].quantity = 1000;
+    state.batches[0].expiresOn = '2026-10-09';
+    expect(matchRecipe(dish, state, options).ingredients[0].status).toBe('missing');
+  });
+
+  it('keeps exact shortfalls precise and unrelated or explicitly separate products missing', () => {
+    const state = inventory('Whole milk', [{ quantity: 1000, unit: 'g' }]);
+    state.products.push({ id: 'generic', name: 'Milk', isStaple: false });
+    state.batches.push({
+      ...state.batches[0],
+      id: 'generic-batch',
+      productId: 'generic',
+      quantity: 10,
+    });
+    expect(matchRecipe(recipe(100, 'g', 'Milk'), state, options).ingredients[0]).toMatchObject({
+      status: 'short',
+      available: 10,
+      shortage: 90,
+    });
+    for (const [needed, supplied] of [
+      ['Milk', 'Soy milk'],
+      ['Rice', 'Cooked rice'],
+      ['Chicken', 'Chicken thigh'],
+      ['All-purpose flour', 'Rice flour'],
+      ['Basil', 'Example basil flavored dressing'],
+    ])
+      expect(
+        matchRecipe(recipe(100, 'g', needed), inventory(supplied), options).ingredients[0].status,
+      ).toBe('missing');
+  });
+
+  it('ranks a large library with the same inventory exclusions and quantity results as individual checks', () => {
+    const state = inventory('Organic carrots', [{ quantity: 500, expiresOn: '2026-10-11' }]);
+    const recipes = Array.from({ length: 1500 }, (_, index) =>
+      recipe(index % 3 === 0 ? 600 : 100, 'g', index % 2 === 0 ? 'Carrots, diced' : 'Potatoes', {
+        id: `catalog:${index}`,
+        title: `Recipe ${index}`,
+      }),
+    );
+    const ranked = rankRecipes(recipes, state, { ...options, prioritizeExpiration: true });
+    expect(ranked).toHaveLength(recipes.length);
+    for (const id of ['catalog:0', 'catalog:1', 'catalog:2', 'catalog:1498']) {
+      const source = recipes.find((item) => item.id === id)!;
+      expect(ranked.find((item) => item.recipe.id === id)).toEqual(
+        matchRecipe(source, state, { ...options, prioritizeExpiration: true }),
+      );
+    }
+    expect(
+      rankRecipes(recipes, state, { ...options, selectedProductIds: [] }).every(
+        (item) => item.ingredients[0].status === 'missing',
+      ),
+    ).toBe(true);
+  });
 });
 
 describe('shopping list calculation', () => {

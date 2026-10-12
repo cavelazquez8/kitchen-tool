@@ -42,6 +42,44 @@ afterEach(() => {
 });
 
 describe('deployed recipe collection', () => {
+  it('repairs demonstrable old measure artifacts only in the built-in collection', async () => {
+    const collection = {
+      ...recipe(),
+      ingredients: [
+        {
+          name: 'sticks (375 g / 13 oz) butter, melted',
+          quantity: 3,
+          unit: 'each',
+          original: '3 sticks (375 g / 13 oz) butter, melted',
+        },
+        { name: 'ea. (50 g) egg', quantity: 1, unit: 'each', original: '1 ea. (50 g) egg' },
+        { name: 'ea. (50 g) eggs', quantity: null, unit: 'each', original: '2 ea. (50 g) eggs' },
+      ],
+    };
+    const loaded = await loadLocalRecipes(
+      vi.fn<typeof fetch>().mockResolvedValue(response([collection])),
+    );
+    expect(loaded[0].ingredients).toMatchObject([
+      { name: 'butter, melted', quantity: 3, unit: 'stick' },
+      { name: 'egg', quantity: 1, unit: 'each' },
+      { name: 'eggs', quantity: null, unit: 'each' },
+    ]);
+    expect(loaded[0].ingredients[0].original).toBe(collection.ingredients[0].original);
+    expect(collection.ingredients[0].name).toContain('sticks (');
+    const personal = {
+      ...collection,
+      ingredients: [
+        {
+          name: 'Corrected butter',
+          quantity: 125,
+          unit: 'g',
+          original: collection.ingredients[0].original,
+        },
+      ],
+    };
+    expect(uniqueRecipes([personal, loaded[0]])[0]).toBe(personal);
+    expect(uniqueRecipes([personal, loaded[0]])[0].ingredients[0]).toEqual(personal.ingredients[0]);
+  });
   it('loads lazily from Mise once, preserving source attribution and full cooking instructions', async () => {
     const fetcher = vi.fn<typeof fetch>().mockResolvedValue(response());
     expect(fetcher).not.toHaveBeenCalled();

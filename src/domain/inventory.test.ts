@@ -52,6 +52,47 @@ function batch(patch: Partial<Batch> = {}): Batch {
   };
 }
 
+describe('remembered package contents', () => {
+  it('retains the original reviewed contents when a batch is used or removed', () => {
+    let state = fixture();
+    state = updateProduct(state, 'milk', {
+      packageQuantity: { quantity: 1000, unit: ' mL ' },
+      ingredientName: 'Whole milk',
+    });
+    state = updateBatch(state, 'milk-1', { quantity: 1000, unit: 'mL' });
+    state = useBatch(state, 'milk-1', { amount: 250, unit: 'mL' });
+    expect(state.batches[0].quantity).toBe(750);
+    expect(state.products[0].packageQuantity).toEqual({ quantity: 1000, unit: 'mL' });
+    expect(removeBatch(state, 'milk-1').products[0].packageQuantity).toEqual({
+      quantity: 1000,
+      unit: 'mL',
+    });
+    expect(isInventoryState(state)).toBe(true);
+  });
+
+  it('rejects corrupt original quantities and keeps old product documents valid', () => {
+    const state = fixture();
+    expect(isInventoryState(state)).toBe(true);
+    for (const quantity of [0, -1, Number.POSITIVE_INFINITY, Number.NaN]) {
+      expect(() =>
+        updateProduct(state, 'milk', { packageQuantity: { quantity, unit: 'mL' } }),
+      ).toThrow('greater than zero');
+      expect(
+        isInventoryState({
+          ...state,
+          products: [{ ...state.products[0], packageQuantity: { quantity, unit: 'mL' } }],
+        }),
+      ).toBe(false);
+    }
+    expect(
+      isInventoryState({
+        ...state,
+        products: [{ ...state.products[0], packageQuantity: { quantity: 1, unit: '' } }],
+      }),
+    ).toBe(false);
+  });
+});
+
 describe('calendar dates', () => {
   it('uses local calendar components for today, without shifting to UTC', () => {
     expect(todayDate(new Date(2026, 9, 8, 23, 59))).toBe('2026-10-08');

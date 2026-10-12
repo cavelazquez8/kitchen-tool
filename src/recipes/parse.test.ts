@@ -59,6 +59,66 @@ describe('recipe measurement parsing', () => {
       quantity: null,
     });
   });
+
+  it('reads common abbreviated, decimal, and equivalent measures without inventing conversions', () => {
+    expect(parseIngredientLine('.5 c. milk')).toMatchObject({
+      quantity: 0.5,
+      unit: 'cup',
+      name: 'milk',
+    });
+    expect(parseIngredientLine('1 T. of olive oil')).toMatchObject({
+      quantity: 1,
+      unit: 'tbsp',
+      name: 'olive oil',
+    });
+    expect(parseIngredientLine('1 t. salt')).toMatchObject({
+      quantity: 1,
+      unit: 'tsp',
+      name: 'salt',
+    });
+    expect(parseIngredientLine('1 cup (120g) flour')).toMatchObject({
+      quantity: 1,
+      unit: 'cup',
+      name: 'flour',
+    });
+    expect(parseMeasure('1,000 g')).toMatchObject({ quantity: 1000, unit: 'g' });
+    expect(parseMeasure('0,5 L')).toMatchObject({ quantity: 0.5, unit: 'L' });
+    expect(parseIngredientLine('1 / 2 cup milk')).toMatchObject({
+      quantity: 0.5,
+      unit: 'cup',
+      name: 'milk',
+    });
+    expect(parseIngredientLine('⅕ cup sugar')).toMatchObject({
+      quantity: 0.2,
+      unit: 'cup',
+      name: 'sugar',
+    });
+  });
+
+  it('adds explicit compatible composite measures and leaves incompatible ones for review', () => {
+    expect(parseIngredientLine('1 cup plus 2 tbsp milk')).toMatchObject({
+      quantity: 1.125,
+      unit: 'cup',
+      name: 'milk',
+    });
+    expect(parseIngredientLine('1 cup plus 50 g flour')).toMatchObject({
+      quantity: null,
+      unit: 'cup',
+      name: 'flour',
+    });
+    expect(parseIngredientLine('about 200 g carrots')).toMatchObject({
+      quantity: null,
+      unit: 'g',
+      name: 'carrots',
+    });
+    expect(parseIngredientLine('1 heaped tsp sugar')).toMatchObject({
+      quantity: null,
+      unit: 'tsp',
+      name: 'sugar',
+    });
+    expect(parseIngredientLine('1 cup milk or cream').quantity).toBeNull();
+    expect(parseIngredientLine('-1 cup milk').quantity).toBeNull();
+  });
 });
 
 describe('editable recipe import', () => {

@@ -70,6 +70,30 @@ function completeState(): InventoryState {
 }
 
 describe('backward-compatible kitchen backups', () => {
+  it('round-trips reviewed package contents without unknown nested fields or shared references', async () => {
+    const state = completeState();
+    state.products[0].packageQuantity = { quantity: 500, unit: 'g' };
+    const injected = {
+      ...state,
+      products: [
+        {
+          ...state.products[0],
+          packageQuantity: { ...state.products[0].packageQuantity, token: 'PRIVATE_PACKAGE_EXTRA' },
+        },
+      ],
+    };
+    const backup = buildInventoryBackup(injected);
+    expect(backup.inventory.products[0].packageQuantity).toEqual({ quantity: 500, unit: 'g' });
+    expect(JSON.stringify(backup)).not.toContain('PRIVATE_PACKAGE_EXTRA');
+    const storage = new MemoryStorage();
+    await createLocalRepository(storage).replace(backup.inventory);
+    expect(createLocalRepository(storage).getSnapshot().state.products[0].packageQuantity).toEqual({
+      quantity: 500,
+      unit: 'g',
+    });
+    backup.inventory.products[0].packageQuantity!.quantity = 250;
+    expect(state.products[0].packageQuantity.quantity).toBe(500);
+  });
   it('retains recipe attribution and licenses through backups and local restoration', async () => {
     const state = completeState();
     state.recipes = [

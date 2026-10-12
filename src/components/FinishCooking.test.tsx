@@ -69,6 +69,22 @@ function amount(date = '2026-01-01', unit = 'g') {
 afterEach(cleanup);
 
 describe('cooking completion review', () => {
+  it('never allocates a related ingredient variant before its identity has been reviewed', () => {
+    const inventory = stock([{ quantity: 1000, unit: 'mL' }]);
+    inventory.products[0] = {
+      ...inventory.products[0],
+      name: 'Brand whole milk',
+      ingredientName: 'Whole milk',
+    };
+    const view = setup(
+      meal({ ingredients: [{ name: 'Milk', quantity: 100, unit: 'mL' }] }),
+      inventory,
+    );
+    expect(screen.queryByRole('spinbutton')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Update inventory' })).toBeDisabled();
+    expect(view.update).not.toHaveBeenCalled();
+    expect(view.state().batches[0].quantity).toBe(1000);
+  });
   it('sums repeated compatible ingredient lines once and allocates oldest purchases with unit conversion', () => {
     setup(
       meal({

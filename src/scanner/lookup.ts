@@ -1,9 +1,19 @@
+import {
+  parsePackageQuantity,
+  suggestIngredientIdentity,
+  type IngredientIdentitySuggestion,
+} from '../recipes/identity';
+
 export interface ProductSuggestion {
   barcode: string;
   name: string;
   brand?: string;
   packageSize?: string;
   imageUrl?: string;
+  genericName?: string;
+  categories?: string[];
+  ingredientIdentity?: IngredientIdentitySuggestion;
+  packageQuantity?: { quantity: number; unit: string };
   source: 'open-food-facts';
 }
 
@@ -115,6 +125,9 @@ function loadCache(): void {
       const brand = textField(product.brand);
       const packageSize = textField(product.packageSize);
       const imageUrl = imageField(product.imageUrl);
+      const genericName = textField(product.genericName);
+      const categories = categoryFields(product.categories);
+      const packageQuantity = packageSize ? parsePackageQuantity(packageSize) : null;
       cache.set(code, {
         expiresAt: value.expiresAt,
         result: {
@@ -126,6 +139,10 @@ function loadCache(): void {
             ...(brand ? { brand } : {}),
             ...(packageSize ? { packageSize } : {}),
             ...(imageUrl ? { imageUrl } : {}),
+            ...(genericName ? { genericName } : {}),
+            ...(categories.length ? { categories } : {}),
+            ingredientIdentity: suggestIngredientIdentity(name, { brand, genericName, categories }),
+            ...(packageQuantity ? { packageQuantity } : {}),
           },
         },
       });
@@ -177,6 +194,15 @@ function textField(value: unknown): string | undefined {
   return typeof value === 'string' && value.trim() ? value.trim().slice(0, 250) : undefined;
 }
 
+function categoryFields(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value
+        .filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
+        .slice(0, 30)
+        .map((item) => item.trim().slice(0, 100))
+    : [];
+}
+
 function imageField(value: unknown): string | undefined {
   if (typeof value !== 'string') return undefined;
   try {
@@ -210,7 +236,7 @@ export async function lookupProduct(input: string, signal?: AbortSignal): Promis
   const url = new URL(`https://world.openfoodfacts.org/api/v3.6/product/${code}`);
   url.searchParams.set(
     'fields',
-    'code,product_name,product_name_en,brands,quantity,image_front_small_url',
+    'code,product_name,product_name_en,generic_name,generic_name_en,categories_tags,brands,quantity,image_front_small_url',
   );
   url.searchParams.set('lc', 'en');
   // User-Agent cannot reliably be overridden in browsers. Include the app name
@@ -254,6 +280,9 @@ export async function lookupProduct(input: string, signal?: AbortSignal): Promis
     const brand = textField(product.brands);
     const packageSize = textField(product.quantity);
     const imageUrl = imageField(product.image_front_small_url);
+    const genericName = textField(product.generic_name_en) ?? textField(product.generic_name);
+    const categories = categoryFields(product.categories_tags);
+    const packageQuantity = packageSize ? parsePackageQuantity(packageSize) : null;
     return cacheResult(code, {
       status: 'found',
       product: {
@@ -262,6 +291,10 @@ export async function lookupProduct(input: string, signal?: AbortSignal): Promis
         ...(brand ? { brand } : {}),
         ...(packageSize ? { packageSize } : {}),
         ...(imageUrl ? { imageUrl } : {}),
+        ...(genericName ? { genericName } : {}),
+        ...(categories.length ? { categories } : {}),
+        ingredientIdentity: suggestIngredientIdentity(name, { brand, genericName, categories }),
+        ...(packageQuantity ? { packageQuantity } : {}),
         source: 'open-food-facts',
       },
     });

@@ -68,6 +68,12 @@ function normalizeProduct(product: Product): Product {
   const barcode = product.barcode?.trim();
   const brand = product.brand?.trim();
   const ingredientName = product.ingredientName?.trim();
+  const packageQuantity = product.packageQuantity;
+  if (
+    packageQuantity &&
+    (!Number.isFinite(packageQuantity.quantity) || packageQuantity.quantity <= 0)
+  )
+    fail('Original package amount must be greater than zero.');
   return {
     id: product.id,
     name: requiredText(product.name, 'Item name'),
@@ -75,6 +81,14 @@ function normalizeProduct(product: Product): Product {
     ...(barcode ? { barcode } : {}),
     ...(brand ? { brand } : {}),
     ...(ingredientName ? { ingredientName } : {}),
+    ...(packageQuantity
+      ? {
+          packageQuantity: {
+            quantity: packageQuantity.quantity,
+            unit: requiredText(packageQuantity.unit, 'Original package unit'),
+          },
+        }
+      : {}),
   };
 }
 
@@ -169,6 +183,8 @@ registerUnit(['oz', 'ounce', 'ounces'], 'mass', 28.349523125);
 registerUnit(['lb', 'lbs', 'pound', 'pounds'], 'mass', 453.59237);
 registerUnit(['ml', 'milliliter', 'milliliters', 'millilitre', 'millilitres'], 'volume', 1);
 registerUnit(['l', 'liter', 'liters', 'litre', 'litres'], 'volume', 1000);
+registerUnit(['dl', 'deciliter', 'deciliters', 'decilitre', 'decilitres'], 'volume', 100);
+registerUnit(['cl', 'centiliter', 'centiliters', 'centilitre', 'centilitres'], 'volume', 10);
 registerUnit(['tsp', 'teaspoon', 'teaspoons'], 'volume', 4.92892159375);
 registerUnit(['tbsp', 'tablespoon', 'tablespoons'], 'volume', 14.78676478125);
 registerUnit(['cup', 'cups'], 'volume', 236.5882365);

@@ -2,53 +2,10 @@ import { convertQuantity } from '../domain/inventory';
 import type { Batch, InventoryState } from '../domain/types';
 import type { Recipe, RecipeIngredient, RecipeSelection } from './types';
 
-const ALIASES: Record<string, string> = {
-  eggs: 'egg',
-  tomatoes: 'tomato',
-  potatoes: 'potato',
-  onions: 'onion',
-  carrots: 'carrot',
-  bananas: 'banana',
-  apples: 'apple',
-  lemons: 'lemon',
-  limes: 'lime',
-  oranges: 'orange',
-  cucumbers: 'cucumber',
-  peppers: 'pepper',
-  mushrooms: 'mushroom',
-  strawberries: 'strawberry',
-  blueberries: 'blueberry',
-  raspberries: 'raspberry',
-  avocados: 'avocado',
-  courgette: 'zucchini',
-  courgettes: 'zucchini',
-  aubergine: 'eggplant',
-  aubergines: 'eggplant',
-  scallions: 'green onion',
-  'spring onion': 'green onion',
-  'spring onions': 'green onion',
-  'green onions': 'green onion',
-  'chicken breasts': 'chicken breast',
-  'chicken thighs': 'chicken thigh',
-  'garlic cloves': 'garlic',
-  'garlic clove': 'garlic',
-  'plain flour': 'all purpose flour',
-  'all-purpose flour': 'all purpose flour',
-  'bicarbonate of soda': 'baking soda',
-  'caster sugar': 'superfine sugar',
-  'icing sugar': 'powdered sugar',
-};
-export function canonicalIngredientName(value: string): string {
-  const name = value
-    .toLowerCase()
-    .normalize('NFKD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .replace(/[’']/g, '')
-    .replace(/[_-]/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-  return ALIASES[name] ?? name;
-}
+import { canonicalIngredientName, relatedIngredientNames } from './identity';
+
+export { canonicalIngredientName } from './identity';
+
 function converted(amount: number, from: string, to: string): number | null {
   try {
     return convertQuantity(amount, from, to);
@@ -91,6 +48,33 @@ export interface RecipeMatch {
 interface Demand {
   ingredient: RecipeIngredient;
   recipeIds: string[];
+}
+interface InventoryIndex {
+  byIngredient: Map<string, Batch[]>;
+  stapleProductIds: Set<string>;
+  today: string;
+}
+
+/** Resolve product names once per library ranking, rather than for every recipe line. */
+function indexInventory(inventory: InventoryState, options: MatchOptions): InventoryIndex {
+  const selected = options.selectedProductIds ? new Set(options.selectedProductIds) : null;
+  const products = new Map(
+    inventory.products
+      .filter((product) => !selected || selected.has(product.id))
+      .map((product) => [product.id, product]),
+  );
+  const byIngredient = new Map<string, Batch[]>();
+  const stapleProductIds = new Set<string>();
+  for (const batch of inventory.batches) {
+    const product = products.get(batch.productId);
+    if (!product) continue;
+    if (product.isStaple) stapleProductIds.add(product.id);
+    const key = canonicalIngredientName(product.ingredientName ?? product.name);
+    const batches = byIngredient.get(key) ?? [];
+    batches.push(batch);
+    byIngredient.set(key, batches);
+  }
+  return { byIngredient, stapleProductIds, today: options.today ?? localDate() };
 }
 
 function demandsFor(selections: readonly RecipeSelection[]): {
@@ -139,32 +123,17 @@ function demandsFor(selections: readonly RecipeSelection[]): {
 }
 
 function eligibleBatches(
-  inventory: InventoryState,
+  index: InventoryIndex,
   name: string,
   options: MatchOptions,
 ): { batches: Batch[]; expired: boolean } {
-  const selected = options.selectedProductIds ? new Set(options.selectedProductIds) : null;
-  const productIds = new Set(
-    inventory.products
-      .filter(
-        (product) =>
-          (!selected || selected.has(product.id)) &&
-          canonicalIngredientName(product.ingredientName ?? product.name) === name,
-      )
-      .map((product) => product.id),
-  );
-  const today = options.today ?? localDate();
   let expired = false;
-  const batches = inventory.batches.filter((batch) => {
-    const product = inventory.products.find((item) => item.id === batch.productId);
-    const assumedStocked = product?.isStaple && (batch.stapleStatus ?? 'stocked') === 'stocked';
-    if (
-      !productIds.has(batch.productId) ||
-      batch.stapleStatus === 'empty' ||
-      (batch.quantity === 0 && !assumedStocked)
-    )
-      return false;
-    if (batch.expiresOn && batch.expiresOn < today && options.excludeExpired !== false) {
+  const batches = (index.byIngredient.get(name) ?? []).filter((batch) => {
+    const assumedStocked =
+      index.stapleProductIds.has(batch.productId) &&
+      (batch.stapleStatus ?? 'stocked') === 'stocked';
+    if (batch.stapleStatus === 'empty' || (batch.quantity === 0 && !assumedStocked)) return false;
+    if (batch.expiresOn && batch.expiresOn < index.today && options.excludeExpired !== false) {
       expired = true;
       return false;
     }
@@ -174,17 +143,28 @@ function eligibleBatches(
 }
 function compareDemand(
   demand: Demand,
-  inventory: InventoryState,
+  index: InventoryIndex,
   options: MatchOptions,
 ): IngredientMatch {
   const { ingredient, recipeIds } = demand;
   const { batches, expired } = eligibleBatches(
-    inventory,
+    index,
     canonicalIngredientName(ingredient.name),
     options,
   );
   const base = { ingredient, recipeIds, required: ingredient.quantity };
-  if (batches.length === 0)
+  if (batches.length === 0) {
+    const related = relatedIngredientNames(ingredient.name).filter(
+      (name) => eligibleBatches(index, name, options).batches.length > 0,
+    );
+    if (related.length > 0)
+      return {
+        ...base,
+        status: 'check',
+        available: null,
+        shortage: null,
+        reason: `You have ${related.join(', ')}; confirm it can supply ${ingredient.name}. Quantities have not been compared.`,
+      };
     return {
       ...base,
       status: 'missing',
@@ -192,9 +172,10 @@ function compareDemand(
       shortage: ingredient.quantity,
       ...(expired ? { reason: 'Only past-date stock is recorded. Check it before using.' } : {}),
     };
+  }
   const stockedStaple = batches.some(
     (batch) =>
-      inventory.products.some((product) => product.id === batch.productId && product.isStaple) &&
+      index.stapleProductIds.has(batch.productId) &&
       (batch.stapleStatus ?? 'stocked') === 'stocked',
   );
   if (stockedStaple)
@@ -245,8 +226,16 @@ export function matchRecipe(
   inventory: InventoryState,
   options: MatchOptions & { servings?: number } = {},
 ): RecipeMatch {
+  return matchIndexedRecipe(recipe, indexInventory(inventory, options), options);
+}
+
+function matchIndexedRecipe(
+  recipe: Recipe,
+  index: InventoryIndex,
+  options: MatchOptions & { servings?: number },
+): RecipeMatch {
   const { demands, warnings } = demandsFor([{ recipe, servings: options.servings }]);
-  const ingredients = demands.map((demand) => compareDemand(demand, inventory, options));
+  const ingredients = demands.map((demand) => compareDemand(demand, index, options));
   const missingCount = ingredients.filter(
     (item) => item.status === 'missing' || item.status === 'short',
   ).length;
@@ -255,16 +244,12 @@ export function matchRecipe(
   const matchedCount = ingredients.filter(
     (item) => item.status === 'available' || item.status === 'check',
   ).length;
-  const today = options.today ?? localDate();
+  const today = index.today;
   const cutoff = new Date(`${today}T12:00:00Z`);
   cutoff.setUTCDate(cutoff.getUTCDate() + 3);
   const soon = cutoff.toISOString().slice(0, 10);
   const useSoonCount = demands.filter((demand) =>
-    eligibleBatches(
-      inventory,
-      canonicalIngredientName(demand.ingredient.name),
-      options,
-    ).batches.some(
+    eligibleBatches(index, canonicalIngredientName(demand.ingredient.name), options).batches.some(
       (batch) => batch.expiresOn && batch.expiresOn >= today && batch.expiresOn <= soon,
     ),
   ).length;
@@ -285,8 +270,9 @@ export function rankRecipes(
   inventory: InventoryState,
   options: MatchOptions = {},
 ): RecipeMatch[] {
+  const index = indexInventory(inventory, options);
   return recipes
-    .map((recipe) => matchRecipe(recipe, inventory, options))
+    .map((recipe) => matchIndexedRecipe(recipe, index, options))
     .sort((a, b) => {
       const tier = { ready: 0, check: 1, almost: 2 };
       return (
@@ -323,9 +309,10 @@ export function buildShoppingList(
   options: MatchOptions = {},
 ): ShoppingListResult {
   const { demands, warnings } = demandsFor(selections);
+  const index = indexInventory(inventory, options);
   const items: ShoppingRequirement[] = [];
   for (const demand of demands) {
-    const match = compareDemand(demand, inventory, options);
+    const match = compareDemand(demand, index, options);
     if (match.status === 'available') continue;
     items.push({
       id: `${canonicalIngredientName(demand.ingredient.name)}:${demand.ingredient.unit}`,

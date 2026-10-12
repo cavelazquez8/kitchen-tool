@@ -9,6 +9,8 @@ export interface Product {
   brand?: string;
   isStaple: boolean;
   ingredientName?: string;
+  /** Reviewed original package contents, independent of a batch's remaining stock. */
+  packageQuantity?: { quantity: number; unit: string };
 }
 
 export interface Batch {
@@ -121,6 +123,14 @@ export function isInventoryState(value: unknown): value is InventoryState {
       !isOptionalText(product.barcode) ||
       !isOptionalText(product.brand) ||
       !isOptionalText(product.ingredientName) ||
+      !(
+        product.packageQuantity === undefined ||
+        (isRecord(product.packageQuantity) &&
+          typeof product.packageQuantity.quantity === 'number' &&
+          Number.isFinite(product.packageQuantity.quantity) &&
+          product.packageQuantity.quantity > 0 &&
+          isNonemptyText(product.packageQuantity.unit))
+      ) ||
       productIds.has(product.id)
     )
       return false;
