@@ -5,12 +5,15 @@ import {
   parseAiReply,
   parseChatRequest,
   parseExtractRequest,
+  parseNutritionExtractRequest,
+  parseAiNutritionReply,
 } from './protocol';
 import type {
   AiChatRequest,
   AiExtractRequest,
   AiMedia,
   AiReply,
+  AiNutritionReply,
   GeminiConnection,
 } from './protocol';
 
@@ -20,6 +23,8 @@ export type {
   AiMedia,
   AiMessage,
   AiRecipeDraft,
+  AiRecipeCandidate,
+  AiNutritionReply,
   AiReply,
   GeminiConnection,
 } from './protocol';
@@ -267,9 +272,52 @@ export async function sendGeminiChat(
       'invalid_request',
       'Use a shorter message or conversation. Clear older messages if needed.',
     );
-  const result = parseAiReply(await requestMiseWorker(connection, '/chat', validated, signal));
+  let raw: unknown;
+  try {
+    raw = await requestMiseWorker(connection, '/chat', validated, signal);
+  } catch (error) {
+    if (validated.candidates && error instanceof GeminiError && error.code === 'invalid_request')
+      throw new GeminiError(
+        'worker_update',
+        'Update your Cloudflare Worker with the latest Mise Worker file to use recipe recommendations. Your saved recipes still work.',
+      );
+    throw error;
+  }
+  const result = parseAiReply(raw, validated.candidates);
   if (!result)
     throw new GeminiError('invalid_response', 'Gemini returned an answer Mise cannot safely save.');
+  return result;
+}
+
+/** Extract stated daily recommendations for review; this never applies targets. */
+export async function extractGeminiNutrition(
+  connection: GeminiConnection,
+  input: AiExtractRequest,
+  signal?: AbortSignal,
+): Promise<AiNutritionReply> {
+  const validated = parseNutritionExtractRequest(input);
+  if (!validated)
+    throw new GeminiError(
+      'invalid_request',
+      'Paste your recommended daily targets or choose a JPG, PNG or WebP report image under 1 MB.',
+    );
+  let raw: unknown;
+  try {
+    raw = await requestMiseWorker(connection, '/nutrition/extract', validated, signal);
+  } catch (error) {
+    if (error instanceof GeminiError && error.code === 'not_found')
+      throw new GeminiError(
+        'worker_update',
+        'Update your Cloudflare Worker with the latest Mise Worker file to extract nutrition reports. You can enter your targets manually now.',
+      );
+    throw error;
+  }
+  const result = parseAiNutritionReply(raw);
+  if (!result)
+    throw new GeminiError(
+      'invalid_response',
+      'Gemini returned nutritional values Mise cannot safely review. Enter the targets manually.',
+    );
   return result;
 }
 

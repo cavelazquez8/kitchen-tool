@@ -3,6 +3,7 @@ import {
   checkGeminiConnection,
   clearGeminiConnection,
   extractGeminiRecipe,
+  extractGeminiNutrition,
   fileToGeminiMedia,
   importGeminiRecipeUrl,
   generateGeminiAccessToken,
@@ -125,6 +126,81 @@ describe('Gemini browser adapter', () => {
     };
     expect(await sendGeminiChat(connection, input)).toEqual(reply);
     expect(JSON.parse(String(fetcher.mock.calls[0][1]?.body))).toEqual(input);
+  });
+
+  it('checks grounded recipe IDs even when an older or misconfigured Worker returns them', async () => {
+    const candidates = [
+      {
+        id: 'real-recipe',
+        title: 'Chili',
+        servings: 4,
+        ingredients: ['beans'],
+        missingIngredients: [],
+      },
+    ];
+    const fetcher = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ ...reply, recommendedRecipeIds: ['real-recipe'] })),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ ...reply, recommendedRecipeIds: ['invented-recipe'] })),
+      );
+    vi.stubGlobal('fetch', fetcher);
+    const input = { message: 'Dinner', inventory: '', candidates };
+    expect((await sendGeminiChat(connection, input)).recommendedRecipeIds).toEqual(['real-recipe']);
+    await expect(sendGeminiChat(connection, input)).rejects.toMatchObject({
+      code: 'invalid_response',
+    });
+  });
+
+  it('explains the required Worker update when an older chat endpoint rejects recipe candidates', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi
+        .fn<typeof fetch>()
+        .mockResolvedValue(
+          new Response(
+            JSON.stringify({ error: { code: 'invalid_request', message: 'Unsupported request.' } }),
+            { status: 400 },
+          ),
+        ),
+    );
+    await expect(
+      sendGeminiChat(connection, {
+        message: 'Choose dinner',
+        inventory: '',
+        candidates: [
+          {
+            id: 'real',
+            title: 'Chili',
+            servings: 4,
+            ingredients: ['beans'],
+            missingIngredients: [],
+          },
+        ],
+      }),
+    ).rejects.toMatchObject({
+      code: 'worker_update',
+      message: expect.stringContaining('latest Mise Worker file'),
+    });
+  });
+
+  it('extracts daily targets for review without saving them and never sends a video report', async () => {
+    const result = {
+      targets: { caloriesKcal: 2000, proteinGrams: null, carbsGrams: null, fatGrams: null },
+      sourceText: 'Recommended daily intake 2000 kcal',
+      warnings: ['Other targets not stated.'],
+    };
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify(result)));
+    vi.stubGlobal('fetch', fetcher);
+    expect(await extractGeminiNutrition(connection, { text: result.sourceText })).toEqual(result);
+    expect(fetcher.mock.calls[0][0]).toBe(`${connection.url}/nutrition/extract`);
+    expect(localStorage.length).toBe(0);
+    await expect(
+      extractGeminiNutrition(connection, { media: { mimeType: 'video/mp4', data: 'AQID' } }),
+    ).rejects.toMatchObject({ code: 'invalid_request' });
+    expect(fetcher).toHaveBeenCalledTimes(1);
   });
 
   it('returns actionable quota details instead of retrying automatically', async () => {

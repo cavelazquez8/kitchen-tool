@@ -82,6 +82,11 @@ previously paired browsers until you enter the new token in each one.
 5. Send one short cooking question to verify Gemini itself. Errors explain a missing or
    rejected key, unavailable model, quota exhaustion, or network failure.
 
+For an existing Worker, download the latest `mise-gemini-worker.js` from Mise settings,
+replace the complete code in Cloudflare's editor, and deploy. Keep the existing secrets
+and allowed origin. New recipe recommendations and nutrition report extraction need
+this updated code; a successful health check alone does not verify those features.
+
 The pairing token is saved only in this browser's separate connection settings. It is a
 credential: protect it and use **Disconnect** on shared devices. Mise does not include
 it in inventory exports or backups. The browser never receives the Google API key.
@@ -119,6 +124,21 @@ it in inventory exports or backups. The browser never receives the Google API ke
   URL proxy; keep its access token private.
 - Gemini chat sends the selected inventory/context and recent history on each request.
   Generated content cannot directly edit inventory. Mise performs its own quantity math.
+- **Recipe-first recommendations** send a small locally retrieved set of real recipes,
+  with their recorded ingredients, yields and inventory gaps. Gemini can ask preference
+  questions and select up to three of those recipes. The Worker and browser validate
+  the returned IDs; generated replacements and unknown IDs are rejected. Mise opens
+  the original recipe and retains its attribution. This does not send the entire
+  cookbook or run an unrestricted web search, and Spoonacular discovery is excluded.
+- Optional reviewed daily nutrition targets accompany cooking questions and recipe
+  recommendations. Targets are daily goals; recipe figures are estimated per serving.
+  Missing nutrition, unreviewed ingredient weights or unknown yields stay unknown.
+- **Nutrition report extraction** uses `/nutrition/extract` with pasted text or a JPG,
+  PNG or WebP image under 1 MB. It extracts explicitly recommended daily calories and
+  macros for review, preserving absent or ambiguous values as unknown. It does not
+  prescribe targets from body measurements, BMI or basal metabolic rate. This consumes
+  the same Gemini allowance as chat and never applies goals automatically.
+  [USDA nutrition setup](nutrition-setup.md) is separate and optional.
 
 ## Local development
 
@@ -134,6 +154,7 @@ production deployment.
 - [Gemini billing and projects](https://ai.google.dev/gemini-api/docs/billing)
 - [API key security](https://ai.google.dev/gemini-api/docs/api-key)
 - [Gemini generateContent REST reference](https://ai.google.dev/api/generate-content)
+- [Gemini structured outputs](https://ai.google.dev/gemini-api/docs/structured-output)
 - [Gemini video input](https://ai.google.dev/gemini-api/docs/video-understanding)
 - [Gemini unpaid-service data terms](https://ai.google.dev/gemini-api/terms)
 - [Cloudflare secrets](https://developers.cloudflare.com/workers/configuration/secrets/)

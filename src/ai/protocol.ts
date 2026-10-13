@@ -25,6 +25,24 @@ export interface AiReply {
   message: string;
   recipes: AiRecipeDraft[];
   warnings: string[];
+  recommendedRecipeIds?: string[];
+}
+
+/** A small, locally retrieved set of real recipes, never the whole cookbook. */
+export interface AiRecipeCandidate {
+  id: string;
+  title: string;
+  servings: number | null;
+  ingredients: string[];
+  missingIngredients: string[];
+  source?: string;
+  nutrition?: { perServing: NutritionValues; complete: boolean };
+}
+
+export interface AiNutritionReply {
+  targets: NutritionTargets;
+  sourceText: string;
+  warnings: string[];
 }
 
 export interface AiChatRequest {
@@ -33,6 +51,8 @@ export interface AiChatRequest {
   tools?: string;
   recipe?: string;
   history?: AiMessage[];
+  candidates?: AiRecipeCandidate[];
+  nutritionTargets?: NutritionTargets;
 }
 
 export interface AiMedia {
@@ -78,12 +98,71 @@ function hasOnlyKeys(value: Record<string, unknown>, keys: string[]): boolean {
 export function parseChatRequest(value: unknown): AiChatRequest | null {
   if (
     !isRecord(value) ||
-    !hasOnlyKeys(value, ['message', 'inventory', 'tools', 'recipe', 'history'])
+    !hasOnlyKeys(value, [
+      'message',
+      'inventory',
+      'tools',
+      'recipe',
+      'history',
+      'candidates',
+      'nutritionTargets',
+    ])
   )
     return null;
   if (!text(value.message, 6000) || !text(value.inventory, 24000, true)) return null;
   if (value.tools !== undefined && !text(value.tools, 4000, true)) return null;
   if (value.recipe !== undefined && !text(value.recipe, 12000, true)) return null;
+  if (value.nutritionTargets !== undefined && !isNutritionTargets(value.nutritionTargets))
+    return null;
+  let candidates: AiRecipeCandidate[] | undefined;
+  if (value.candidates !== undefined) {
+    if (
+      !Array.isArray(value.candidates) ||
+      value.candidates.length === 0 ||
+      value.candidates.length > 12 ||
+      JSON.stringify(value.candidates).length > 24000
+    )
+      return null;
+    candidates = [];
+    const ids = new Set<string>();
+    for (const candidate of value.candidates) {
+      if (
+        !isRecord(candidate) ||
+        !hasOnlyKeys(candidate, [
+          'id',
+          'title',
+          'servings',
+          'ingredients',
+          'missingIngredients',
+          'source',
+          'nutrition',
+        ]) ||
+        !text(candidate.id, 200) ||
+        ids.has(candidate.id) ||
+        !text(candidate.title, 180) ||
+        !validNumber(candidate.servings, 100) ||
+        !Array.isArray(candidate.ingredients) ||
+        candidate.ingredients.length === 0 ||
+        candidate.ingredients.length > 60 ||
+        !candidate.ingredients.every((item) => text(item, 400)) ||
+        !Array.isArray(candidate.missingIngredients) ||
+        candidate.missingIngredients.length > 60 ||
+        !candidate.missingIngredients.every((item) => text(item, 400)) ||
+        (candidate.source !== undefined && !text(candidate.source, 300))
+      )
+        return null;
+      if (
+        candidate.nutrition !== undefined &&
+        (!isRecord(candidate.nutrition) ||
+          !hasOnlyKeys(candidate.nutrition, ['perServing', 'complete']) ||
+          !isNutritionValues(candidate.nutrition.perServing) ||
+          typeof candidate.nutrition.complete !== 'boolean')
+      )
+        return null;
+      ids.add(candidate.id);
+      candidates.push(candidate as unknown as AiRecipeCandidate);
+    }
+  }
   let history: AiMessage[] | undefined;
   if (value.history !== undefined) {
     if (!Array.isArray(value.history) || value.history.length > 12) return null;
@@ -106,6 +185,10 @@ export function parseChatRequest(value: unknown): AiChatRequest | null {
     ...(value.tools !== undefined ? { tools: value.tools as string } : {}),
     ...(value.recipe !== undefined ? { recipe: value.recipe as string } : {}),
     ...(history ? { history } : {}),
+    ...(candidates ? { candidates } : {}),
+    ...(value.nutritionTargets !== undefined
+      ? { nutritionTargets: value.nutritionTargets as NutritionTargets }
+      : {}),
   };
 }
 
@@ -156,7 +239,10 @@ function validNumber(value: unknown, max: number): value is number | null {
   );
 }
 
-export function parseAiReply(value: unknown): AiReply | null {
+export function parseAiReply(
+  value: unknown,
+  candidates?: readonly AiRecipeCandidate[],
+): AiReply | null {
   if (
     !isRecord(value) ||
     !text(value.message, 16000, true) ||
@@ -164,6 +250,20 @@ export function parseAiReply(value: unknown): AiReply | null {
     value.recipes.length > 4
   )
     return null;
+  let recommendedRecipeIds: string[] | undefined;
+  if (value.recommendedRecipeIds !== undefined) {
+    if (
+      !Array.isArray(value.recommendedRecipeIds) ||
+      value.recommendedRecipeIds.length > 3 ||
+      !value.recommendedRecipeIds.every((id) => text(id, 200)) ||
+      new Set(value.recommendedRecipeIds).size !== value.recommendedRecipeIds.length ||
+      value.recommendedRecipeIds.some((id) => !candidates?.some((candidate) => candidate.id === id))
+    )
+      return null;
+    recommendedRecipeIds = value.recommendedRecipeIds as string[];
+  }
+  // Grounded mode returns references to originals, never generated replacement recipes.
+  if (candidates && (value.recipes.length !== 0 || !recommendedRecipeIds)) return null;
   if (
     !Array.isArray(value.warnings) ||
     value.warnings.length > 12 ||
@@ -214,8 +314,56 @@ export function parseAiReply(value: unknown): AiReply | null {
       steps: recipe.steps as string[],
     });
   }
-  return { message: value.message, recipes, warnings: value.warnings as string[] };
+  return {
+    message: value.message,
+    recipes,
+    warnings: value.warnings as string[],
+    ...(recommendedRecipeIds ? { recommendedRecipeIds } : {}),
+  };
 }
+
+export function parseNutritionExtractRequest(value: unknown): AiExtractRequest | null {
+  const input = parseExtractRequest(value);
+  if (!input || input.sourceUrl || input.media?.mimeType.startsWith('video/')) return null;
+  return input;
+}
+
+export function parseAiNutritionReply(value: unknown): AiNutritionReply | null {
+  if (
+    !isRecord(value) ||
+    !hasOnlyKeys(value, ['targets', 'sourceText', 'warnings']) ||
+    !isNutritionTargets(value.targets) ||
+    !text(value.sourceText, 12000, true) ||
+    !Array.isArray(value.warnings) ||
+    value.warnings.length > 12 ||
+    !value.warnings.every((warning) => text(warning, 1000))
+  )
+    return null;
+  return {
+    targets: value.targets,
+    sourceText: value.sourceText,
+    warnings: value.warnings as string[],
+  };
+}
+
+export const AI_NUTRITION_SCHEMA = {
+  type: 'OBJECT',
+  properties: {
+    targets: {
+      type: 'OBJECT',
+      properties: {
+        caloriesKcal: { type: 'NUMBER', nullable: true },
+        proteinGrams: { type: 'NUMBER', nullable: true },
+        carbsGrams: { type: 'NUMBER', nullable: true },
+        fatGrams: { type: 'NUMBER', nullable: true },
+      },
+      required: ['caloriesKcal', 'proteinGrams', 'carbsGrams', 'fatGrams'],
+    },
+    sourceText: { type: 'STRING' },
+    warnings: { type: 'ARRAY', items: { type: 'STRING' } },
+  },
+  required: ['targets', 'sourceText', 'warnings'],
+} as const;
 
 // The API uses its documented Schema representation; nullable values remain unknown.
 export const AI_REPLY_SCHEMA = {
@@ -252,3 +400,5 @@ export const AI_REPLY_SCHEMA = {
   },
   required: ['message', 'recipes', 'warnings'],
 } as const;
+import { isNutritionTargets, isNutritionValues } from '../nutrition/types';
+import type { NutritionTargets, NutritionValues } from '../nutrition/types';

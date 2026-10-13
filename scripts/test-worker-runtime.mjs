@@ -21,6 +21,7 @@ const bindings = {
   RECIPEAPI_PLAN: 'free',
   SPOONACULAR_API_KEY: 'test_only_'.repeat(4),
   SPOONACULAR_PLAN: 'free',
+  USDA_API_KEY: 'test_only_usda_not_a_real_key',
 };
 const recipeApi = {
   data: [
@@ -47,6 +48,23 @@ const spoonacular = {
   totalResults: 1,
 };
 const json = (body, init) => new Response(JSON.stringify(body), init);
+const geminiAnswer = (body) =>
+  json({
+    candidates: [{ finishReason: 'STOP', content: { parts: [{ text: JSON.stringify(body) }] } }],
+  });
+const groundedInput = {
+  message: 'Help me choose dinner',
+  inventory: '',
+  candidates: [
+    {
+      id: 'actual-fixture',
+      title: 'Runtime fixture chili',
+      servings: 4,
+      ingredients: ['300 g beans'],
+      missingIngredients: ['beans'],
+    },
+  ],
+};
 
 async function run(date, path, payload, upstream, verify) {
   const calls = [];
@@ -91,6 +109,107 @@ for (const date of ['2024-10-01', '2026-10-10']) {
       assert.equal(response.status, 200);
       assert.equal(calls.length, 0);
       assert.ok((await response.json()).providers.every((provider) => provider.configured));
+    },
+  );
+  passed++;
+  await run(
+    date,
+    '/nutrition/status',
+    undefined,
+    () => assert.fail('Nutrition status must not consume USDA or Gemini quota.'),
+    async (response, calls) => {
+      assert.equal(response.status, 200);
+      assert.deepEqual(await response.json(), { provider: 'usda', configured: true });
+      assert.equal(calls.length, 0);
+    },
+  );
+  passed++;
+  for (const actualId of [true, false]) {
+    await run(
+      date,
+      '/chat',
+      groundedInput,
+      async (request) => {
+        assert.equal(new URL(request.url).hostname, 'generativelanguage.googleapis.com');
+        const input = await request.json();
+        assert.deepEqual(
+          input.generationConfig.responseSchema.properties.recommendedRecipeIds.items.enum,
+          ['actual-fixture'],
+        );
+        return geminiAnswer({
+          message: 'Try the original chili.',
+          recipes: [],
+          warnings: [],
+          recommendedRecipeIds: [actualId ? 'actual-fixture' : 'invented'],
+        });
+      },
+      async (response, calls) => {
+        assert.equal(response.status, actualId ? 200 : 502);
+        const body = await response.json();
+        if (actualId) {
+          assert.deepEqual(body.recommendedRecipeIds, ['actual-fixture']);
+          assert.deepEqual(body.recipes, []);
+        } else assert.equal(body.error.code, 'invalid_response');
+        assert.equal(calls.length, 1);
+      },
+    );
+    passed++;
+  }
+  await run(
+    date,
+    '/nutrition/extract',
+    { text: 'Recommended daily intake: 2000 kcal, 120 g protein' },
+    async (request) => {
+      const input = await request.json();
+      assert.deepEqual(input.generationConfig.responseSchema.required, [
+        'targets',
+        'sourceText',
+        'warnings',
+      ]);
+      return geminiAnswer({
+        targets: { caloriesKcal: 2000, proteinGrams: 120, carbsGrams: null, fatGrams: null },
+        sourceText: 'Recommended daily intake: 2000 kcal, 120 g protein',
+        warnings: ['Other targets not stated.'],
+      });
+    },
+    async (response, calls) => {
+      assert.equal(response.status, 200);
+      assert.equal((await response.json()).targets.proteinGrams, 120);
+      assert.equal(calls.length, 1);
+    },
+  );
+  passed++;
+  await run(
+    date,
+    '/nutrition/food',
+    { fdcId: 12345 },
+    (request) => {
+      const url = new URL(request.url);
+      assert.equal(url.hostname, 'api.nal.usda.gov');
+      assert.equal(url.pathname, '/fdc/v1/food/12345');
+      return json({
+        fdcId: 12345,
+        description: 'Runtime fixture beans',
+        dataType: 'Foundation',
+        foodNutrients: [
+          { nutrient: { id: 1008, unitName: 'kcal' }, amount: 120 },
+          { nutrient: { id: 1003, unitName: 'g' }, amount: 7 },
+          { nutrient: { id: 1005, unitName: 'g' }, amount: 20 },
+          { nutrient: { id: 1004, unitName: 'g' }, amount: 1 },
+        ],
+      });
+    },
+    async (response, calls) => {
+      assert.equal(response.status, 200, JSON.stringify(await response.clone().json()));
+      const body = await response.json();
+      assert.equal(body.food.fdcId, 12345);
+      assert.deepEqual(body.food.per100g, {
+        caloriesKcal: 120,
+        proteinGrams: 7,
+        carbsGrams: 20,
+        fatGrams: 1,
+      });
+      assert.equal(calls.length, 1);
     },
   );
   passed++;

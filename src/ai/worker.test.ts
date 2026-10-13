@@ -123,6 +123,165 @@ describe('private Gemini Worker', () => {
     expect(sent.generationConfig.responseMimeType).toBe('application/json');
   });
 
+  it('grounds recommendations in supplied real IDs without changing source recipes', async () => {
+    const groundedReply = {
+      message: 'Try chili, or tell me whether you prefer pasta.',
+      recipes: [],
+      warnings: [],
+      recommendedRecipeIds: ['source-chili'],
+    };
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          candidates: [
+            { finishReason: 'STOP', content: { parts: [{ text: JSON.stringify(groundedReply) }] } },
+          ],
+        }),
+      ),
+    );
+    const input = {
+      message: 'Help me choose',
+      inventory: '',
+      candidates: [
+        {
+          id: 'source-chili',
+          title: 'Chili',
+          servings: 4,
+          ingredients: ['1 lb beef', '2 cups beans'],
+          missingIngredients: ['beef'],
+        },
+      ],
+      nutritionTargets: { caloriesKcal: 2000, proteinGrams: 120, carbsGrams: null, fatGrams: null },
+    };
+    const response = await createWorker(fetcher).fetch(request('/chat', input), env);
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual(groundedReply);
+    const sent = JSON.parse(String(fetcher.mock.calls[0][1]?.body));
+    expect(sent.generationConfig.responseSchema.properties.recommendedRecipeIds.items.enum).toEqual(
+      ['source-chili'],
+    );
+    expect(sent.contents.at(-1).parts[0].text).toContain('approvedDailyNutritionTargets');
+    expect(sent.systemInstruction.parts[0].text).toContain('partial nutrient subtotals');
+    expect(fetcher.mock.calls[0][1]?.redirect).toBe('manual');
+  });
+
+  it('rejects invented recommendation IDs and generated replacements in grounded mode', async () => {
+    const input = {
+      message: 'Dinner',
+      inventory: '',
+      candidates: [
+        {
+          id: 'real',
+          title: 'Chili',
+          servings: null,
+          ingredients: ['beans'],
+          missingIngredients: [],
+        },
+      ],
+    };
+    for (const invalid of [
+      { message: 'Try it', recipes: [], warnings: [], recommendedRecipeIds: ['invented'] },
+      { ...reply, recommendedRecipeIds: ['real'] },
+      { message: 'Try it', recipes: [], warnings: [] },
+    ]) {
+      const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            candidates: [
+              { finishReason: 'STOP', content: { parts: [{ text: JSON.stringify(invalid) }] } },
+            ],
+          }),
+        ),
+      );
+      expect((await createWorker(fetcher).fetch(request('/chat', input), env)).status).toBe(502);
+    }
+  });
+
+  it('extracts only recommended daily nutrition targets with a separate schema for review', async () => {
+    const nutrition = {
+      targets: { caloriesKcal: 2000, proteinGrams: 120, carbsGrams: null, fatGrams: null },
+      sourceText: 'Daily targets: 2000 kcal, 120 g protein',
+      warnings: ['Carbs and fat not stated.'],
+    };
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          candidates: [
+            { finishReason: 'STOP', content: { parts: [{ text: JSON.stringify(nutrition) }] } },
+          ],
+        }),
+      ),
+    );
+    const response = await createWorker(fetcher).fetch(
+      request('/nutrition/extract', {
+        text: nutrition.sourceText,
+        media: { mimeType: 'image/png', data: 'AQID' },
+      }),
+      env,
+    );
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual(nutrition);
+    const sent = JSON.parse(String(fetcher.mock.calls[0][1]?.body));
+    expect(sent.generationConfig.responseSchema.required).toEqual([
+      'targets',
+      'sourceText',
+      'warnings',
+    ]);
+    expect(sent.systemInstruction.parts[0].text).toContain('basal metabolic rate (BMR)');
+    expect(sent.contents[0].parts[1].inlineData).toEqual({ mimeType: 'image/png', data: 'AQID' });
+  });
+
+  it('keeps nutrition status behind pairing and checks configuration without quota', async () => {
+    const fetcher = vi.fn<typeof fetch>();
+    const worker = createWorker(fetcher);
+    const statusRequest = (authorization: string) =>
+      new Request('https://mise.example.workers.dev/nutrition/status', {
+        headers: { Origin: origin, Authorization: authorization },
+      });
+    expect((await worker.fetch(statusRequest(''), env)).status).toBe(401);
+    const response = await worker.fetch(statusRequest(`Bearer ${token}`), {
+      ...env,
+      USDA_API_KEY: 'test-usda-key-not-a-real-secret',
+    });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ provider: 'usda', configured: true });
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+
+  it('rejects unpaired and wrong-origin food searches before any USDA work', async () => {
+    const fetcher = vi.fn<typeof fetch>();
+    const worker = createWorker(fetcher);
+    const configuredNutrition = { ...env, USDA_API_KEY: 'test-usda-key-not-a-real-secret' };
+    expect(
+      (
+        await worker.fetch(
+          request('/nutrition/search', { query: 'beans' }, ''),
+          configuredNutrition,
+        )
+      ).status,
+    ).toBe(401);
+    expect(
+      (
+        await worker.fetch(
+          request('/nutrition/search', { query: 'beans' }, undefined, 'https://attacker.example'),
+          configuredNutrition,
+        )
+      ).status,
+    ).toBe(403);
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+
+  it('rejects unsupported nutrition report files before using AI quota', async () => {
+    const fetcher = vi.fn<typeof fetch>();
+    const worker = createWorker(fetcher);
+    for (const input of [
+      { media: { mimeType: 'video/mp4', data: 'AQID' } },
+      { sourceUrl: 'https://example.com/report' },
+    ])
+      expect((await worker.fetch(request('/nutrition/extract', input), env)).status).toBe(400);
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+
   it('fails closed on a model outside the reviewed free-tier allowlist', async () => {
     const fetcher = vi.fn<typeof fetch>();
     expect(
