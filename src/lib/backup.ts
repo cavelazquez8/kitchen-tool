@@ -1,5 +1,6 @@
 import { isInventoryState, type InventoryState } from '../domain/types';
 import type { Recipe } from '../recipes/types';
+import { copyNutritionValues, copyRecipeNutritionMapping } from '../nutrition/types';
 
 export interface InventoryBackup {
   version: 2;
@@ -103,6 +104,17 @@ export function buildInventoryBackup(state: InventoryState): InventoryBackup {
             id: message.id,
             role: message.role,
             text: message.text,
+          })),
+        }),
+    ...(state.nutritionTargets === undefined
+      ? {}
+      : { nutritionTargets: copyNutritionValues(state.nutritionTargets) }),
+    ...(state.recipeNutrition === undefined
+      ? {}
+      : {
+          recipeNutrition: state.recipeNutrition.map((item) => ({
+            recipeId: item.recipeId,
+            ...copyRecipeNutritionMapping(item),
           })),
         }),
   };

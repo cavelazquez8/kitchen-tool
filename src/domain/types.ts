@@ -1,4 +1,10 @@
 import { isRecipe, type Recipe } from '../recipes/types';
+import {
+  isNutritionTargets,
+  isRecipeNutritionMapping,
+  type NutritionTargets,
+  type RecipeNutritionMapping,
+} from '../nutrition/types';
 export type StorageLocation = 'fridge' | 'freezer' | 'pantry';
 export type StapleStatus = 'stocked' | 'low' | 'empty';
 
@@ -56,6 +62,8 @@ export interface InventoryState {
   mealPlan?: MealPlanItem[];
   shoppingList?: ShoppingItem[];
   chatHistory?: ChatMessage[];
+  nutritionTargets?: NutritionTargets;
+  recipeNutrition?: (RecipeNutritionMapping & { recipeId: string })[];
 }
 
 export interface InventoryGroup {
@@ -224,6 +232,22 @@ export function isInventoryState(value: unknown): value is InventoryState {
           ['user', 'assistant'].includes(item.role as string) &&
           isNonemptyText(item.text),
       ))
+  )
+    return false;
+  if (value.nutritionTargets !== undefined && !isNutritionTargets(value.nutritionTargets))
+    return false;
+  if (
+    value.recipeNutrition !== undefined &&
+    (!Array.isArray(value.recipeNutrition) ||
+      value.recipeNutrition.length > 1000 ||
+      !value.recipeNutrition.every(
+        (item) =>
+          isRecord(item) &&
+          isNonemptyText(item.recipeId) &&
+          isRecipeNutritionMapping({ recipeKey: item.recipeKey, ingredients: item.ingredients }),
+      ) ||
+      new Set(value.recipeNutrition.map((item) => item.recipeId)).size !==
+        value.recipeNutrition.length)
   )
     return false;
   return true;
