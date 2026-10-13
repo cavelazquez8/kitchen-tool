@@ -1,6 +1,13 @@
 import { importRecipeWebsite, WebsiteImportError } from './website';
 import { workerOutboundOptions } from './outbound';
 import {
+  authorizeDiscoveredModel,
+  createModelDiscoveryState,
+  discoverGeminiModels,
+  ModelsError,
+  type ModelDiscoveryState,
+} from './models';
+import {
   NutritionError,
   createNutritionState,
   handleNutritionRequest,
@@ -18,10 +25,10 @@ import {
   AI_REPLY_SCHEMA,
   AI_NUTRITION_SCHEMA,
   AI_BODY_SCAN_SCHEMA,
-  ALLOWED_MODELS,
   DEFAULT_MODEL,
   isRecord,
   isGeminiModel,
+  isGeminiModelId,
   MAX_MEDIA_BYTES,
   MAX_CHAT_REQUEST_BYTES,
   MAX_BODY_SCAN_BYTES,
@@ -309,26 +316,49 @@ function groundedSchema(input: AiChatRequest): unknown {
   };
 }
 
+async function resolveModel(
+  requested: string | undefined,
+  reviewed: unknown,
+  env: Env,
+  discovery: ModelDiscoveryState,
+  fetcher: typeof fetch,
+  now: () => number,
+): Promise<string> {
+  const model = requested ?? env.GEMINI_MODEL ?? DEFAULT_MODEL;
+  if (requested === undefined && !isGeminiModel(model))
+    throw new HttpError(
+      503,
+      'configuration',
+      'Choose a built-in free model for the Worker default. Select newly discovered models inside Mise.',
+    );
+  if (!isGeminiModel(model))
+    await authorizeDiscoveredModel(model, reviewed, env.GEMINI_API_KEY, discovery, fetcher, now);
+  return model;
+}
+
 async function generate(
   contents: unknown[],
   env: Env,
   state: WorkerState,
   fetcher: typeof fetch,
   now: () => number,
+  discovery: ModelDiscoveryState,
   options: {
     system?: string;
     schema?: unknown;
     parse?: (value: unknown) => unknown | null;
     model?: GeminiModel;
+    modelReviewed?: true;
   } = {},
 ): Promise<unknown> {
-  const model = options.model ?? env.GEMINI_MODEL ?? DEFAULT_MODEL;
-  if (!(ALLOWED_MODELS as readonly string[]).includes(model))
-    throw new HttpError(
-      503,
-      'configuration',
-      'The Worker model is not on Mise’s free-tier allowlist.',
-    );
+  const model = await resolveModel(
+    options.model,
+    options.modelReviewed,
+    env,
+    discovery,
+    fetcher,
+    now,
+  );
   reserveRequest(state, now());
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), UPSTREAM_TIMEOUT_MS);
@@ -465,6 +495,7 @@ export function createWorker(
   const importState = createWorkerState();
   const recipeProviderState = createRecipeProviderState();
   const nutritionState = createNutritionState();
+  const modelDiscovery = createModelDiscoveryState();
   return {
     async fetch(request: Request, env: Env): Promise<Response> {
       const origin = allowedOrigin(request, env);
@@ -499,6 +530,32 @@ export function createWorker(
             'The Mise access token is missing or incorrect. Check AI connection settings.',
           );
         const path = new URL(request.url).pathname;
+        if (path === '/models') {
+          if (request.method !== 'GET')
+            throw new HttpError(405, 'method', 'Model discovery expects a GET request.');
+          const query = new URL(request.url).searchParams;
+          if (
+            Array.from(query.keys()).some((key) => key !== 'refresh') ||
+            query.getAll('refresh').length > 1 ||
+            (query.has('refresh') && query.get('refresh') !== '1')
+          )
+            throw new HttpError(
+              400,
+              'invalid_request',
+              'Use Refresh models to check Google’s current model list.',
+            );
+          return json(
+            await discoverGeminiModels(
+              env.GEMINI_API_KEY,
+              modelDiscovery,
+              fetcher,
+              now,
+              query.get('refresh') === '1',
+            ),
+            200,
+            origin,
+          );
+        }
         if (['/nutrition/status', '/nutrition/search', '/nutrition/food'].includes(path)) {
           const result = await handleNutritionRequest(request, env, fetcher, nutritionState, now);
           return json(result.body, result.status, origin);
@@ -509,22 +566,27 @@ export function createWorker(
           const query = new URL(request.url).searchParams;
           const requestedModel = query.get('model');
           if (
-            Array.from(query.keys()).some((key) => key !== 'model') ||
+            Array.from(query.keys()).some((key) => !['model', 'modelReviewed'].includes(key)) ||
             query.getAll('model').length > 1 ||
-            (requestedModel !== null && !isGeminiModel(requestedModel))
+            query.getAll('modelReviewed').length > 1 ||
+            (query.has('modelReviewed') &&
+              (query.get('modelReviewed') !== '1' || requestedModel === null)) ||
+            (requestedModel !== null && !isGeminiModelId(requestedModel))
           )
             throw new HttpError(400, 'invalid_request', 'Choose a supported Gemini model.');
-          const model = requestedModel ?? env.GEMINI_MODEL ?? DEFAULT_MODEL;
-          if (!(ALLOWED_MODELS as readonly string[]).includes(model))
-            throw new HttpError(
-              503,
-              'configuration',
-              'Select a model from Mise’s free-tier allowlist.',
-            );
+          const model = await resolveModel(
+            requestedModel ?? undefined,
+            query.get('modelReviewed') === '1',
+            env,
+            modelDiscovery,
+            fetcher,
+            now,
+          );
           return json(
             {
               ok: true,
               model,
+              modelDiscovery: true,
               limits: {
                 requestsPerMinute: REQUESTS_PER_MINUTE,
                 requestsPerDayPerIsolate: REQUESTS_PER_DAY,
@@ -600,11 +662,12 @@ export function createWorker(
               'Paste recommended daily targets or supply a supported report image under 1 MB.',
             );
           return json(
-            await generate(nutritionContents(input), env, state, fetcher, now, {
+            await generate(nutritionContents(input), env, state, fetcher, now, modelDiscovery, {
               system: NUTRITION_SYSTEM,
               schema: AI_NUTRITION_SCHEMA,
               parse: parseAiNutritionReply,
               model: input.model,
+              modelReviewed: input.modelReviewed,
             }),
             200,
             origin,
@@ -619,11 +682,12 @@ export function createWorker(
               'Paste report text or supply a PDF, JPG, PNG or WebP body scan up to 4 MB.',
             );
           return json(
-            await generate(bodyScanContents(input), env, state, fetcher, now, {
+            await generate(bodyScanContents(input), env, state, fetcher, now, modelDiscovery, {
               system: BODY_SCAN_SYSTEM,
               schema: AI_BODY_SCAN_SCHEMA,
               parse: parseAiBodyScanReply,
               model: input.model,
+              modelReviewed: input.modelReviewed,
             }),
             200,
             origin,
@@ -644,14 +708,16 @@ export function createWorker(
               state,
               fetcher,
               now,
+              modelDiscovery,
               input.candidates
                 ? {
                     system: GROUNDED_SYSTEM,
                     schema: groundedSchema(input),
                     parse: (value) => parseAiReply(value, input.candidates),
                     model: input.model,
+                    modelReviewed: input.modelReviewed,
                   }
-                : { model: input.model },
+                : { model: input.model, modelReviewed: input.modelReviewed },
             ),
             200,
             origin,
@@ -665,11 +731,29 @@ export function createWorker(
             'Use a shorter message, supported file, or valid recipe content.',
           );
         return json(
-          await generate(extractContents(input), env, state, fetcher, now, { model: input.model }),
+          await generate(extractContents(input), env, state, fetcher, now, modelDiscovery, {
+            model: input.model,
+            modelReviewed: input.modelReviewed,
+          }),
           200,
           origin,
         );
       } catch (error) {
+        if (error instanceof ModelsError)
+          return json(
+            {
+              error: {
+                code: error.code,
+                message: error.message,
+                ...(error.retryAfterSeconds !== undefined
+                  ? { retryAfterSeconds: error.retryAfterSeconds }
+                  : {}),
+              },
+            },
+            error.status,
+            origin,
+            error.retryAfterSeconds,
+          );
         if (error instanceof NutritionError)
           return json(
             {

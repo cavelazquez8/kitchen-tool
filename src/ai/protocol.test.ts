@@ -10,6 +10,9 @@ import {
   MAX_BODY_SCAN_BYTES,
   MAX_CHAT_REQUEST_BYTES,
   type AiRecipeCandidate,
+  isGeminiModel,
+  isGeminiModelId,
+  isSupportedModelSelection,
 } from './protocol';
 
 const targets = { caloriesKcal: 2000, proteinGrams: 120, carbsGrams: null, fatGrams: null };
@@ -22,6 +25,45 @@ const candidate: AiRecipeCandidate = {
   source: 'Wikibooks Cookbook',
 };
 const input = { message: 'Help me choose dinner', inventory: '', candidates: [candidate] };
+
+describe('reviewed Gemini model selection', () => {
+  it('keeps legacy model compatibility while requiring explicit approval for newly discovered IDs', () => {
+    expect(isGeminiModel('gemini-3.8-flash')).toBe(true);
+    expect(isGeminiModel('gemini-4.0-flash')).toBe(false);
+    expect(isGeminiModelId('gemini-4.0-flash')).toBe(true);
+    expect(isSupportedModelSelection(undefined, undefined)).toBe(true);
+    expect(isSupportedModelSelection('gemini-3.8-flash', undefined)).toBe(true);
+    expect(isSupportedModelSelection('gemini-3.8-flash', true)).toBe(true);
+    expect(isSupportedModelSelection('gemini-4.0-flash', undefined)).toBe(false);
+    expect(isSupportedModelSelection('gemini-4.0-flash', true)).toBe(true);
+  });
+
+  it('rejects unsafe IDs and mismatched approvals before either Worker endpoint receives them', () => {
+    const parsers = [
+      (selection: object) => parseChatRequest({ message: 'Dinner', inventory: '', ...selection }),
+      (selection: object) => parseExtractRequest({ text: 'Recipe', ...selection }),
+      (selection: object) => parseNutritionExtractRequest({ text: 'Daily targets', ...selection }),
+      (selection: object) => parseBodyScanExtractRequest({ text: 'Report', ...selection }),
+    ];
+    const selection = { model: 'gemini-4.0-flash', modelReviewed: true };
+    for (const parser of parsers) {
+      expect(parser(selection)).toMatchObject(selection);
+      for (const invalid of [
+        { model: selection.model },
+        { model: selection.model, modelReviewed: false },
+        { modelReviewed: true },
+        { model: 'models/gemini-4.0-flash', modelReviewed: true },
+        { model: 'gemini-new?api=key', modelReviewed: true },
+        { model: 'gemini-new/../../other', modelReviewed: true },
+        { model: `gemini-${'a'.repeat(100)}`, modelReviewed: true },
+        { model: 'GEMINI-4.0-flash', modelReviewed: true },
+        { model: 'gemini--new', modelReviewed: true },
+        { model: 'gemini-new', modelReviewed: 'true' },
+      ])
+        expect(parser(invalid)).toBeNull();
+    }
+  });
+});
 
 describe('grounded recommendation protocol', () => {
   it('accepts bounded real candidates and explicitly approved daily targets', () => {

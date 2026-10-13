@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   checkGeminiConnection,
+  discoverGeminiModels,
   clearGeminiConnection,
   extractGeminiRecipe,
   extractGeminiNutrition,
@@ -17,6 +18,7 @@ import {
   sendGeminiChat,
 } from './client';
 import { MAX_MEDIA_BYTES, MAX_BODY_SCAN_BYTES } from './protocol';
+import { GEMINI_PRICING_URL } from './models';
 
 const connection = { url: 'https://mise.example.workers.dev', token: 'a'.repeat(43) };
 const reply = { message: 'Try scrambled eggs.', recipes: [], warnings: [] };
@@ -306,8 +308,147 @@ describe('Gemini browser adapter', () => {
     await expect(checkGeminiConnection(selected)).rejects.toMatchObject({ code: 'worker_update' });
   });
 
+  it('persists a reviewed discovered model and includes that review in its health check', async () => {
+    const selected = { ...connection, model: 'gemini-4.0-flash', modelReviewed: true as const };
+    saveGeminiConnectionDraft(selected);
+    expect(readGeminiConnectionDraft()).toEqual(selected);
+    saveGeminiConnection(selected);
+    expect(readGeminiConnection()).toEqual(selected);
+    const fetcher = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(new Response(JSON.stringify({ ok: true, model: selected.model })));
+    vi.stubGlobal('fetch', fetcher);
+    await expect(checkGeminiConnection(selected)).resolves.toEqual({
+      ok: true,
+      model: selected.model,
+    });
+    expect(fetcher.mock.calls[0][0]).toBe(
+      `${connection.url}/health?model=${selected.model}&modelReviewed=1`,
+    );
+  });
+
+  it('blocks unreviewed selections and malformed stored approvals before reaching the Worker', async () => {
+    const fetcher = vi.fn<typeof fetch>();
+    vi.stubGlobal('fetch', fetcher);
+    const selected = { ...connection, model: 'gemini-4.0-flash' };
+    expect(() => saveGeminiConnection(selected)).toThrow('Review and approve');
+    expect(() => saveGeminiConnectionDraft(selected)).toThrow('Review');
+    await expect(checkGeminiConnection(selected)).rejects.toMatchObject({ code: 'settings' });
+    await expect(
+      sendGeminiChat(selected, { message: 'Dinner', inventory: '' }),
+    ).rejects.toMatchObject({ code: 'settings' });
+    await expect(
+      sendGeminiChat(connection, { message: 'Dinner', inventory: '', model: selected.model }),
+    ).rejects.toMatchObject({ code: 'invalid_request' });
+    expect(fetcher).not.toHaveBeenCalled();
+    for (const invalid of [
+      selected,
+      { ...connection, modelReviewed: true },
+      { ...selected, modelReviewed: 'true' },
+    ]) {
+      localStorage.setItem('mise.gemini.connection.v1', JSON.stringify(invalid));
+      localStorage.setItem('mise.gemini.connection-draft.v1', JSON.stringify(invalid));
+      expect(readGeminiConnection()).toBeNull();
+      expect(readGeminiConnectionDraft()).toBeNull();
+    }
+  });
+
+  it('discovers current models without saving or selecting them and can request a fresh catalog', async () => {
+    saveGeminiConnection(connection);
+    const catalog = {
+      models: [
+        {
+          id: 'gemini-4.0-flash',
+          name: 'Gemini 4.0 Flash',
+          description: '',
+          inputTokenLimit: null,
+          outputTokenLimit: null,
+          freeTier: 'verified',
+        },
+      ],
+      checkedAt: '2026-10-13T12:00:00.000Z',
+      pricingUrl: GEMINI_PRICING_URL,
+      warnings: [],
+    };
+    const fetcher = vi
+      .fn<typeof fetch>()
+      .mockImplementation(() => Promise.resolve(new Response(JSON.stringify(catalog))));
+    vi.stubGlobal('fetch', fetcher);
+    expect(await discoverGeminiModels(connection)).toEqual(catalog);
+    expect(await discoverGeminiModels(connection, { refresh: true })).toEqual(catalog);
+    expect(fetcher.mock.calls.map(([url]) => url)).toEqual([
+      `${connection.url}/models`,
+      `${connection.url}/models?refresh=1`,
+    ]);
+    expect(
+      fetcher.mock.calls.every(
+        ([, options]) => options?.method === 'GET' && options.body === undefined,
+      ),
+    ).toBe(true);
+    expect(readGeminiConnection()).toEqual(connection);
+  });
+
+  it('rejects invalid discovery catalogs and explains the update needed by an older Worker', async () => {
+    const fetcher = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ models: [] })))
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ error: { code: 'not_found', message: 'Unknown route.' } }), {
+          status: 404,
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({ error: { code: 'invalid_request', message: 'Unsupported query.' } }),
+          { status: 400 },
+        ),
+      )
+      .mockResolvedValueOnce(new Response('Not found', { status: 404 }));
+    vi.stubGlobal('fetch', fetcher);
+    await expect(discoverGeminiModels(connection)).rejects.toMatchObject({
+      code: 'invalid_response',
+    });
+    await expect(discoverGeminiModels(connection)).rejects.toMatchObject({
+      code: 'worker_update',
+      message: expect.stringContaining('latest Mise Worker file'),
+    });
+    await expect(discoverGeminiModels(connection, { refresh: true })).rejects.toMatchObject({
+      code: 'worker_update',
+    });
+    await expect(discoverGeminiModels(connection)).rejects.toMatchObject({
+      code: 'worker_update',
+    });
+  });
+
+  it('preserves paid or unverified model refusals instead of suggesting an update or another model', async () => {
+    const selected = { ...connection, model: 'gemini-4.0-pro', modelReviewed: true as const };
+    const refusal = {
+      code: 'model_not_free',
+      message: 'This model has no verified free input and output tier.',
+    };
+    vi.stubGlobal(
+      'fetch',
+      vi
+        .fn<typeof fetch>()
+        .mockImplementation(() =>
+          Promise.resolve(new Response(JSON.stringify({ error: refusal }), { status: 422 })),
+        ),
+    );
+    await expect(checkGeminiConnection(selected)).rejects.toMatchObject(refusal);
+    await expect(
+      sendGeminiChat(selected, { message: 'Dinner', inventory: '' }),
+    ).rejects.toMatchObject(refusal);
+    await expect(extractGeminiRecipe(selected, { text: 'Recipe' })).rejects.toMatchObject(refusal);
+    await expect(extractGeminiNutrition(selected, { text: 'Daily targets' })).rejects.toMatchObject(
+      refusal,
+    );
+    await expect(extractGeminiBodyScan(selected, { text: 'Report' })).rejects.toMatchObject(
+      refusal,
+    );
+  });
+
   it('applies the saved model to every Gemini task and keeps website import free of overrides', async () => {
-    const selected = { ...connection, model: 'gemini-3.1-flash-lite' as const };
+    const selected = { ...connection, model: 'gemini-4.0-flash', modelReviewed: true as const };
     const scan = {
       text: 'BMR: 1650 kcal',
       recordedOn: null,
@@ -338,9 +479,38 @@ describe('Gemini browser adapter', () => {
     await extractGeminiBodyScan(selected, { text: scan.text });
     await importGeminiRecipeUrl(selected, 'https://example.com/recipe');
     for (const [, options] of fetcher.mock.calls.slice(0, 4))
-      expect(JSON.parse(String(options?.body)).model).toBe(selected.model);
+      expect(JSON.parse(String(options?.body))).toMatchObject({
+        model: selected.model,
+        modelReviewed: true,
+      });
     expect(JSON.parse(String(fetcher.mock.calls[4][1]?.body))).toEqual({
       url: 'https://example.com/recipe',
+    });
+  });
+
+  it('overrides a request model and its approval together with the saved model selection', async () => {
+    const fetcher = vi
+      .fn<typeof fetch>()
+      .mockImplementation(() => Promise.resolve(new Response(JSON.stringify(reply))));
+    vi.stubGlobal('fetch', fetcher);
+    await sendGeminiChat(
+      { ...connection, model: 'gemini-3.8-flash' },
+      { message: 'Dinner', inventory: '', model: 'gemini-4.0-flash', modelReviewed: true },
+    );
+    expect(JSON.parse(String(fetcher.mock.calls[0][1]?.body))).toEqual({
+      message: 'Dinner',
+      inventory: '',
+      model: 'gemini-3.8-flash',
+    });
+    await sendGeminiChat(
+      { ...connection, model: 'gemini-4.0-flash', modelReviewed: true },
+      { message: 'Dinner', inventory: '', model: 'gemini-3.8-flash' },
+    );
+    expect(JSON.parse(String(fetcher.mock.calls[1][1]?.body))).toEqual({
+      message: 'Dinner',
+      inventory: '',
+      model: 'gemini-4.0-flash',
+      modelReviewed: true,
     });
   });
 

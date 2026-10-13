@@ -2,6 +2,7 @@ export interface GeminiConnection {
   url: string;
   token: string;
   model?: GeminiModel;
+  modelReviewed?: true;
 }
 
 export interface AiMessage {
@@ -64,6 +65,7 @@ export interface AiChatRequest {
   nutritionTargets?: NutritionTargets;
   profile?: string;
   model?: GeminiModel;
+  modelReviewed?: true;
 }
 
 export interface AiMedia {
@@ -76,12 +78,14 @@ export interface AiExtractRequest {
   sourceUrl?: string;
   media?: AiMedia;
   model?: GeminiModel;
+  modelReviewed?: true;
 }
 
 export interface AiBodyScanExtractRequest {
   text?: string;
   media?: AiMedia;
   model?: GeminiModel;
+  modelReviewed?: true;
 }
 
 export const MAX_BODY_SCAN_BYTES = 4_000_000;
@@ -108,10 +112,26 @@ export const ALLOWED_MODELS = [
   'gemini-3.8-flash',
 ] as const;
 export const DEFAULT_MODEL = ALLOWED_MODELS[0];
-export type GeminiModel = (typeof ALLOWED_MODELS)[number];
+export type GeminiModel = string;
 
 export function isGeminiModel(value: unknown): value is GeminiModel {
   return typeof value === 'string' && (ALLOWED_MODELS as readonly string[]).includes(value);
+}
+
+/** Google resource IDs only, never arbitrary URL paths or query parameters. */
+export function isGeminiModelId(value: unknown): value is GeminiModel {
+  return (
+    typeof value === 'string' &&
+    value.length <= 100 &&
+    /^gemini-[a-z0-9]+(?:[.-][a-z0-9]+)*$/.test(value)
+  );
+}
+
+/** Review records a user's choice; the Worker still verifies availability and free pricing. */
+export function isSupportedModelSelection(model: unknown, reviewed: unknown): boolean {
+  if (model === undefined) return reviewed === undefined;
+  if (reviewed !== undefined && reviewed !== true) return false;
+  return isGeminiModel(model) || (isGeminiModelId(model) && reviewed === true);
 }
 
 export function isRecord(value: unknown): value is Record<string, unknown> {
@@ -141,6 +161,7 @@ export function parseChatRequest(value: unknown): AiChatRequest | null {
       'nutritionTargets',
       'profile',
       'model',
+      'modelReviewed',
     ])
   )
     return null;
@@ -148,7 +169,7 @@ export function parseChatRequest(value: unknown): AiChatRequest | null {
   if (value.tools !== undefined && !text(value.tools, 4000, true)) return null;
   if (value.recipe !== undefined && !text(value.recipe, 12000, true)) return null;
   if (value.profile !== undefined && !text(value.profile, 24000, true)) return null;
-  if (value.model !== undefined && !isGeminiModel(value.model)) return null;
+  if (!isSupportedModelSelection(value.model, value.modelReviewed)) return null;
   if (value.nutritionTargets !== undefined && !isNutritionTargets(value.nutritionTargets))
     return null;
   let candidates: AiRecipeCandidate[] | undefined;
@@ -223,6 +244,7 @@ export function parseChatRequest(value: unknown): AiChatRequest | null {
     ...(value.recipe !== undefined ? { recipe: value.recipe as string } : {}),
     ...(value.profile !== undefined ? { profile: value.profile as string } : {}),
     ...(value.model !== undefined ? { model: value.model as GeminiModel } : {}),
+    ...(value.modelReviewed === true ? { modelReviewed: true as const } : {}),
     ...(history ? { history } : {}),
     ...(candidates ? { candidates } : {}),
     ...(value.nutritionTargets !== undefined
@@ -235,9 +257,10 @@ export function parseChatRequest(value: unknown): AiChatRequest | null {
 }
 
 export function parseBodyScanExtractRequest(value: unknown): AiBodyScanExtractRequest | null {
-  if (!isRecord(value) || !hasOnlyKeys(value, ['text', 'media', 'model'])) return null;
+  if (!isRecord(value) || !hasOnlyKeys(value, ['text', 'media', 'model', 'modelReviewed']))
+    return null;
   if (value.text !== undefined && !text(value.text, 24000, true)) return null;
-  if (value.model !== undefined && !isGeminiModel(value.model)) return null;
+  if (!isSupportedModelSelection(value.model, value.modelReviewed)) return null;
   let media: AiMedia | undefined;
   if (value.media !== undefined) {
     if (!isRecord(value.media) || !hasOnlyKeys(value.media, ['mimeType', 'data'])) return null;
@@ -261,6 +284,7 @@ export function parseBodyScanExtractRequest(value: unknown): AiBodyScanExtractRe
     ...(value.text !== undefined ? { text: value.text as string } : {}),
     ...(media ? { media } : {}),
     ...(value.model !== undefined ? { model: value.model as GeminiModel } : {}),
+    ...(value.modelReviewed === true ? { modelReviewed: true as const } : {}),
   };
 }
 
@@ -291,9 +315,13 @@ export function parseAiBodyScanReply(value: unknown): AiBodyScanReply | null {
 }
 
 export function parseExtractRequest(value: unknown): AiExtractRequest | null {
-  if (!isRecord(value) || !hasOnlyKeys(value, ['text', 'sourceUrl', 'media', 'model'])) return null;
+  if (
+    !isRecord(value) ||
+    !hasOnlyKeys(value, ['text', 'sourceUrl', 'media', 'model', 'modelReviewed'])
+  )
+    return null;
   if (value.text !== undefined && !text(value.text, 24000, true)) return null;
-  if (value.model !== undefined && !isGeminiModel(value.model)) return null;
+  if (!isSupportedModelSelection(value.model, value.modelReviewed)) return null;
   if (value.sourceUrl !== undefined) {
     if (!text(value.sourceUrl, 2000)) return null;
     try {
@@ -329,6 +357,7 @@ export function parseExtractRequest(value: unknown): AiExtractRequest | null {
     ...(value.sourceUrl !== undefined ? { sourceUrl: value.sourceUrl as string } : {}),
     ...(media ? { media } : {}),
     ...(value.model !== undefined ? { model: value.model as GeminiModel } : {}),
+    ...(value.modelReviewed === true ? { modelReviewed: true as const } : {}),
   };
 }
 

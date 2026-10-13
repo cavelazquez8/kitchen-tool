@@ -19,9 +19,12 @@ kitchen data, not either secret; pair another device separately after restoring 
 
 The default model is `gemini-3.5-flash-lite`. Its text/image/video/audio inputs and text
 outputs are listed as free on Google's pricing page, checked October 10, 2026. The other
-reviewed choices are `gemini-3.1-flash-lite` and `gemini-3.8-flash`. The Worker rejects
-other model names and never switches models or billing plans automatically. A reviewed
-model name does **not** detect or disable Google project billing: keep billing unlinked.
+reviewed choices are `gemini-3.1-flash-lite` and `gemini-3.8-flash`. These built-in choices
+remain available when discovery cannot be reached. Mise also discovers newer models
+using Google's live catalog and official pricing; it never selects them automatically.
+A reviewed model name does **not** detect or disable Google project billing: keep billing
+unlinked. A free-tier price describes Google's Free tier, not a promise that requests
+will be free when your Google project is connected to a billing account.
 
 ## Build and deploy from this project
 
@@ -78,7 +81,9 @@ previously paired browsers until you enter the new token in each one.
    `MISE_ACCESS_TOKEN` secret. This token is separate from your Google API key.
 3. Enter the Worker base URL and that personal access token in Mise; save and test.
 4. A successful connection test confirms the Worker address, origin, settings and pairing.
-   It makes no Gemini request and does not verify the Google key or actual model access.
+   It makes no Gemini generation request. A newly discovered selection also checks
+   Google's catalog and pricing, but neither check establishes that generation quota
+   is available or that your project has billing disabled.
 5. Send one short cooking question to verify Gemini itself. Errors explain a missing or
    rejected key, unavailable model, quota exhaustion, or network failure.
 
@@ -86,15 +91,34 @@ For an existing Worker, download the latest `mise-gemini-worker.js` from Mise se
 replace the complete code in Cloudflare's editor, and deploy. Keep the existing secrets
 and allowed origin. New recipe recommendations and nutrition report extraction need
 this updated code; profile PDF reading and choosing a Gemini model inside Mise also
-need the updated Worker. A successful health check alone does not verify Gemini access.
+need the updated Worker. Automatic model discovery needs one more replacement with
+the current bundle; future supported free releases then appear without replacing code
+for each model. A successful health check alone does not verify Gemini generation access.
 
 The optional model selector stores a preference in this browser. **Worker default**
 uses the Worker's `GEMINI_MODEL` setting, or Mise's default. A selected model accompanies
-each Gemini request and never changes the Worker globally. Mise currently supports
-`gemini-3.5-flash-lite`, `gemini-3.1-flash-lite` and `gemini-3.8-flash`; Google's
-[Standard pricing table](https://ai.google.dev/gemini-api/docs/pricing) lists free-tier
-input and output for these models. Availability and quotas depend on your Google project.
-Keep billing disabled; Mise does not fall back to an unselected or paid-only model.
+each Gemini request and never changes the Worker globally. The built-in choices are
+`gemini-3.5-flash-lite`, `gemini-3.1-flash-lite` and `gemini-3.8-flash`. For discovered
+choices, Mise requires an explicit review and save before sending requests. Google must
+list the exact model ID with `generateContent` support, and its
+[Standard pricing table](https://ai.google.dev/gemini-api/docs/pricing) must list free
+input **and** output for that exact ID. Specialized voice, image-generation and embedding
+models are excluded from cooking chat. Paid-only models and models with missing or
+unreadable pricing remain disabled. Model aliases do not inherit another model's price.
+
+The authenticated `/models` endpoint checks Google's paginated model catalog and public
+English pricing page. It sends the Google key only to Google's API, never to the pricing
+website or browser, and makes no generation request. Results are cached for up to one
+hour in each Worker isolate and are separated by API key. **Refresh models** checks
+both sources again. If fresh pricing cannot be checked, new models cannot be authorized
+using stale verification. Metadata checks have a separate best-effort limit of ten per
+minute per isolate; they do not consume Mise's generation counters. Google's own access
+and quota limits still apply.
+
+Availability, pricing and quotas can change; discovery does not establish your account's
+billing status. Keep billing disabled. Mise does not fall back to an unselected or
+paid-only model. The Worker default remains a built-in model; choose newly discovered
+models through Mise's selector rather than setting an unreviewed environment default.
 
 The pairing token is saved only in this browser's separate connection settings. It is a
 credential: protect it and use **Disconnect** on shared devices. Mise does not include
@@ -179,6 +203,7 @@ production deployment.
 ## Official references
 
 - [Gemini pricing and free availability](https://ai.google.dev/gemini-api/docs/pricing)
+- [Gemini model listing and capabilities](https://ai.google.dev/api/models)
 - [Gemini billing and projects](https://ai.google.dev/gemini-api/docs/billing)
 - [API key security](https://ai.google.dev/gemini-api/docs/api-key)
 - [Gemini generateContent REST reference](https://ai.google.dev/api/generate-content)

@@ -52,6 +52,34 @@ const geminiAnswer = (body) =>
   json({
     candidates: [{ finishReason: 'STOP', content: { parts: [{ text: JSON.stringify(body) }] } }],
   });
+const discoveredModel = 'gemini-9-flash';
+const discoveredModels = {
+  models: [discoveredModel, 'gemini-9-pro'].map((id) => ({
+    name: `models/${id}`,
+    displayName: id,
+    supportedGenerationMethods: ['generateContent'],
+    inputTokenLimit: 100000,
+    outputTokenLimit: 8000,
+  })),
+};
+const discoveryPricing = [discoveredModel, 'gemini-9-pro']
+  .map((id) => {
+    const price = id === discoveredModel ? 'Free of charge' : 'Not available';
+    return `<h2>${id}</h2><code>${id}</code><h3>Standard</h3><table><thead><tr><th></th><th>Free Tier</th><th>Paid Tier</th></tr></thead><tbody><tr><td>Input price</td><td>${price}</td><td>$1</td></tr><tr><td>Output price (including thinking tokens)</td><td>${price}</td><td>$2</td></tr></tbody></table>`;
+  })
+  .join('');
+const discoveryUpstream = (request) => {
+  const url = new URL(request.url);
+  if (url.hostname === 'ai.google.dev') {
+    assert.equal(request.headers.get('x-goog-api-key'), null);
+    assert.equal(url.pathname, '/gemini-api/docs/pricing');
+    return new Response(discoveryPricing);
+  }
+  assert.equal(url.hostname, 'generativelanguage.googleapis.com');
+  assert.equal(request.headers.get('x-goog-api-key'), bindings.GEMINI_API_KEY);
+  assert.equal(url.pathname, '/v1beta/models');
+  return json(discoveredModels);
+};
 const groundedInput = {
   message: 'Help me choose dinner',
   inventory: '',
@@ -92,7 +120,7 @@ async function run(date, path, payload, upstream, verify) {
       },
       ...(payload === undefined ? {} : { body: JSON.stringify(payload) }),
     });
-    await verify(response, calls);
+    await verify(response, calls, runtime);
   } finally {
     await runtime.dispose();
   }
@@ -109,6 +137,121 @@ for (const date of ['2024-10-01', '2026-10-10']) {
       assert.equal(response.status, 200);
       assert.equal(calls.length, 0);
       assert.ok((await response.json()).providers.every((provider) => provider.configured));
+    },
+  );
+  passed++;
+  await run(date, '/models', undefined, discoveryUpstream, async (response, calls) => {
+    assert.equal(response.status, 200);
+    const catalog = await response.json();
+    assert.equal(catalog.models.find((model) => model.id === discoveredModel).freeTier, 'verified');
+    assert.equal(
+      catalog.models.find((model) => model.id === 'gemini-9-pro').freeTier,
+      'unavailable',
+    );
+    assert.equal(calls.length, 2);
+    assert.ok(!JSON.stringify(catalog).includes(bindings.GEMINI_API_KEY));
+  });
+  passed++;
+  await run(
+    date,
+    `/health?model=${discoveredModel}&modelReviewed=1`,
+    undefined,
+    discoveryUpstream,
+    async (response, calls) => {
+      assert.equal(response.status, 200);
+      assert.equal((await response.json()).model, discoveredModel);
+      assert.equal(calls.length, 2, 'Dynamic model health checks only metadata and pricing.');
+    },
+  );
+  passed++;
+  for (const path of ['/chat', '/extract']) {
+    await run(
+      date,
+      path,
+      {
+        ...(path === '/chat'
+          ? { message: 'Fixture dinner', inventory: '' }
+          : { text: 'Fixture recipe' }),
+        model: discoveredModel,
+        modelReviewed: true,
+      },
+      (request) => {
+        if (!new URL(request.url).pathname.endsWith(':generateContent'))
+          return discoveryUpstream(request);
+        assert.equal(
+          new URL(request.url).pathname,
+          `/v1beta/models/${discoveredModel}:generateContent`,
+        );
+        return geminiAnswer({ message: 'Fixture answer.', warnings: [], recipes: [] });
+      },
+      async (response, calls) => {
+        assert.equal(response.status, 200, JSON.stringify(await response.clone().json()));
+        assert.equal(calls.length, 3);
+      },
+    );
+    passed++;
+  }
+  await run(
+    date,
+    '/chat',
+    { message: 'Fixture dinner', inventory: '', model: 'gemini-9-pro', modelReviewed: true },
+    discoveryUpstream,
+    async (response, calls) => {
+      assert.equal(response.status, 403);
+      assert.equal((await response.json()).error.code, 'model_unverified');
+      assert.equal(calls.length, 2, 'Paid models must never trigger generation.');
+    },
+  );
+  passed++;
+  await run(
+    date,
+    '/chat',
+    { message: 'Fixture dinner', inventory: '', model: discoveredModel },
+    () => assert.fail('An unreviewed model must not fetch anything.'),
+    async (response, calls) => {
+      assert.equal(response.status, 400);
+      assert.equal(calls.length, 0);
+    },
+  );
+  passed++;
+  let pricingChecks = 0;
+  await run(
+    date,
+    '/models',
+    undefined,
+    (request) => {
+      if (new URL(request.url).hostname === 'ai.google.dev' && ++pricingChecks > 1)
+        return new Response(null, { status: 503 });
+      return discoveryUpstream(request);
+    },
+    async (response, calls, runtime) => {
+      assert.equal(response.status, 200);
+      const headers = { Origin: origin, Authorization: `Bearer ${token}` };
+      const refreshed = await runtime.dispatchFetch(
+        'https://mise.example.workers.dev/models?refresh=1',
+        { headers },
+      );
+      assert.equal(refreshed.status, 200);
+      assert.equal(
+        (await refreshed.json()).models.find((model) => model.id === discoveredModel).freeTier,
+        'unknown',
+      );
+      const denied = await runtime.dispatchFetch('https://mise.example.workers.dev/chat', {
+        method: 'POST',
+        headers: { ...headers, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          message: 'Fixture dinner',
+          inventory: '',
+          model: discoveredModel,
+          modelReviewed: true,
+        }),
+      });
+      assert.equal(
+        denied.status,
+        403,
+        'Failed refresh must invalidate prior free-model authorization.',
+      );
+      assert.equal(calls.length, 4);
     },
   );
   passed++;

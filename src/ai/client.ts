@@ -1,6 +1,6 @@
 import {
   isRecord,
-  isGeminiModel,
+  isSupportedModelSelection,
   MAX_MEDIA_BYTES,
   MEDIA_TYPES,
   MAX_BODY_SCAN_BYTES,
@@ -13,6 +13,8 @@ import {
   parseBodyScanExtractRequest,
   parseAiBodyScanReply,
 } from './protocol';
+import { parseGeminiModelCatalog } from './models';
+import type { GeminiModelCatalog } from './models';
 import type {
   AiChatRequest,
   AiExtractRequest,
@@ -23,6 +25,8 @@ import type {
   AiBodyScanExtractRequest,
   GeminiConnection,
 } from './protocol';
+
+export type { GeminiModelCatalog, GeminiModelCatalogEntry } from './models';
 
 export type {
   AiChatRequest,
@@ -92,12 +96,16 @@ export function normalizeGeminiConnection(connection: GeminiConnection): GeminiC
       'settings',
       'Enter the Mise access token stored in your Worker—not your Gemini API key.',
     );
-  if (connection.model !== undefined && !isGeminiModel(connection.model))
-    throw new GeminiError('settings', 'Choose a supported Gemini model or Worker default.');
+  if (!isSupportedModelSelection(connection.model, connection.modelReviewed))
+    throw new GeminiError(
+      'settings',
+      'Review and approve this Gemini model in settings before using it, or choose Worker default.',
+    );
   return {
     url: url.origin,
     token,
     ...(connection.model !== undefined ? { model: connection.model } : {}),
+    ...(connection.modelReviewed === true ? { modelReviewed: true as const } : {}),
   };
 }
 
@@ -106,11 +114,12 @@ export function readGeminiConnection(): GeminiConnection | null {
     const stored: unknown = JSON.parse(localStorage.getItem(CONNECTION_KEY) ?? 'null');
     if (!isRecord(stored) || typeof stored.url !== 'string' || typeof stored.token !== 'string')
       return null;
-    if (stored.model !== undefined && !isGeminiModel(stored.model)) return null;
+    if (!isSupportedModelSelection(stored.model, stored.modelReviewed)) return null;
     return normalizeGeminiConnection({
       url: stored.url,
       token: stored.token,
-      ...(stored.model !== undefined ? { model: stored.model } : {}),
+      ...(typeof stored.model === 'string' ? { model: stored.model } : {}),
+      ...(stored.modelReviewed === true ? { modelReviewed: true as const } : {}),
     });
   } catch {
     return null;
@@ -133,13 +142,14 @@ export function readGeminiConnectionDraft(): GeminiConnection | null {
       stored.url.length > 2048 ||
       stored.token.length > 128 ||
       stored.token.trim().startsWith('AIza') ||
-      (stored.model !== undefined && !isGeminiModel(stored.model))
+      !isSupportedModelSelection(stored.model, stored.modelReviewed)
     )
       return null;
     return {
       url: stored.url,
       token: stored.token,
-      ...(stored.model !== undefined ? { model: stored.model } : {}),
+      ...(typeof stored.model === 'string' ? { model: stored.model } : {}),
+      ...(stored.modelReviewed === true ? { modelReviewed: true as const } : {}),
     };
   } catch {
     return null;
@@ -147,13 +157,16 @@ export function readGeminiConnectionDraft(): GeminiConnection | null {
 }
 
 export function saveGeminiConnectionDraft(connection: GeminiConnection): void {
+  if (!isSupportedModelSelection(connection.model, connection.modelReviewed))
+    throw new GeminiError('settings', 'Review this Gemini model before saving your selection.');
   // Pairing tokens may be kept locally; Google's API key must stay in Cloudflare.
   localStorage.setItem(
     CONNECTION_DRAFT_KEY,
     JSON.stringify({
       url: connection.url.slice(0, 2048),
       token: connection.token.trim().startsWith('AIza') ? '' : connection.token.slice(0, 128),
-      ...(isGeminiModel(connection.model) ? { model: connection.model } : {}),
+      ...(connection.model !== undefined ? { model: connection.model } : {}),
+      ...(connection.modelReviewed === true ? { modelReviewed: true as const } : {}),
     }),
   );
 }
@@ -237,6 +250,8 @@ export async function requestMiseWorker(
     try {
       result = JSON.parse(raw);
     } catch {
+      if (response.status === 404)
+        throw new GeminiError('not_found', 'Your Worker does not provide this Mise endpoint.');
       throw new GeminiError(
         'invalid_response',
         'The Worker returned an unreadable response. Check the Worker URL.',
@@ -256,6 +271,8 @@ export async function requestMiseWorker(
           typeof retryAfter === 'number' && Number.isFinite(retryAfter) ? retryAfter : undefined,
         );
       }
+      if (response.status === 404)
+        throw new GeminiError('not_found', 'Your Worker does not provide this Mise endpoint.');
       throw new GeminiError('connection', 'The AI connection could not complete this request.');
     }
     return result;
@@ -277,18 +294,35 @@ export async function requestMiseWorker(
   }
 }
 
-/** Tests Worker configuration and pairing without consuming Gemini quota. */
+/** Checks pairing and the selected model without making a generation request. */
 export async function checkGeminiConnection(
   connection: GeminiConnection,
   signal?: AbortSignal,
 ): Promise<{ ok: true; model: string }> {
-  const selected = normalizeGeminiConnection(connection).model;
-  const result = await requestMiseWorker(
-    connection,
-    selected ? `/health?model=${selected}` : '/health',
-    undefined,
-    signal,
-  );
+  const configured = normalizeGeminiConnection(connection);
+  const selected = configured.model;
+  let result: unknown;
+  try {
+    result = await requestMiseWorker(
+      configured,
+      selected
+        ? `/health?model=${selected}${configured.modelReviewed ? '&modelReviewed=1' : ''}`
+        : '/health',
+      undefined,
+      signal,
+    );
+  } catch (error) {
+    if (
+      selected &&
+      error instanceof GeminiError &&
+      ['invalid_request', 'not_found'].includes(error.code)
+    )
+      throw new GeminiError(
+        'worker_update',
+        'Update your Cloudflare Worker with the latest Mise Worker file to review and switch Gemini models inside Mise.',
+      );
+    throw error;
+  }
   if (!isRecord(result) || result.ok !== true || typeof result.model !== 'string')
     throw new GeminiError('invalid_response', 'This address did not respond as a Mise Worker.');
   if (selected && result.model !== selected)
@@ -299,15 +333,54 @@ export async function checkGeminiConnection(
   return { ok: true, model: result.model };
 }
 
+/** Discover models and current free-tier status; never selects or generates with them. */
+export async function discoverGeminiModels(
+  connection: GeminiConnection,
+  options: { refresh?: boolean } = {},
+  signal?: AbortSignal,
+): Promise<GeminiModelCatalog> {
+  let raw: unknown;
+  try {
+    raw = await requestMiseWorker(
+      connection,
+      options.refresh ? '/models?refresh=1' : '/models',
+      undefined,
+      signal,
+    );
+  } catch (error) {
+    if (error instanceof GeminiError && ['not_found', 'invalid_request'].includes(error.code))
+      throw new GeminiError(
+        'worker_update',
+        'Update your Cloudflare Worker with the latest Mise Worker file to discover new Gemini models.',
+      );
+    throw error;
+  }
+  const catalog = parseGeminiModelCatalog(raw);
+  if (!catalog)
+    throw new GeminiError(
+      'invalid_response',
+      'The Worker returned an unreadable Gemini model list. Your selected model stays unchanged.',
+    );
+  return catalog;
+}
+
+/** A saved selection overrides both input fields together, never a mismatched review flag. */
+function withConfiguredModel<T extends { model?: string; modelReviewed?: true }>(
+  connection: GeminiConnection,
+  input: T,
+): T {
+  const configured = normalizeGeminiConnection(connection);
+  return configured.model
+    ? { ...input, model: configured.model, modelReviewed: configured.modelReviewed }
+    : input;
+}
+
 export async function sendGeminiChat(
   connection: GeminiConnection,
   input: AiChatRequest,
   signal?: AbortSignal,
 ): Promise<AiReply> {
-  const validated = parseChatRequest({
-    ...input,
-    ...(connection.model ? { model: connection.model } : {}),
-  });
+  const validated = parseChatRequest(withConfiguredModel(connection, input));
   if (!validated)
     throw new GeminiError(
       'invalid_request',
@@ -340,10 +413,7 @@ export async function extractGeminiBodyScan(
   input: AiBodyScanExtractRequest,
   signal?: AbortSignal,
 ): Promise<AiBodyScanReply> {
-  const validated = parseBodyScanExtractRequest({
-    ...input,
-    ...(connection.model ? { model: connection.model } : {}),
-  });
+  const validated = parseBodyScanExtractRequest(withConfiguredModel(connection, input));
   if (!validated)
     throw new GeminiError(
       'invalid_request',
@@ -378,10 +448,7 @@ export async function extractGeminiNutrition(
   input: AiExtractRequest,
   signal?: AbortSignal,
 ): Promise<AiNutritionReply> {
-  const validated = parseNutritionExtractRequest({
-    ...input,
-    ...(connection.model ? { model: connection.model } : {}),
-  });
+  const validated = parseNutritionExtractRequest(withConfiguredModel(connection, input));
   if (!validated)
     throw new GeminiError(
       'invalid_request',
@@ -415,10 +482,7 @@ export async function extractGeminiRecipe(
   input: AiExtractRequest,
   signal?: AbortSignal,
 ): Promise<AiReply> {
-  const validated = parseExtractRequest({
-    ...input,
-    ...(connection.model ? { model: connection.model } : {}),
-  });
+  const validated = parseExtractRequest(withConfiguredModel(connection, input));
   if (!validated)
     throw new GeminiError(
       'invalid_request',
