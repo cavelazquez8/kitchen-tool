@@ -35,7 +35,7 @@ export const STARTER_RECIPES: readonly { id: string; tags: readonly string[] }[]
 const starterMetadata = new Map(STARTER_RECIPES.map((entry) => [entry.id, entry]));
 const starterOrder = new Map(STARTER_RECIPES.map((entry, index) => [entry.id, index]));
 
-function sourceRecipes(recipes: readonly Recipe[]): Recipe[] {
+export function discoveryRecipePool(recipes: readonly Recipe[]): Recipe[] {
   const seen = new Set<string>();
   return recipes.filter((recipe) => {
     if (seen.has(recipe.id) || recipe.source.type === 'ai' || !canPersistProviderRecipe(recipe))
@@ -47,7 +47,7 @@ function sourceRecipes(recipes: readonly Recipe[]): Recipe[] {
 
 /** Keep the original source records, including attribution and unknown measures. */
 export function getStarterRecipes(recipes: readonly Recipe[]): Recipe[] {
-  const eligible = sourceRecipes(recipes);
+  const eligible = discoveryRecipePool(recipes);
   const byId = new Map(eligible.map((recipe) => [recipe.id, recipe]));
   const starters = STARTER_RECIPES.flatMap(({ id }) => {
     const recipe = byId.get(id);
@@ -55,6 +55,19 @@ export function getStarterRecipes(recipes: readonly Recipe[]): Recipe[] {
   });
   // A custom/personal library can still be useful without the bundled collection.
   return starters.length > 0 ? starters : eligible.slice(0, STARTER_RECIPES.length);
+}
+
+/** Shuffle only source recipes, keeping original records and the caller's order intact. */
+export function shuffleRecipeOrder(
+  recipes: readonly Recipe[],
+  random: () => number = Math.random,
+): Recipe[] {
+  const shuffled = discoveryRecipePool(recipes);
+  for (let index = shuffled.length - 1; index > 0; index--) {
+    const next = Math.floor(random() * (index + 1));
+    [shuffled[index], shuffled[next]] = [shuffled[next], shuffled[index]];
+  }
+  return shuffled;
 }
 
 function normalize(text: string): string {
@@ -232,7 +245,7 @@ export function recommendRecipes(
   const terms = [...new Set(words(phrase).filter((word) => !requestWords.has(word)))];
   const broadRequest =
     terms.length === 0 || terms.every((term) => ['dinner', 'lunch', 'breakfast'].includes(term));
-  const eligible = sourceRecipes(recipes).filter(
+  const eligible = discoveryRecipePool(recipes).filter(
     (recipe) => !excludesRecipe(recipe, request.exclusions),
   );
   let candidates = eligible

@@ -37,6 +37,8 @@ export function RecipeNutrition({
   );
   const [open, setOpen] = useState(false);
   const [configured, setConfigured] = useState<boolean | null>(null);
+  const [liveLookup, setLiveLookup] = useState<'untested' | 'verified' | 'failed'>('untested');
+  const [testNotice, setTestNotice] = useState('');
   const [active, setActive] = useState<number | null>(null);
   const [query, setQuery] = useState('');
   const [foods, setFoods] = useState<FoodNutrition[]>([]);
@@ -71,6 +73,43 @@ export function RecipeNutrition({
         setError(e instanceof Error ? e.message : 'Could not check nutrition lookup.');
     }
   }
+  async function testLookup() {
+    const connection = readGeminiConnection();
+    if (!connection) {
+      onConfigure();
+      return;
+    }
+    const id = ++attempt.current;
+    controller.current?.abort();
+    controller.current = new AbortController();
+    setBusy(true);
+    setError('');
+    setTestNotice('');
+    try {
+      const status = await nutritionStatus(connection, controller.current.signal);
+      if (id !== attempt.current) return;
+      setConfigured(status.configured);
+      if (!status.configured) {
+        setLiveLookup('untested');
+        return;
+      }
+      const result = await searchNutritionFoods(connection, 'Carrots', controller.current.signal);
+      if (id !== attempt.current) return;
+      setLiveLookup('verified');
+      setTestNotice(
+        result.foods.length
+          ? `USDA lookup verified: ${result.foods.length} food${result.foods.length === 1 ? '' : 's'} returned for “Carrots”.`
+          : 'USDA lookup verified: USDA responded, but no foods matched “Carrots”.',
+      );
+    } catch (e) {
+      if (id === attempt.current) {
+        setLiveLookup('failed');
+        setError(e instanceof Error ? e.message : 'Could not verify live USDA access.');
+      }
+    } finally {
+      if (id === attempt.current) setBusy(false);
+    }
+  }
   function edit(index: number) {
     attempt.current++;
     controller.current?.abort();
@@ -99,12 +138,20 @@ export function RecipeNutrition({
     try {
       if (foodId !== undefined) {
         const food = await getNutritionFood(connection, foodId, controller.current.signal);
-        if (id === attempt.current) setChosen(food);
+        if (id === attempt.current) {
+          setChosen(food);
+          setConfigured(true);
+          setLiveLookup('verified');
+          setTestNotice('');
+        }
       } else {
         const result = await searchNutritionFoods(connection, query, controller.current.signal);
         if (id === attempt.current) {
           setFoods(result.foods);
           setChosen(null);
+          setConfigured(true);
+          setLiveLookup('verified');
+          setTestNotice('');
           setNotice(
             result.foods.length
               ? 'Choose the food and preparation that match your recipe.'
@@ -113,7 +160,11 @@ export function RecipeNutrition({
         }
       }
     } catch (e) {
-      if (id === attempt.current) setError(e instanceof Error ? e.message : 'Food lookup failed.');
+      if (id === attempt.current) {
+        setLiveLookup('failed');
+        setTestNotice('');
+        setError(e instanceof Error ? e.message : 'Food lookup failed.');
+      }
     } finally {
       if (id === attempt.current) setBusy(false);
     }
@@ -199,6 +250,15 @@ export function RecipeNutrition({
               Connect nutrition lookup
             </button>
           )}
+          {configured === true && (
+            <p className="field-note" role="status">
+              {liveLookup === 'verified'
+                ? 'Live USDA access verified.'
+                : liveLookup === 'failed'
+                  ? 'USDA key configured. The last live lookup failed.'
+                  : 'USDA key configured. Live access has not been verified.'}
+            </p>
+          )}
           {configured === false && (
             <p className="field-note">
               Add the free USDA key as <code>USDA_API_KEY</code> in your Cloudflare Worker.{' '}
@@ -206,6 +266,23 @@ export function RecipeNutrition({
                 Get a free key
               </a>
               . Your reviewed matches remain available locally.
+            </p>
+          )}
+          {readGeminiConnection() && (
+            <div className="hub-actions">
+              <button
+                className="button secondary"
+                disabled={busy}
+                onClick={() => void testLookup()}
+              >
+                Test USDA lookup
+              </button>
+              <small>Checks one food search. Your recipe stays unchanged.</small>
+            </div>
+          )}
+          {testNotice && (
+            <p className="field-note" role="status">
+              {testNotice}
             </p>
           )}
           <p className="field-note">

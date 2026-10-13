@@ -1,8 +1,13 @@
 import { useMemo, useState } from 'react';
-import { ArrowRight, BookOpen } from 'lucide-react';
+import { ArrowRight, BookOpen, Shuffle } from 'lucide-react';
 import type { InventoryState } from '../domain/types';
 import type { Recipe } from '../recipes/types';
-import { getStarterRecipes, recommendRecipes } from '../recipes/recommendations';
+import {
+  discoveryRecipePool,
+  getStarterRecipes,
+  recommendRecipes,
+  shuffleRecipeOrder,
+} from '../recipes/recommendations';
 import { matchRecipe } from '../recipes/matching';
 
 export function RecipeDiscovery({
@@ -21,11 +26,18 @@ export function RecipeDiscovery({
   onChoose: () => void;
 }) {
   const [expanded, setExpanded] = useState(false);
+  const [scope, setScope] = useState<'starter' | 'cookbook'>('starter');
+  const [shuffledIds, setShuffledIds] = useState<string[] | null>(null);
   const starters = useMemo(() => getStarterRecipes(recipes), [recipes]);
-  const choices = useMemo(
-    () => recommendRecipes(starters, inventory, { limit: expanded ? 24 : 3 }),
-    [starters, inventory, expanded],
-  );
+  const cookbook = useMemo(() => discoveryRecipePool(recipes), [recipes]);
+  const pool = scope === 'starter' ? starters : cookbook;
+  const choices = useMemo(() => {
+    if (!shuffledIds) return recommendRecipes(pool, inventory, { limit: expanded ? 24 : 3 });
+    const byId = new Map(pool.map((recipe) => [recipe.id, recipe]));
+    return shuffledIds
+      .flatMap((id) => (byId.has(id) ? [byId.get(id)!] : []))
+      .slice(0, expanded ? 24 : 3);
+  }, [pool, inventory, expanded, shuffledIds]);
   return (
     <section className="recipe-discovery" aria-label="Recipe starting points">
       <div className="discovery-heading">
@@ -46,6 +58,54 @@ export function RecipeDiscovery({
         </p>
       )}
       {error && <p className="field-note">{error}</p>}
+      <div className="discovery-controls">
+        <div className="discovery-pool" role="group" aria-label="Recipe suggestion pool">
+          <button
+            type="button"
+            aria-pressed={scope === 'starter'}
+            onClick={() => {
+              setScope('starter');
+              setShuffledIds(null);
+              setExpanded(false);
+            }}
+          >
+            Everyday picks
+          </button>
+          <button
+            type="button"
+            aria-pressed={scope === 'cookbook'}
+            disabled={loading || !cookbook.length}
+            onClick={() => {
+              setScope('cookbook');
+              setShuffledIds(shuffleRecipeOrder(cookbook).map((recipe) => recipe.id));
+              setExpanded(false);
+            }}
+          >
+            Whole cookbook
+          </button>
+        </div>
+        <button
+          className="button secondary discovery-shuffle"
+          disabled={loading || pool.length < 2}
+          onClick={() => {
+            setShuffledIds(shuffleRecipeOrder(pool).map((recipe) => recipe.id));
+          }}
+        >
+          <Shuffle size={16} /> Shuffle suggestions
+        </button>
+      </div>
+      <div className="discovery-order" role="status">
+        <small>
+          {shuffledIds
+            ? `Random picks from ${pool.length.toLocaleString()} ${scope === 'starter' ? 'everyday recipes' : 'cookbook recipes'}.`
+            : `${scope === 'starter' ? `${starters.length} curated` : `${cookbook.length.toLocaleString()} cookbook`} recipes, ordered using your inventory.`}
+        </small>
+        {shuffledIds && (
+          <button className="text-button" onClick={() => setShuffledIds(null)}>
+            Use inventory order
+          </button>
+        )}
+      </div>
       <div className="starter-grid">
         {choices.map((recipe) => {
           const match = matchRecipe(recipe, inventory);
@@ -66,9 +126,13 @@ export function RecipeDiscovery({
           );
         })}
       </div>
-      {starters.length > 3 && (
+      {pool.length > 3 && (
         <button className="text-button" onClick={() => setExpanded((value) => !value)}>
-          {expanded ? 'Show fewer' : 'More everyday recipes'}
+          {expanded
+            ? 'Show fewer'
+            : scope === 'starter'
+              ? 'More everyday recipes'
+              : 'Show more suggestions'}
         </button>
       )}
     </section>

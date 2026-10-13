@@ -50,6 +50,86 @@ afterEach(() => {
 });
 
 describe('recipe food and weight review', () => {
+  it('distinguishes a configured key from verified live USDA access without spending a food search', async () => {
+    render(<RecipeNutrition recipe={recipe} onSave={vi.fn()} onConfigure={vi.fn()} />);
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Estimate with USDA' }));
+    expect(
+      await screen.findByText('USDA key configured. Live access has not been verified.'),
+    ).toBeInTheDocument();
+    expect(nutritionStatus).toHaveBeenCalledTimes(1);
+    expect(searchNutritionFoods).not.toHaveBeenCalled();
+  });
+
+  it('verifies live access with one explicit test search without choosing or saving a food', async () => {
+    const onSave = vi.fn();
+    render(<RecipeNutrition recipe={recipe} onSave={onSave} onConfigure={vi.fn()} />);
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: 'Estimate with USDA' }));
+    await user.click(screen.getByRole('button', { name: 'Test USDA lookup' }));
+    expect(
+      await screen.findByText('USDA lookup verified: 1 food returned for “Carrots”.'),
+    ).toBeInTheDocument();
+    expect(screen.getByText('Live USDA access verified.')).toBeInTheDocument();
+    expect(searchNutritionFoods).toHaveBeenCalledTimes(1);
+    expect(searchNutritionFoods).toHaveBeenCalledWith(
+      expect.any(Object),
+      'Carrots',
+      expect.any(AbortSignal),
+    );
+    expect(getNutritionFood).not.toHaveBeenCalled();
+    expect(onSave).not.toHaveBeenCalled();
+    expect(screen.queryByRole('spinbutton')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Match food' })).toBeInTheDocument();
+  });
+
+  it('recognizes a valid empty response as live access while reporting no matches', async () => {
+    vi.mocked(searchNutritionFoods).mockResolvedValueOnce({
+      query: 'Carrots',
+      foods: [],
+      rejectedCount: 0,
+    });
+    render(<RecipeNutrition recipe={recipe} onSave={vi.fn()} onConfigure={vi.fn()} />);
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: 'Estimate with USDA' }));
+    await user.click(screen.getByRole('button', { name: 'Test USDA lookup' }));
+    expect(
+      await screen.findByText(
+        'USDA lookup verified: USDA responded, but no foods matched “Carrots”.',
+      ),
+    ).toBeInTheDocument();
+    expect(screen.getByText('Live USDA access verified.')).toBeInTheDocument();
+  });
+
+  it('refreshes setup before a test and avoids searching when the USDA key is missing', async () => {
+    vi.mocked(nutritionStatus).mockResolvedValue({ provider: 'usda', configured: false });
+    render(<RecipeNutrition recipe={recipe} onSave={vi.fn()} onConfigure={vi.fn()} />);
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: 'Estimate with USDA' }));
+    await user.click(screen.getByRole('button', { name: 'Test USDA lookup' }));
+    expect(screen.getByText(/Add the free USDA key as/)).toBeInTheDocument();
+    expect(nutritionStatus).toHaveBeenCalledTimes(2);
+    expect(searchNutritionFoods).not.toHaveBeenCalled();
+    expect(screen.queryByText('Live USDA access verified.')).not.toBeInTheDocument();
+  });
+
+  it('reports a failed live test instead of treating key presence as a successful connection', async () => {
+    vi.mocked(searchNutritionFoods).mockRejectedValueOnce(
+      new Error('USDA rejected this API key. Check the Worker secret.'),
+    );
+    render(<RecipeNutrition recipe={recipe} onSave={vi.fn()} onConfigure={vi.fn()} />);
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: 'Estimate with USDA' }));
+    await user.click(screen.getByRole('button', { name: 'Test USDA lookup' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'USDA rejected this API key. Check the Worker secret.',
+    );
+    expect(
+      screen.getByText('USDA key configured. The last live lookup failed.'),
+    ).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Test USDA lookup' })).toBeEnabled();
+    expect(screen.queryByText('Live USDA access verified.')).not.toBeInTheDocument();
+  });
+
   it('requires a chosen food and confirmed grams, without assuming weight for a count', async () => {
     const onSave = vi.fn().mockResolvedValue(undefined);
     render(<RecipeNutrition recipe={recipe} onSave={onSave} onConfigure={vi.fn()} />);
@@ -57,6 +137,7 @@ describe('recipe food and weight review', () => {
     await user.click(screen.getByRole('button', { name: 'Estimate with USDA' }));
     await user.click(screen.getByRole('button', { name: 'Match food' }));
     await user.click(screen.getByRole('button', { name: 'Search USDA' }));
+    expect(await screen.findByText('Live USDA access verified.')).toBeInTheDocument();
     await user.click(await screen.findByRole('button', { name: /Synthetic fixture carrots, raw/ }));
     const grams = await screen.findByRole('spinbutton', { name: 'Grams of Carrots' });
     expect(grams).toHaveValue(null);

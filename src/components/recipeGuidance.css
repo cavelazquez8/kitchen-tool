@@ -36,6 +36,55 @@
   gap: 12px;
   margin: 22px 0 12px;
 }
+.discovery-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 22px;
+}
+.discovery-pool {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid var(--line);
+  background: #11161366;
+  border-radius: 12px;
+}
+.discovery-pool button {
+  min-height: 44px;
+  padding: 10px 13px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 12px;
+}
+.discovery-pool button[aria-pressed='true'] {
+  background: #344238;
+  color: #edf1ec;
+  border-color: #4f6255;
+}
+.discovery-order {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  align-items: center;
+  margin-top: 12px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.6;
+}
+.discovery-order .text-button {
+  min-height: 44px;
+  font-size: 12px;
+}
+.discovery-shuffle {
+  white-space: normal;
+  max-width: 100%;
+}
 .starter-recipe {
   display: flex;
   flex-direction: column;
@@ -167,6 +216,10 @@
 }
 .recipe-nutrition h3 {
   margin-top: 0;
+}
+.recipe-nutrition .field-note {
+  margin: 12px 0;
+  line-height: 1.7;
 }
 .nutrition-macros {
   display: flex;

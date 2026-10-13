@@ -55,6 +55,8 @@ Inventory, recipe editing/matching, shopping lists, and backups work without Gem
 
 The recipe starting points highlight 24 existing, attributed cookbook dishes. Gemini's default recommendation mode receives a small locally retrieved shortlist and returns recipe IDs; Mise displays the original records with their missing groceries. Inventory is a preference, so an empty kitchen can still lead to a meal. Creating a recipe from inventory remains an explicit choice. Recommendations do not imply that a dish has verified nutrition or meets a dietary restriction.
 
+Recipe starting points can shuffle the everyday collection or the whole built-in cookbook. Random picks stay in place until you shuffle again or switch back to inventory order; shuffling makes no provider or AI requests. Inside a recipe's nutrition review, **Test USDA lookup** distinguishes a configured key from a successful live food search without applying any food matches.
+
 Optional [USDA nutrition support](docs/nutrition-setup.md) uses a free server-side key, reviewed food matches, and confirmed edible weights. Daily targets can be entered manually or extracted from pasted recommendations or a report image for review. Report files are not saved in kitchen data. Unknown nutrient values and missing recipe yields remain unknown. Approved targets and reviewed food matches travel in backups; API and pairing credentials do not.
 
 ## Run and verify

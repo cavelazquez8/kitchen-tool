@@ -7,7 +7,7 @@ Daily nutrition goals are optional and entered or reviewed by you. Mise does not
 1. Get a free data.gov key at [USDA FoodData Central API key signup](https://fdc.nal.usda.gov/api-key-signup/). No paid plan is needed.
 2. In your existing Cloudflare Worker, add a **Secret** named `USDA_API_KEY` with that key. Keep it out of the browser, Git, and backups.
 3. Download the current `mise-gemini-worker.js` from Mise settings. Replace your Worker's code and deploy, retaining your existing Gemini key, pairing token, allowed origin, and provider configuration.
-4. Check nutrition setup inside Mise. **Configured** checks only the secret's presence; searching for a food verifies live access.
+4. Open a recipe and choose **Estimate with USDA**. **USDA key configured** checks only the secret's presence. Choose **Test USDA lookup** to run one small search for carrots and see whether live access works; this does not select an ingredient match or change your recipe. A normal ingredient search also verifies live access.
 
 The normal API allowance is 1,000 requests per hour per IP address. USDA's `DEMO_KEY` is an exploration key with only 30 requests per hour and 50 per day; Mise requires your own key. Mise sends one request per explicit search or food selection, with no automatic retry or paid fallback. Its additional rate limits are best effort per Worker isolate; USDA enforces the actual account/IP limits. Missing setup leaves your inventory, recipes, and manually entered goals available.
 
