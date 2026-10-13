@@ -4,7 +4,9 @@ import {
   clearGeminiConnection,
   extractGeminiRecipe,
   extractGeminiNutrition,
+  extractGeminiBodyScan,
   fileToGeminiMedia,
+  fileToBodyScanMedia,
   importGeminiRecipeUrl,
   generateGeminiAccessToken,
   normalizeGeminiConnection,
@@ -14,7 +16,7 @@ import {
   saveGeminiConnection,
   sendGeminiChat,
 } from './client';
-import { MAX_MEDIA_BYTES } from './protocol';
+import { MAX_MEDIA_BYTES, MAX_BODY_SCAN_BYTES } from './protocol';
 
 const connection = { url: 'https://mise.example.workers.dev', token: 'a'.repeat(43) };
 const reply = { message: 'Try scrambled eggs.', recipes: [], warnings: [] };
@@ -128,6 +130,24 @@ describe('Gemini browser adapter', () => {
     expect(JSON.parse(String(fetcher.mock.calls[0][1]?.body))).toEqual(input);
   });
 
+  it('rejects oversized combined report and history context before sending', async () => {
+    const fetcher = vi.fn<typeof fetch>();
+    vi.stubGlobal('fetch', fetcher);
+    await expect(
+      sendGeminiChat(connection, {
+        message: '\u0000'.repeat(6000),
+        inventory: '\u0000'.repeat(24000),
+        profile: '\u0000'.repeat(24000),
+        recipe: '\u0000'.repeat(12000),
+        history: Array.from({ length: 5 }, () => ({ role: 'user', text: '\u0000'.repeat(6000) })),
+      }),
+    ).rejects.toMatchObject({
+      code: 'invalid_request',
+      message: expect.stringContaining('remove an attached body scan or recipe'),
+    });
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+
   it('checks grounded recipe IDs even when an older or misconfigured Worker returns them', async () => {
     const candidates = [
       {
@@ -201,6 +221,127 @@ describe('Gemini browser adapter', () => {
       extractGeminiNutrition(connection, { media: { mimeType: 'video/mp4', data: 'AQID' } }),
     ).rejects.toMatchObject({ code: 'invalid_request' });
     expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+
+  it('reads complete report text and dates for review without saving or attaching the file', async () => {
+    const result = {
+      text: 'Scan date: October 1, 2026\nBMR: 1650 kcal\nBody fat: 20%',
+      recordedOn: '2026-10-01',
+      targets: { caloriesKcal: null, proteinGrams: null, carbsGrams: null, fatGrams: null },
+      warnings: ['No explicitly recommended daily targets.'],
+    };
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify(result)));
+    vi.stubGlobal('fetch', fetcher);
+    const input = { media: { mimeType: 'application/pdf', data: 'AQID' } };
+    expect(await extractGeminiBodyScan(connection, input)).toEqual(result);
+    expect(fetcher.mock.calls[0][0]).toBe(`${connection.url}/profile/extract`);
+    expect(JSON.parse(String(fetcher.mock.calls[0][1]?.body))).toEqual(input);
+    expect(localStorage.length).toBe(0);
+    await expect(
+      extractGeminiBodyScan(connection, { media: { mimeType: 'video/mp4', data: 'AQID' } }),
+    ).rejects.toMatchObject({ code: 'invalid_request' });
+    expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+
+  it('accepts PDF/image reports up to 4 MB and leaves recipe media limits unchanged', async () => {
+    expect(await fileToBodyScanMedia(new File(['pdf'], 'scan.pdf'))).toEqual({
+      mimeType: 'application/pdf',
+      data: 'cGRm',
+    });
+    const largeImage = new File([new Uint8Array(MAX_MEDIA_BYTES + 1)], 'scan.png', {
+      type: 'image/png',
+    });
+    expect((await fileToBodyScanMedia(largeImage)).mimeType).toBe('image/png');
+    await expect(fileToGeminiMedia(largeImage)).rejects.toMatchObject({ code: 'file_size' });
+    await expect(
+      fileToBodyScanMedia(
+        new File([new Uint8Array(MAX_BODY_SCAN_BYTES + 1)], 'scan.pdf', {
+          type: 'application/pdf',
+        }),
+      ),
+    ).rejects.toMatchObject({ code: 'file_size' });
+    await expect(
+      fileToBodyScanMedia(new File(['video'], 'scan.mp4', { type: 'video/mp4' })),
+    ).rejects.toMatchObject({ code: 'file_type' });
+  });
+
+  it('explains an older Worker when report reading or selected profile context is rejected', async () => {
+    const fetcher = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ error: { code: 'not_found', message: 'Unknown route.' } }), {
+          status: 404,
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({ error: { code: 'invalid_request', message: 'Unsupported request.' } }),
+          { status: 400 },
+        ),
+      );
+    vi.stubGlobal('fetch', fetcher);
+    await expect(extractGeminiBodyScan(connection, { text: 'Body scan' })).rejects.toMatchObject({
+      code: 'worker_update',
+    });
+    await expect(
+      sendGeminiChat(connection, { message: 'Dinner', inventory: '', profile: 'Selected scan' }),
+    ).rejects.toMatchObject({ code: 'worker_update' });
+  });
+
+  it('persists a chosen model and verifies the Worker recognizes it without a generation request', async () => {
+    const selected = { ...connection, model: 'gemini-3.8-flash' as const };
+    saveGeminiConnectionDraft(selected);
+    expect(readGeminiConnectionDraft()).toEqual(selected);
+    saveGeminiConnection(selected);
+    expect(readGeminiConnection()).toEqual(selected);
+    const fetcher = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ ok: true, model: selected.model })))
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ ok: true, model: 'gemini-3.5-flash-lite' })),
+      );
+    vi.stubGlobal('fetch', fetcher);
+    expect(await checkGeminiConnection(selected)).toEqual({ ok: true, model: selected.model });
+    expect(fetcher.mock.calls[0][0]).toBe(`${connection.url}/health?model=${selected.model}`);
+    await expect(checkGeminiConnection(selected)).rejects.toMatchObject({ code: 'worker_update' });
+  });
+
+  it('applies the saved model to every Gemini task and keeps website import free of overrides', async () => {
+    const selected = { ...connection, model: 'gemini-3.1-flash-lite' as const };
+    const scan = {
+      text: 'BMR: 1650 kcal',
+      recordedOn: null,
+      targets: { caloriesKcal: null, proteinGrams: null, carbsGrams: null, fatGrams: null },
+      warnings: [],
+    };
+    const recipe = {
+      title: 'Eggs',
+      servings: 1,
+      ingredients: [{ name: 'egg', quantity: 1, unit: 'each' }],
+      steps: ['Cook.'],
+    };
+    const fetcher = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(new Response(JSON.stringify(reply)))
+      .mockResolvedValueOnce(new Response(JSON.stringify(reply)))
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({ targets: scan.targets, sourceText: scan.text, warnings: [] }),
+        ),
+      )
+      .mockResolvedValueOnce(new Response(JSON.stringify(scan)))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ ...reply, recipes: [recipe] })));
+    vi.stubGlobal('fetch', fetcher);
+    await sendGeminiChat(selected, { message: 'Dinner', inventory: '', profile: scan.text });
+    await extractGeminiRecipe(selected, { text: 'Recipe' });
+    await extractGeminiNutrition(selected, { text: 'Targets' });
+    await extractGeminiBodyScan(selected, { text: scan.text });
+    await importGeminiRecipeUrl(selected, 'https://example.com/recipe');
+    for (const [, options] of fetcher.mock.calls.slice(0, 4))
+      expect(JSON.parse(String(options?.body)).model).toBe(selected.model);
+    expect(JSON.parse(String(fetcher.mock.calls[4][1]?.body))).toEqual({
+      url: 'https://example.com/recipe',
+    });
   });
 
   it('returns actionable quota details instead of retrying automatically', async () => {

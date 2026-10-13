@@ -28,14 +28,8 @@ import {
   Utensils,
   X,
 } from 'lucide-react';
-import type {
-  Batch,
-  InventoryGroup,
-  InventoryState,
-  Product,
-  StorageLocation,
-} from './domain/types';
-import { isDateOnly, isInventoryState } from './domain/types';
+import type { Batch, InventoryGroup, Product, StorageLocation } from './domain/types';
+import { isDateOnly } from './domain/types';
 import {
   addBatch,
   addProduct,
@@ -53,7 +47,15 @@ import {
 } from './domain/inventory';
 import { generateMarkdown } from './domain/export';
 import { getInventoryRepository } from './lib/repository';
-import { buildInventoryBackup } from './lib/backup';
+import {
+  buildProfileBackup,
+  parseProfileBackup,
+  stageProfileBackupFiles,
+  MAX_PROFILE_BACKUP_BYTES,
+  type ProfileBackup,
+} from './profile/backup';
+import { bodyScanContext } from './profile/context';
+import { ProfileDialog } from './components/ProfileDialog';
 import { useInventoryRepository } from './lib/useInventoryRepository';
 import { GroceryScannerSession } from './scanner/GroceryScannerSession';
 import { suggestIngredientIdentity } from './recipes/identity';
@@ -130,6 +132,8 @@ export default function App() {
   const [busy, setBusy] = useState(false);
   const [toast, setToast] = useState('');
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [profileOpen, setProfileOpen] = useState(false);
+  const [attachedBodyScanIds, setAttachedBodyScanIds] = useState<string[]>([]);
   const [exportOpen, setExportOpen] = useState(false);
   const [exportSelected, setExportSelected] = useState(false);
   const [scannerOpen, setScannerOpen] = useState(false);
@@ -141,7 +145,7 @@ export default function App() {
   const [deleteBatch, setDeleteBatch] = useState<string | null>(null);
   const [toolName, setToolName] = useState('');
   const [toolToDelete, setToolToDelete] = useState<string | null>(null);
-  const [backupToImport, setBackupToImport] = useState<InventoryState | null>(null);
+  const [backupToImport, setBackupToImport] = useState<ProfileBackup | null>(null);
   const undoPending = useRef(false);
   const pendingShoppingId = useRef<string | undefined>(undefined);
   const [undoDeduction, setUndoDeduction] = useState<{
@@ -428,19 +432,35 @@ export default function App() {
   async function readBackup(file?: File) {
     if (!file) return;
     try {
-      if (file.size > 10_000_000) throw new Error('This backup is too large.');
+      if (file.size > MAX_PROFILE_BACKUP_BYTES) throw new Error('This backup is too large.');
       const parsed: unknown = JSON.parse(await file.text());
-      const state =
-        typeof parsed === 'object' && parsed !== null && 'inventory' in parsed
-          ? parsed.inventory
-          : parsed;
-      if (!isInventoryState(state))
-        throw new Error('That file is not a valid Mise inventory backup.');
-      setBackupToImport(buildInventoryBackup(state).inventory);
+      setBackupToImport(parseProfileBackup(parsed));
     } catch (error) {
       setToast(error instanceof Error ? error.message : 'Could not read this backup.');
     }
     if (fileInput.current) fileInput.current.value = '';
+  }
+  async function downloadBackup() {
+    await act(async () => {
+      const backup = await buildProfileBackup(inventory);
+      download(
+        JSON.stringify({ ...backup, exportedAt: new Date().toISOString() }, null, 2),
+        `mise-backup-${todayDate()}.json`,
+        'application/json',
+      );
+    });
+  }
+  function attachBodyScan(id: string) {
+    try {
+      const ids = [...new Set([...attachedBodyScanIds, id])];
+      bodyScanContext(inventory.bodyScans ?? [], ids);
+      setAttachedBodyScanIds(ids);
+      setProfileOpen(false);
+      setPage('assistant');
+      setToast('Body scan attached. Ask Gemini a question.');
+    } catch (error) {
+      setToast(error instanceof Error ? error.message : 'Could not attach this body scan.');
+    }
   }
   async function saveUsage(event: FormEvent) {
     event.preventDefault();
@@ -718,6 +738,9 @@ export default function App() {
               onScan={openScanner}
               onConfigure={() => setSettingsOpen(true)}
               onNavigate={setPage}
+              onProfile={() => setProfileOpen(true)}
+              attachedBodyScanIds={attachedBodyScanIds}
+              onBodyScanAttachmentsChange={setAttachedBodyScanIds}
             />
           ) : page === 'inventory' ? (
             <>
@@ -1295,32 +1318,44 @@ export default function App() {
           </p>
         </div>
         <GeminiSettings onToast={setToast} />
+        <div className="settings-section">
+          <h3>Your profile</h3>
+          <p className="settings-note">
+            Manage daily nutrition targets and body scans. Choose which reports to share with
+            Gemini.
+          </p>
+          <button
+            className="button secondary"
+            onClick={() => {
+              setSettingsOpen(false);
+              setProfileOpen(true);
+            }}
+          >
+            Open your profile
+          </button>
+        </div>
         <RecipeProviderSettings onToast={setToast} />
         <div className="settings-section">
           <h3>Keep a backup</h3>
           <p className="settings-note">
             A backup includes inventory, tools, saved recipes, meal plans, shopping lists, and your
-            conversation. It can also move your kitchen to another device.
+            conversation, nutrition targets, and body scans with their original files. It can also
+            move your kitchen to another device.
           </p>
           <div className="backup-actions">
             <button
               className="button secondary"
-              onClick={() =>
-                download(
-                  JSON.stringify(
-                    { ...buildInventoryBackup(inventory), exportedAt: new Date().toISOString() },
-                    null,
-                    2,
-                  ),
-                  `mise-backup-${todayDate()}.json`,
-                  'application/json',
-                )
-              }
+              disabled={isSaving}
+              onClick={() => void downloadBackup()}
             >
               <ArrowDownToLine size={17} />
               Download backup
             </button>
-            <button className="button secondary" onClick={() => fileInput.current?.click()}>
+            <button
+              className="button secondary"
+              disabled={isSaving}
+              onClick={() => fileInput.current?.click()}
+            >
               Restore backup
             </button>
             <input
@@ -1358,13 +1393,15 @@ export default function App() {
       </Modal>
       <Modal
         open={!!backupToImport}
-        onClose={() => setBackupToImport(null)}
+        onClose={() => {
+          if (!isSaving) setBackupToImport(null);
+        }}
         title="Restore this kitchen?"
-        description={`This backup contains ${backupToImport?.batches.length ?? 0} purchase batches, ${backupToImport?.recipes?.length ?? 0} saved recipes, and ${backupToImport?.shoppingList?.length ?? 0} shopping items.`}
+        description={`This backup contains ${backupToImport?.inventory.batches.length ?? 0} purchase batches, ${backupToImport?.inventory.recipes?.length ?? 0} saved recipes, and ${backupToImport?.inventory.bodyScans?.length ?? 0} body scans.`}
       >
         <p className="settings-note">
-          This replaces the kitchen you’re viewing, including saved recipes, lists, and
-          conversation. Download a backup of your current kitchen first if you want to keep it.
+          This replaces the kitchen you’re viewing, including saved recipes, lists, and conversation
+          and profile. Download a backup of your current kitchen first if you want to keep it.
         </p>
         <div className="form-footer">
           <button
@@ -1379,11 +1416,21 @@ export default function App() {
             disabled={isSaving}
             onClick={() => {
               const imported = backupToImport!;
-              void act(() => repository.replace(imported), 'Kitchen restored.').then((saved) => {
+              void act(async () => {
+                const staged = await stageProfileBackupFiles(imported, inventory);
+                try {
+                  await repository.replace(staged.inventory);
+                } catch (error) {
+                  await staged.rollback();
+                  throw error;
+                }
+                await staged.commit();
+              }, 'Kitchen restored.').then((saved) => {
                 if (saved) {
                   setBackupToImport(null);
                   setSelected([]);
                   setExpanded(null);
+                  setAttachedBodyScanIds([]);
                 }
               });
             }}
@@ -1392,6 +1439,20 @@ export default function App() {
           </button>
         </div>
       </Modal>
+      {profileOpen && (
+        <ProfileDialog
+          inventory={inventory}
+          update={(reducer) => repository.update(reducer)}
+          onClose={() => setProfileOpen(false)}
+          onToast={setToast}
+          onAttach={attachBodyScan}
+          selectedScanIds={attachedBodyScanIds}
+          onConfigure={() => {
+            setProfileOpen(false);
+            setSettingsOpen(true);
+          }}
+        />
+      )}
       <Modal
         open={scannerOpen}
         onClose={closeScanner}

@@ -235,7 +235,8 @@ test('daily targets extracted from text or a report picture require review befor
     });
   });
   await navigate(page, 'Gemini');
-  await page.getByRole('button', { name: 'Add nutrition targets', exact: true }).click();
+  await page.getByRole('button', { name: 'Your profile', exact: true }).click();
+  await page.getByRole('button', { name: 'Set targets', exact: true }).click();
   let editor = page.getByRole('dialog', { name: 'Your daily nutrition targets', exact: true });
   await editor.getByText('Read targets from text or a report picture', { exact: true }).click();
   await editor
@@ -256,7 +257,8 @@ test('daily targets extracted from text or a report picture require review befor
   await page.reload();
   await navigate(page, 'Gemini');
   await expect(page.locator('.nutrition-summary')).toContainText('110 g protein');
-  await page.getByRole('button', { name: 'Edit nutrition targets', exact: true }).click();
+  await page.getByRole('button', { name: 'Your profile', exact: true }).click();
+  await page.getByRole('button', { name: 'Edit targets', exact: true }).click();
   editor = page.getByRole('dialog', { name: 'Your daily nutrition targets', exact: true });
   await expect(editor).toBeVisible();
   if (['cover', 'unfolded'].includes(test.info().project.name))
@@ -281,7 +283,7 @@ test('daily targets extracted from text or a report picture require review befor
     proteinGrams: 110,
   });
   await editor.getByRole('button', { name: 'Close', exact: true }).click();
-  await page.getByRole('button', { name: 'Edit nutrition targets', exact: true }).click();
+  await page.getByRole('button', { name: 'Edit targets', exact: true }).click();
   await expect(editor.getByRole('spinbutton', { name: /^Calories per day/ })).toHaveValue('1800');
   await expect(editor.getByRole('spinbutton', { name: /^Protein per day/ })).toHaveValue('110');
   expect((await kitchen(page)).nutritionTargets).not.toHaveProperty('sourceText');

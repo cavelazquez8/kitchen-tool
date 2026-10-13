@@ -85,7 +85,16 @@ previously paired browsers until you enter the new token in each one.
 For an existing Worker, download the latest `mise-gemini-worker.js` from Mise settings,
 replace the complete code in Cloudflare's editor, and deploy. Keep the existing secrets
 and allowed origin. New recipe recommendations and nutrition report extraction need
-this updated code; a successful health check alone does not verify those features.
+this updated code; profile PDF reading and choosing a Gemini model inside Mise also
+need the updated Worker. A successful health check alone does not verify Gemini access.
+
+The optional model selector stores a preference in this browser. **Worker default**
+uses the Worker's `GEMINI_MODEL` setting, or Mise's default. A selected model accompanies
+each Gemini request and never changes the Worker globally. Mise currently supports
+`gemini-3.5-flash-lite`, `gemini-3.1-flash-lite` and `gemini-3.8-flash`; Google's
+[Standard pricing table](https://ai.google.dev/gemini-api/docs/pricing) lists free-tier
+input and output for these models. Availability and quotas depend on your Google project.
+Keep billing disabled; Mise does not fall back to an unselected or paid-only model.
 
 The pairing token is saved only in this browser's separate connection settings. It is a
 credential: protect it and use **Disconnect** on shared devices. Mise does not include
@@ -124,6 +133,8 @@ it in inventory exports or backups. The browser never receives the Google API ke
   URL proxy; keep its access token private.
 - Gemini chat sends the selected inventory/context and recent history on each request.
   Generated content cannot directly edit inventory. Mise performs its own quantity math.
+  The combined JSON request has a shared 512 KB UTF-8 limit checked by both Mise and
+  the Worker; large report text can require removing an attachment or older messages.
 - **Recipe-first recommendations** send a small locally retrieved set of real recipes,
   with their recorded ingredients, yields and inventory gaps. Gemini can ask preference
   questions and select up to three of those recipes. The Worker and browser validate
@@ -139,6 +150,23 @@ it in inventory exports or backups. The browser never receives the Google API ke
   prescribe targets from body measurements, BMI or basal metabolic rate. This consumes
   the same Gemini allowance as chat and never applies goals automatically.
   [USDA nutrition setup](nutrition-setup.md) is separate and optional.
+- **Profile report reading** uses `/profile/extract` with pasted text or a PDF, JPG,
+  PNG or WebP file up to 4 MB. PDFs are sent to Gemini as native inline document data,
+  following Google's [document processing guide](https://ai.google.dev/gemini-api/docs/generate-content/document-processing).
+  The result preserves readable labels, measurements, units, ranges and notes for
+  review, plus an unambiguous scan date when present. Recommended ranges remain in
+  the report text; they do not become invented midpoint targets. BMR and energy
+  expenditure are measurements, not daily calorie recommendations. The original
+  file stays in this browser's profile storage; reading it sends its contents to
+  Gemini once and consumes the same AI allowance as chat. It creates no persistent
+  Worker storage or Gemini Files API upload. Larger files can exceed a free Worker's
+  CPU budget; a smaller picture or pasted report text remains available.
+- Saving a profile report does not automatically send it in cooking conversations.
+  **Add to Gemini** adds only the selected reviewed report text to chat context,
+  within a 24,000-character total limit. Raw files and other saved reports are not
+  attached. Attached reports remain reference data; approved daily nutrition targets
+  are separate. Removed report context is omitted from subsequent requests, while
+  older chat messages may still mention it until the conversation is cleared.
 
 ## Local development
 

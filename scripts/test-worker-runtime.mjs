@@ -157,6 +157,151 @@ for (const date of ['2024-10-01', '2026-10-10']) {
   }
   await run(
     date,
+    '/health?model=gemini-3.8-flash',
+    undefined,
+    () => assert.fail('Choosing a supported model must not use Gemini quota.'),
+    async (response, calls) => {
+      assert.equal(response.status, 200);
+      assert.equal((await response.json()).model, 'gemini-3.8-flash');
+      assert.equal(calls.length, 0);
+    },
+  );
+  passed++;
+  await run(
+    date,
+    '/chat',
+    {
+      ...groundedInput,
+      profile: 'Reviewed fixture report: BMR 1600 kcal.',
+      model: 'gemini-3.1-flash-lite',
+    },
+    async (request) => {
+      assert.equal(
+        new URL(request.url).pathname,
+        '/v1beta/models/gemini-3.1-flash-lite:generateContent',
+      );
+      const input = await request.json();
+      assert.ok(input.contents.at(-1).parts[0].text.includes('selectedReviewedProfileReports'));
+      assert.ok(
+        input.systemInstruction.parts[0].text.includes('only approvedDailyNutritionTargets'),
+      );
+      return geminiAnswer({
+        message: 'Try the original recipe.',
+        recipes: [],
+        warnings: [],
+        recommendedRecipeIds: ['actual-fixture'],
+      });
+    },
+    async (response, calls) => {
+      assert.equal(response.status, 200);
+      assert.equal(calls.length, 1);
+    },
+  );
+  passed++;
+  await run(
+    date,
+    '/chat',
+    { message: 'Dinner', inventory: '', model: 'paid-pro' },
+    () => assert.fail('Unsupported models must never reach Gemini.'),
+    async (response, calls) => {
+      assert.equal(response.status, 400);
+      assert.equal((await response.json()).error.code, 'invalid_request');
+      assert.equal(calls.length, 0);
+    },
+  );
+  passed++;
+  await run(
+    date,
+    '/chat',
+    {
+      message: 'Choose dinner using the reviewed fixture reports.',
+      inventory: '食'.repeat(24000),
+      profile: '体'.repeat(24000),
+      history: Array.from({ length: 5 }, () => ({ role: 'user', text: '菜'.repeat(6000) })),
+    },
+    async (request) => {
+      const input = await request.json();
+      assert.ok(input.contents.at(-1).parts[0].text.includes('selectedReviewedProfileReports'));
+      return geminiAnswer({
+        message: 'What style of dinner would you like?',
+        recipes: [],
+        warnings: [],
+      });
+    },
+    async (response, calls) => {
+      assert.equal(response.status, 200, JSON.stringify(await response.clone().json()));
+      assert.equal(calls.length, 1, 'Valid Unicode context above 128 KB must still reach Gemini.');
+    },
+  );
+  passed++;
+  await run(
+    date,
+    '/chat',
+    {
+      message: '\u0000'.repeat(6000),
+      inventory: '\u0000'.repeat(24000),
+      profile: '\u0000'.repeat(24000),
+      recipe: '\u0000'.repeat(12000),
+      history: Array.from({ length: 5 }, () => ({ role: 'user', text: '\u0000'.repeat(6000) })),
+    },
+    () => assert.fail('Aggregate oversized context must not reach Gemini.'),
+    async (response, calls) => {
+      assert.equal(response.status, 413);
+      assert.equal((await response.json()).error.code, 'too_large');
+      assert.equal(calls.length, 0);
+    },
+  );
+  passed++;
+  await run(
+    date,
+    '/profile/extract',
+    { media: { mimeType: 'application/pdf', data: 'JVBERi0xLjQK' }, model: 'gemini-3.8-flash' },
+    async (request) => {
+      assert.equal(
+        new URL(request.url).pathname,
+        '/v1beta/models/gemini-3.8-flash:generateContent',
+      );
+      const input = await request.json();
+      assert.deepEqual(input.contents[0].parts[1].inlineData, {
+        mimeType: 'application/pdf',
+        data: 'JVBERi0xLjQK',
+      });
+      assert.deepEqual(input.generationConfig.responseSchema.required, [
+        'text',
+        'recordedOn',
+        'targets',
+        'warnings',
+      ]);
+      assert.ok(input.systemInstruction.parts[0].text.includes('BMR is a measured report value'));
+      return geminiAnswer({
+        text: 'Fixture report: BMR 1600 kcal; recommended calories 2000–2200 kcal.',
+        recordedOn: null,
+        targets: { caloriesKcal: null, proteinGrams: null, carbsGrams: null, fatGrams: null },
+        warnings: ['Recommended calories are a range.'],
+      });
+    },
+    async (response, calls) => {
+      assert.equal(response.status, 200);
+      const report = await response.json();
+      assert.equal(report.targets.caloriesKcal, null);
+      assert.ok(report.text.includes('2000–2200 kcal'));
+      assert.equal(calls.length, 1);
+    },
+  );
+  passed++;
+  await run(
+    date,
+    '/profile/extract',
+    { media: { mimeType: 'video/mp4', data: 'AQID' } },
+    () => assert.fail('A video cannot be uploaded as a profile report.'),
+    async (response, calls) => {
+      assert.equal(response.status, 400);
+      assert.equal(calls.length, 0);
+    },
+  );
+  passed++;
+  await run(
+    date,
     '/nutrition/extract',
     { text: 'Recommended daily intake: 2000 kcal, 120 g protein' },
     async (request) => {

@@ -23,6 +23,7 @@ import { recommendRecipes } from '../recipes/recommendations';
 import { reviewedRecipeEstimate } from '../nutrition/recipeEstimate';
 import { recipeNutritionKey } from '../nutrition/estimate';
 import { parseChatRequest, type AiRecipeCandidate } from '../ai/protocol';
+import { bodyScanContext } from '../profile/context';
 import {
   normalizeAiRecipe,
   boundedChatHistory,
@@ -62,6 +63,9 @@ interface Props {
   onScan: () => void;
   onConfigure: () => void;
   onNavigate: (page: HubPage) => void;
+  onProfile?: () => void;
+  attachedBodyScanIds?: string[];
+  onBodyScanAttachmentsChange?: (ids: string[]) => void;
 }
 const labels = { ready: 'Ready to cook', almost: 'Almost ready', check: 'Check quantities' };
 const sourceLabels = {
@@ -156,6 +160,9 @@ export function KitchenHub({
   onScan,
   onConfigure,
   onNavigate,
+  onProfile,
+  attachedBodyScanIds = [],
+  onBodyScanAttachmentsChange,
 }: Props) {
   const [error, setError] = useState('');
   const [useSelection, setUseSelection] = useState(false);
@@ -448,6 +455,7 @@ export function KitchenHub({
         );
       }
       let attachedContext = chatRecipes.map(recipeContext).join('\n\n');
+      const profile = bodyScanContext(inventory.bodyScans ?? [], attachedBodyScanIds);
       if (attachedContext.length > 12000)
         throw new Error(
           'Remove a recipe from Gemini context before sending these recipes together.',
@@ -457,22 +465,29 @@ export function KitchenHub({
           recipe,
           inventory.recipeNutrition?.find((item) => item.recipeId === recipe.id),
         );
-        const note = `\n${recipe.title} · Reviewed nutrition: ${JSON.stringify(estimate ? { perServing: estimate.perServing, complete: estimate.complete } : { recorded: false })}`;
+        const note = `\n${recipe.title} · Reviewed nutrition: ${JSON.stringify(estimate ? { totals: estimate.totals, perServing: estimate.perServing, complete: estimate.complete } : { recorded: false })}`;
         if (attachedContext.length + note.length <= 12000) attachedContext += note;
       }
-      await mutate((state) => ({
-        ...state,
-        chatHistory: [...(state.chatHistory ?? []), user].slice(-80),
-      }));
-      setMessage('');
-      const reply = await sendGeminiChat(connection, {
+      const request = parseChatRequest({
         message: prompt.trim(),
         inventory: boundedInventoryContext(generateMarkdown(relevant, { includeTools: true })),
         ...(attachedContext ? { recipe: attachedContext } : {}),
         ...(recipeCandidates.length ? { candidates: recipeCandidates } : {}),
         ...(inventory.nutritionTargets ? { nutritionTargets: inventory.nutritionTargets } : {}),
+        ...(profile ? { profile } : {}),
+        ...(connection.model ? { model: connection.model } : {}),
         history: boundedChatHistory(history),
       });
+      if (!request)
+        throw new Error(
+          'This conversation has too much context. Remove a recipe or body scan, or shorten your message.',
+        );
+      await mutate((state) => ({
+        ...state,
+        chatHistory: [...(state.chatHistory ?? []), user].slice(-80),
+      }));
+      setMessage('');
+      const reply = await sendGeminiChat(connection, request);
       const assistant = {
         id: crypto.randomUUID(),
         role: 'assistant' as const,
@@ -961,8 +976,12 @@ export function KitchenHub({
               />{' '}
               Create with my inventory
             </label>
-            <button className="text-button" onClick={() => setNutritionOpen(true)}>
-              {inventory.nutritionTargets ? 'Edit nutrition targets' : 'Add nutrition targets'}
+            <button className="text-button" onClick={onProfile ?? (() => setNutritionOpen(true))}>
+              {onProfile
+                ? 'Your profile'
+                : inventory.nutritionTargets
+                  ? 'Edit nutrition targets'
+                  : 'Add nutrition targets'}
             </button>
           </div>
           {inventory.nutritionTargets && (
@@ -1010,6 +1029,39 @@ export function KitchenHub({
               </button>
             )}
           </div>
+          {(inventory.bodyScans ?? []).some((scan) => attachedBodyScanIds.includes(scan.id)) && (
+            <section className="gemini-recipe-context" aria-label="Gemini body scan context">
+              <div className="hub-section-title">
+                <h3>Body scans in context</h3>
+                <button className="text-button" onClick={() => onBodyScanAttachmentsChange?.([])}>
+                  Clear body scans
+                </button>
+              </div>
+              {(inventory.bodyScans ?? [])
+                .filter((scan) => attachedBodyScanIds.includes(scan.id))
+                .map((scan) => (
+                  <div className="gemini-context-row" key={scan.id}>
+                    <button className="text-button" onClick={onProfile}>
+                      {scan.name}
+                    </button>
+                    <button
+                      className="icon-button"
+                      aria-label={`Remove ${scan.name} from Gemini context`}
+                      onClick={() =>
+                        onBodyScanAttachmentsChange?.(
+                          attachedBodyScanIds.filter((id) => id !== scan.id),
+                        )
+                      }
+                    >
+                      <X size={17} />
+                    </button>
+                  </div>
+                ))}
+              <p className="settings-note">
+                Only these reports’ reviewed text will be sent with your next message.
+              </p>
+            </section>
+          )}
           {chatRecipes.length > 0 && (
             <section className="gemini-recipe-context" aria-label="Gemini recipe context">
               <div className="hub-section-title">
@@ -1243,6 +1295,7 @@ export function KitchenHub({
                 );
               }}
               onConfigure={onConfigure}
+              onEditRecipe={() => openEditor(detail)}
             />
             <button
               className="text-button"

@@ -1,6 +1,7 @@
 export interface GeminiConnection {
   url: string;
   token: string;
+  model?: GeminiModel;
 }
 
 export interface AiMessage {
@@ -45,6 +46,14 @@ export interface AiNutritionReply {
   warnings: string[];
 }
 
+/** Proposed transcription for review, never automatically applied to a profile. */
+export interface AiBodyScanReply {
+  text: string;
+  recordedOn: string | null;
+  targets: NutritionTargets;
+  warnings: string[];
+}
+
 export interface AiChatRequest {
   message: string;
   inventory: string;
@@ -53,6 +62,8 @@ export interface AiChatRequest {
   history?: AiMessage[];
   candidates?: AiRecipeCandidate[];
   nutritionTargets?: NutritionTargets;
+  profile?: string;
+  model?: GeminiModel;
 }
 
 export interface AiMedia {
@@ -64,9 +75,26 @@ export interface AiExtractRequest {
   text?: string;
   sourceUrl?: string;
   media?: AiMedia;
+  model?: GeminiModel;
 }
 
+export interface AiBodyScanExtractRequest {
+  text?: string;
+  media?: AiMedia;
+  model?: GeminiModel;
+}
+
+export const MAX_BODY_SCAN_BYTES = 4_000_000;
+export const BODY_SCAN_MEDIA_TYPES = [
+  'application/pdf',
+  'image/jpeg',
+  'image/png',
+  'image/webp',
+] as const;
+
 export const MAX_MEDIA_BYTES = 1024 * 1024;
+/** Shared UTF-8 JSON cap, including selected reports, inventory and recent conversation. */
+export const MAX_CHAT_REQUEST_BYTES = 512 * 1024;
 export const MEDIA_TYPES = [
   'image/jpeg',
   'image/png',
@@ -80,6 +108,11 @@ export const ALLOWED_MODELS = [
   'gemini-3.8-flash',
 ] as const;
 export const DEFAULT_MODEL = ALLOWED_MODELS[0];
+export type GeminiModel = (typeof ALLOWED_MODELS)[number];
+
+export function isGeminiModel(value: unknown): value is GeminiModel {
+  return typeof value === 'string' && (ALLOWED_MODELS as readonly string[]).includes(value);
+}
 
 export function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -106,12 +139,16 @@ export function parseChatRequest(value: unknown): AiChatRequest | null {
       'history',
       'candidates',
       'nutritionTargets',
+      'profile',
+      'model',
     ])
   )
     return null;
   if (!text(value.message, 6000) || !text(value.inventory, 24000, true)) return null;
   if (value.tools !== undefined && !text(value.tools, 4000, true)) return null;
   if (value.recipe !== undefined && !text(value.recipe, 12000, true)) return null;
+  if (value.profile !== undefined && !text(value.profile, 24000, true)) return null;
+  if (value.model !== undefined && !isGeminiModel(value.model)) return null;
   if (value.nutritionTargets !== undefined && !isNutritionTargets(value.nutritionTargets))
     return null;
   let candidates: AiRecipeCandidate[] | undefined;
@@ -179,22 +216,84 @@ export function parseChatRequest(value: unknown): AiChatRequest | null {
     }
     if (history.reduce((sum, item) => sum + item.text.length, 0) > 30000) return null;
   }
-  return {
+  const request: AiChatRequest = {
     message: value.message,
     inventory: value.inventory,
     ...(value.tools !== undefined ? { tools: value.tools as string } : {}),
     ...(value.recipe !== undefined ? { recipe: value.recipe as string } : {}),
+    ...(value.profile !== undefined ? { profile: value.profile as string } : {}),
+    ...(value.model !== undefined ? { model: value.model as GeminiModel } : {}),
     ...(history ? { history } : {}),
     ...(candidates ? { candidates } : {}),
     ...(value.nutritionTargets !== undefined
       ? { nutritionTargets: value.nutritionTargets as NutritionTargets }
       : {}),
   };
+  return new TextEncoder().encode(JSON.stringify(request)).byteLength <= MAX_CHAT_REQUEST_BYTES
+    ? request
+    : null;
+}
+
+export function parseBodyScanExtractRequest(value: unknown): AiBodyScanExtractRequest | null {
+  if (!isRecord(value) || !hasOnlyKeys(value, ['text', 'media', 'model'])) return null;
+  if (value.text !== undefined && !text(value.text, 24000, true)) return null;
+  if (value.model !== undefined && !isGeminiModel(value.model)) return null;
+  let media: AiMedia | undefined;
+  if (value.media !== undefined) {
+    if (!isRecord(value.media) || !hasOnlyKeys(value.media, ['mimeType', 'data'])) return null;
+    const { mimeType, data } = value.media;
+    if (
+      typeof mimeType !== 'string' ||
+      !(BODY_SCAN_MEDIA_TYPES as readonly string[]).includes(mimeType) ||
+      typeof data !== 'string' ||
+      !data.length ||
+      data.length > Math.ceil(MAX_BODY_SCAN_BYTES / 3) * 4 ||
+      data.length % 4 !== 0 ||
+      !/^[A-Za-z0-9+/]*={0,2}$/.test(data)
+    )
+      return null;
+    const bytes = (data.length * 3) / 4 - (data.endsWith('==') ? 2 : data.endsWith('=') ? 1 : 0);
+    if (bytes > MAX_BODY_SCAN_BYTES) return null;
+    media = { mimeType, data };
+  }
+  if (!(typeof value.text === 'string' && value.text.trim()) && !media) return null;
+  return {
+    ...(value.text !== undefined ? { text: value.text as string } : {}),
+    ...(media ? { media } : {}),
+    ...(value.model !== undefined ? { model: value.model as GeminiModel } : {}),
+  };
+}
+
+export function parseAiBodyScanReply(value: unknown): AiBodyScanReply | null {
+  if (
+    !isRecord(value) ||
+    !hasOnlyKeys(value, ['text', 'recordedOn', 'targets', 'warnings']) ||
+    !text(value.text, 24000) ||
+    !isNutritionTargets(value.targets) ||
+    !Array.isArray(value.warnings) ||
+    value.warnings.length > 12 ||
+    !value.warnings.every((warning) => text(warning, 1000))
+  )
+    return null;
+  if (value.recordedOn !== null) {
+    if (typeof value.recordedOn !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value.recordedOn))
+      return null;
+    const date = new Date(`${value.recordedOn}T00:00:00.000Z`);
+    if (!Number.isFinite(date.getTime()) || date.toISOString().slice(0, 10) !== value.recordedOn)
+      return null;
+  }
+  return {
+    text: value.text,
+    recordedOn: value.recordedOn,
+    targets: value.targets,
+    warnings: value.warnings as string[],
+  };
 }
 
 export function parseExtractRequest(value: unknown): AiExtractRequest | null {
-  if (!isRecord(value) || !hasOnlyKeys(value, ['text', 'sourceUrl', 'media'])) return null;
+  if (!isRecord(value) || !hasOnlyKeys(value, ['text', 'sourceUrl', 'media', 'model'])) return null;
   if (value.text !== undefined && !text(value.text, 24000, true)) return null;
+  if (value.model !== undefined && !isGeminiModel(value.model)) return null;
   if (value.sourceUrl !== undefined) {
     if (!text(value.sourceUrl, 2000)) return null;
     try {
@@ -229,6 +328,7 @@ export function parseExtractRequest(value: unknown): AiExtractRequest | null {
     ...(value.text !== undefined ? { text: value.text as string } : {}),
     ...(value.sourceUrl !== undefined ? { sourceUrl: value.sourceUrl as string } : {}),
     ...(media ? { media } : {}),
+    ...(value.model !== undefined ? { model: value.model as GeminiModel } : {}),
   };
 }
 
@@ -363,6 +463,17 @@ export const AI_NUTRITION_SCHEMA = {
     warnings: { type: 'ARRAY', items: { type: 'STRING' } },
   },
   required: ['targets', 'sourceText', 'warnings'],
+} as const;
+
+export const AI_BODY_SCAN_SCHEMA = {
+  type: 'OBJECT',
+  properties: {
+    text: { type: 'STRING' },
+    recordedOn: { type: 'STRING', nullable: true },
+    targets: AI_NUTRITION_SCHEMA.properties.targets,
+    warnings: { type: 'ARRAY', items: { type: 'STRING' } },
+  },
+  required: ['text', 'recordedOn', 'targets', 'warnings'],
 } as const;
 
 // The API uses its documented Schema representation; nullable values remain unknown.

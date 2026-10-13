@@ -22,6 +22,9 @@ A touch-friendly kitchen inventory, recipe library, meal planner, shopping list,
 - Review recorded quantities, cook with step timers, and optionally keep the screen awake. Finish cooking reviews deductions before changing inventory.
 - Save recipes and choose meal-plan portions. Request a shopping list to combine requirements and subtract inventory once.
 - Ask Gemini follow-up questions inside Mise after connecting the optional free-tier backend. Copy for Gemini remains available without a backend.
+- Choose a Gemini model in settings and save it on this device. **Worker default** uses Cloudflare’s configured model; supported free-tier choices travel with your requests.
+- Open **Your profile** from Gemini or settings to manage daily nutrition targets and multiple body scans. Save PDFs, pictures, or pasted text; explicitly read with Gemini, review, then choose **Add to Gemini** for the reports you want in a conversation. Backups include the original files.
+- Review recipe nutrition with USDA food matches and confirmed edible weights. Whole-recipe totals are available without a serving yield; partial estimates and missing data are labelled, and recorded yields enable per-serving values.
 
 Matching and shopping calculations run locally. Unknown quantities, package contents, and original recipe yields stay unknown until you record them. Clear ingredient names are recognized; ambiguous branded foods require a confirmed generic ingredient name or an explicit **Use product name** choice. Barcode identities and reviewed original package sizes are remembered separately from remaining stock. Matching never guesses a package's weight or a mass/volume conversion.
 

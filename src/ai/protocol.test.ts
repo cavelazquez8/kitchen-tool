@@ -4,6 +4,11 @@ import {
   parseChatRequest,
   parseNutritionExtractRequest,
   parseAiNutritionReply,
+  parseBodyScanExtractRequest,
+  parseAiBodyScanReply,
+  parseExtractRequest,
+  MAX_BODY_SCAN_BYTES,
+  MAX_CHAT_REQUEST_BYTES,
   type AiRecipeCandidate,
 } from './protocol';
 
@@ -83,6 +88,98 @@ describe('grounded recommendation protocol', () => {
         [candidate],
       ),
     ).toBeNull();
+  });
+});
+
+describe('profile report protocol', () => {
+  it('accepts complete Unicode context above the former 128 KB Worker limit', () => {
+    const context = {
+      message: 'Help choose dinner',
+      inventory: '食'.repeat(24000),
+      profile: '体'.repeat(24000),
+      history: Array.from({ length: 5 }, () => ({ role: 'user', text: '菜'.repeat(6000) })),
+    };
+    const bytes = new TextEncoder().encode(JSON.stringify(context)).byteLength;
+    expect(bytes).toBeGreaterThan(128 * 1024);
+    expect(bytes).toBeLessThanOrEqual(MAX_CHAT_REQUEST_BYTES);
+    expect(parseChatRequest(context)).toEqual(context);
+  });
+
+  it('rejects aggregate escaped data above the shared cap even when each field fits', () => {
+    const context = {
+      message: '\u0000'.repeat(6000),
+      inventory: '\u0000'.repeat(24000),
+      profile: '\u0000'.repeat(24000),
+      recipe: '\u0000'.repeat(12000),
+      history: Array.from({ length: 5 }, () => ({ role: 'user', text: '\u0000'.repeat(6000) })),
+    };
+    expect(new TextEncoder().encode(JSON.stringify(context)).byteLength).toBeGreaterThan(
+      MAX_CHAT_REQUEST_BYTES,
+    );
+    expect(parseChatRequest(context)).toBeNull();
+  });
+
+  it('keeps selected reviewed reports separate from daily targets and recipe attachments', () => {
+    const context = {
+      ...input,
+      profile: 'Body scan, 2026-10-01: BMR 1650 kcal; body fat 20%.',
+      recipe: 'Original chili recipe',
+      nutritionTargets: targets,
+      model: 'gemini-3.8-flash',
+    };
+    expect(parseChatRequest(context)).toEqual(context);
+    expect(parseChatRequest({ ...context, profile: 'a'.repeat(24001) })).toBeNull();
+    expect(parseChatRequest({ ...context, model: 'paid-model' })).toBeNull();
+  });
+
+  it('accepts native PDF report content independently of recipe extraction limits', () => {
+    const exactLimit = 'A'.repeat(Math.ceil(MAX_BODY_SCAN_BYTES / 3) * 4 - 2) + '==';
+    const report = {
+      media: { mimeType: 'application/pdf', data: exactLimit },
+      model: 'gemini-3.1-flash-lite',
+    };
+    expect(parseBodyScanExtractRequest(report)).toEqual(report);
+    expect(parseExtractRequest(report)).toBeNull();
+    expect(
+      parseBodyScanExtractRequest({
+        media: { mimeType: 'application/pdf', data: 'A'.repeat(exactLimit.length) },
+      }),
+    ).toBeNull();
+  });
+
+  it('rejects unbounded text, videos, links, malformed data and unsupported model overrides', () => {
+    for (const report of [
+      {},
+      { text: ' ' },
+      { text: 'a'.repeat(24001) },
+      { text: 'Report', sourceUrl: 'https://example.com/report.pdf' },
+      { media: { mimeType: 'video/mp4', data: 'AQID' } },
+      { media: { mimeType: 'application/pdf', data: 'AQID!' } },
+      { media: { mimeType: 'image/svg+xml', data: 'AQID' } },
+      { text: 'Report', model: 'paid-model' },
+    ])
+      expect(parseBodyScanExtractRequest(report)).toBeNull();
+  });
+
+  it('preserves measurements, unknown goals and scan dates while rejecting unreadable outputs', () => {
+    const result = {
+      text: 'Scan date: February 29, 2024\nBMR: 1650 kcal\nBody fat: 20%',
+      recordedOn: '2024-02-29',
+      targets: { caloriesKcal: null, proteinGrams: null, carbsGrams: null, fatGrams: null },
+      warnings: ['No explicitly recommended daily intake targets are stated.'],
+    };
+    expect(parseAiBodyScanReply(result)).toEqual(result);
+    expect(parseAiBodyScanReply({ ...result, recordedOn: null })).not.toBeNull();
+    for (const invalid of [
+      { ...result, recordedOn: '2026-02-29' },
+      { ...result, recordedOn: '10/01/2026' },
+      { ...result, text: '' },
+      { ...result, text: 'a'.repeat(24001) },
+      { ...result, targets: { ...targets, caloriesKcal: -1 } },
+      { ...result, recipes: [] },
+      { ...result, recordedOn: undefined },
+    ])
+      expect(parseAiBodyScanReply(invalid)).toBeNull();
   });
 });
 

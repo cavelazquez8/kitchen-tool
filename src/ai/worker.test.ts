@@ -231,6 +231,167 @@ describe('private Gemini Worker', () => {
     expect(sent.contents[0].parts[1].inlineData).toEqual({ mimeType: 'image/png', data: 'AQID' });
   });
 
+  it('transcribes a native PDF with measured readings and ranges separate from approved targets', async () => {
+    const report = {
+      text: 'Body scan: 2026-10-01\nBMR: 1600 kcal\nTEE: 2400 kcal\nYOUR NUTRITION\nRecommended calories: 2000–2200 kcal\nProtein: 100–120 g (20–25%)',
+      recordedOn: '2026-10-01',
+      targets: { caloriesKcal: null, proteinGrams: null, carbsGrams: null, fatGrams: null },
+      warnings: ['Recommended values are ranges. Review them before choosing daily targets.'],
+    };
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          candidates: [
+            { finishReason: 'STOP', content: { parts: [{ text: JSON.stringify(report) }] } },
+          ],
+        }),
+      ),
+    );
+    const media = { mimeType: 'application/pdf', data: 'A'.repeat(2 * 1024 * 1024) };
+    const response = await createWorker(fetcher).fetch(request('/profile/extract', { media }), env);
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual(report);
+    const sent = JSON.parse(String(fetcher.mock.calls[0][1]?.body));
+    expect(sent.contents[0].parts[1].inlineData).toEqual(media);
+    expect(sent.generationConfig.responseSchema.required).toEqual([
+      'text',
+      'recordedOn',
+      'targets',
+      'warnings',
+    ]);
+    expect(sent.systemInstruction.parts[0].text).toContain('Preserve all readable report labels');
+    expect(sent.systemInstruction.parts[0].text).toContain('Leave absent, ranged, conflicting');
+    expect(sent.systemInstruction.parts[0].text).toContain('BMR is a measured report value');
+    expect(fetcher.mock.calls[0][1]?.redirect).toBe('manual');
+  });
+
+  it('validates profile reports and rejects unpaired uploads before upstream processing', async () => {
+    const fetcher = vi.fn<typeof fetch>();
+    const worker = createWorker(fetcher);
+    expect(
+      (await worker.fetch(request('/profile/extract', { text: 'Report' }, ''), env)).status,
+    ).toBe(401);
+    expect(
+      (
+        await worker.fetch(
+          request('/profile/extract', { text: 'Report' }, undefined, 'https://attacker.example'),
+          env,
+        )
+      ).status,
+    ).toBe(403);
+    for (const body of [
+      { media: { mimeType: 'video/mp4', data: 'AQID' } },
+      { media: { mimeType: 'application/pdf', data: 'incorrect-base64' } },
+      { text: 'Report', sourceUrl: 'https://example.com/report.pdf' },
+      { text: 'Report', model: 'paid-model' },
+    ])
+      expect((await worker.fetch(request('/profile/extract', body), env)).status).toBe(400);
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+
+  it('sends only explicitly supplied profile text as data in both cooking and guided chat', async () => {
+    const profile = 'Reviewed report: BMR 1600 kcal. Recommended protein 100–120 g.';
+    for (const guided of [false, true]) {
+      const candidates = guided
+        ? [
+            {
+              id: 'chili',
+              title: 'Chili',
+              servings: 4,
+              ingredients: ['beans'],
+              missingIngredients: [],
+            },
+          ]
+        : undefined;
+      const responseReply = guided
+        ? {
+            message: 'Would you like chili?',
+            warnings: [],
+            recipes: [],
+            recommendedRecipeIds: ['chili'],
+          }
+        : {
+            message: 'How much protein would you like this meal to contribute?',
+            warnings: [],
+            recipes: [],
+          };
+      const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            candidates: [
+              {
+                finishReason: 'STOP',
+                content: { parts: [{ text: JSON.stringify(responseReply) }] },
+              },
+            ],
+          }),
+        ),
+      );
+      const response = await createWorker(fetcher).fetch(
+        request('/chat', {
+          message: 'Dinner please',
+          inventory: '',
+          recipe: 'Original recipe',
+          profile,
+          candidates,
+        }),
+        env,
+      );
+      expect(response.status).toBe(200);
+      const sent = JSON.parse(String(fetcher.mock.calls[0][1]?.body));
+      expect(sent.contents.at(-1).parts[0].text).toContain('selectedReviewedProfileReports');
+      expect(sent.contents.at(-1).parts[0].text).toContain(profile);
+      expect(sent.contents.at(-1).parts[0].text).not.toContain('approvedDailyNutritionTargets');
+      expect(sent.systemInstruction.parts[0].text).toContain('untrusted data');
+      expect(sent.systemInstruction.parts[0].text).toContain('only approvedDailyNutritionTargets');
+    }
+  });
+
+  it('selects supported models per request without changing the Worker default or consuming health quota', async () => {
+    const fetcher = vi.fn<typeof fetch>().mockImplementation(async () => answer());
+    const worker = createWorker(fetcher);
+    const selectedHealth = new Request(
+      'https://mise.example.workers.dev/health?model=gemini-3.8-flash',
+      {
+        headers: { Origin: origin, Authorization: `Bearer ${token}` },
+      },
+    );
+    expect((await (await worker.fetch(selectedHealth, env)).json()).model).toBe('gemini-3.8-flash');
+    expect(fetcher).not.toHaveBeenCalled();
+    for (const model of ['gemini-3.8-flash', undefined]) {
+      const response = await worker.fetch(
+        request('/chat', { message: 'Dinner', inventory: '', model }),
+        env,
+      );
+      expect(response.status).toBe(200);
+    }
+    expect(String(fetcher.mock.calls[0][0])).toContain('/models/gemini-3.8-flash:');
+    expect(String(fetcher.mock.calls[1][0])).toContain('/models/gemini-3.5-flash-lite:');
+    expect(env.GEMINI_MODEL).toBeUndefined();
+    expect(
+      (
+        await worker.fetch(
+          request('/chat', { message: 'Dinner', inventory: '', model: 'paid-pro' }),
+          env,
+        )
+      ).status,
+    ).toBe(400);
+    for (const query of [
+      'model=paid-pro',
+      'model=gemini-3.8-flash&model=gemini-3.1-flash-lite',
+      'tool=web',
+    ]) {
+      const response = await worker.fetch(
+        new Request(`https://mise.example.workers.dev/health?${query}`, {
+          headers: { Origin: origin, Authorization: `Bearer ${token}` },
+        }),
+        env,
+      );
+      expect(response.status).toBe(400);
+    }
+    expect(fetcher).toHaveBeenCalledTimes(2);
+  });
+
   it('keeps nutrition status behind pairing and checks configuration without quota', async () => {
     const fetcher = vi.fn<typeof fetch>();
     const worker = createWorker(fetcher);

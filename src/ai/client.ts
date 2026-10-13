@@ -1,12 +1,17 @@
 import {
   isRecord,
+  isGeminiModel,
   MAX_MEDIA_BYTES,
   MEDIA_TYPES,
+  MAX_BODY_SCAN_BYTES,
+  BODY_SCAN_MEDIA_TYPES,
   parseAiReply,
   parseChatRequest,
   parseExtractRequest,
   parseNutritionExtractRequest,
   parseAiNutritionReply,
+  parseBodyScanExtractRequest,
+  parseAiBodyScanReply,
 } from './protocol';
 import type {
   AiChatRequest,
@@ -14,6 +19,8 @@ import type {
   AiMedia,
   AiReply,
   AiNutritionReply,
+  AiBodyScanReply,
+  AiBodyScanExtractRequest,
   GeminiConnection,
 } from './protocol';
 
@@ -25,8 +32,11 @@ export type {
   AiRecipeDraft,
   AiRecipeCandidate,
   AiNutritionReply,
+  AiBodyScanReply,
+  AiBodyScanExtractRequest,
   AiReply,
   GeminiConnection,
+  GeminiModel,
 } from './protocol';
 
 const CONNECTION_KEY = 'mise.gemini.connection.v1';
@@ -82,7 +92,13 @@ export function normalizeGeminiConnection(connection: GeminiConnection): GeminiC
       'settings',
       'Enter the Mise access token stored in your Worker—not your Gemini API key.',
     );
-  return { url: url.origin, token };
+  if (connection.model !== undefined && !isGeminiModel(connection.model))
+    throw new GeminiError('settings', 'Choose a supported Gemini model or Worker default.');
+  return {
+    url: url.origin,
+    token,
+    ...(connection.model !== undefined ? { model: connection.model } : {}),
+  };
 }
 
 export function readGeminiConnection(): GeminiConnection | null {
@@ -90,7 +106,12 @@ export function readGeminiConnection(): GeminiConnection | null {
     const stored: unknown = JSON.parse(localStorage.getItem(CONNECTION_KEY) ?? 'null');
     if (!isRecord(stored) || typeof stored.url !== 'string' || typeof stored.token !== 'string')
       return null;
-    return normalizeGeminiConnection({ url: stored.url, token: stored.token });
+    if (stored.model !== undefined && !isGeminiModel(stored.model)) return null;
+    return normalizeGeminiConnection({
+      url: stored.url,
+      token: stored.token,
+      ...(stored.model !== undefined ? { model: stored.model } : {}),
+    });
   } catch {
     return null;
   }
@@ -111,10 +132,15 @@ export function readGeminiConnectionDraft(): GeminiConnection | null {
       typeof stored.token !== 'string' ||
       stored.url.length > 2048 ||
       stored.token.length > 128 ||
-      stored.token.trim().startsWith('AIza')
+      stored.token.trim().startsWith('AIza') ||
+      (stored.model !== undefined && !isGeminiModel(stored.model))
     )
       return null;
-    return { url: stored.url, token: stored.token };
+    return {
+      url: stored.url,
+      token: stored.token,
+      ...(stored.model !== undefined ? { model: stored.model } : {}),
+    };
   } catch {
     return null;
   }
@@ -127,6 +153,7 @@ export function saveGeminiConnectionDraft(connection: GeminiConnection): void {
     JSON.stringify({
       url: connection.url.slice(0, 2048),
       token: connection.token.trim().startsWith('AIza') ? '' : connection.token.slice(0, 128),
+      ...(isGeminiModel(connection.model) ? { model: connection.model } : {}),
     }),
   );
 }
@@ -255,9 +282,20 @@ export async function checkGeminiConnection(
   connection: GeminiConnection,
   signal?: AbortSignal,
 ): Promise<{ ok: true; model: string }> {
-  const result = await requestMiseWorker(connection, '/health', undefined, signal);
+  const selected = normalizeGeminiConnection(connection).model;
+  const result = await requestMiseWorker(
+    connection,
+    selected ? `/health?model=${selected}` : '/health',
+    undefined,
+    signal,
+  );
   if (!isRecord(result) || result.ok !== true || typeof result.model !== 'string')
     throw new GeminiError('invalid_response', 'This address did not respond as a Mise Worker.');
+  if (selected && result.model !== selected)
+    throw new GeminiError(
+      'worker_update',
+      'Update your Cloudflare Worker with the latest Mise Worker file to switch Gemini models inside Mise.',
+    );
   return { ok: true, model: result.model };
 }
 
@@ -266,20 +304,27 @@ export async function sendGeminiChat(
   input: AiChatRequest,
   signal?: AbortSignal,
 ): Promise<AiReply> {
-  const validated = parseChatRequest(input);
+  const validated = parseChatRequest({
+    ...input,
+    ...(connection.model ? { model: connection.model } : {}),
+  });
   if (!validated)
     throw new GeminiError(
       'invalid_request',
-      'Use a shorter message or conversation. Clear older messages if needed.',
+      'This message and its context are too large. Shorten the message, remove an attached body scan or recipe, or clear older conversation messages.',
     );
   let raw: unknown;
   try {
     raw = await requestMiseWorker(connection, '/chat', validated, signal);
   } catch (error) {
-    if (validated.candidates && error instanceof GeminiError && error.code === 'invalid_request')
+    if (
+      (validated.candidates || validated.profile !== undefined || validated.model) &&
+      error instanceof GeminiError &&
+      error.code === 'invalid_request'
+    )
       throw new GeminiError(
         'worker_update',
-        'Update your Cloudflare Worker with the latest Mise Worker file to use recipe recommendations. Your saved recipes still work.',
+        'Update your Cloudflare Worker with the latest Mise Worker file to use recipe recommendations, attached profile reports and model selection. Your saved recipes still work.',
       );
     throw error;
   }
@@ -289,13 +334,54 @@ export async function sendGeminiChat(
   return result;
 }
 
+/** Read a report for the profile review screen; nothing is saved or attached here. */
+export async function extractGeminiBodyScan(
+  connection: GeminiConnection,
+  input: AiBodyScanExtractRequest,
+  signal?: AbortSignal,
+): Promise<AiBodyScanReply> {
+  const validated = parseBodyScanExtractRequest({
+    ...input,
+    ...(connection.model ? { model: connection.model } : {}),
+  });
+  if (!validated)
+    throw new GeminiError(
+      'invalid_request',
+      'Paste report text or choose a PDF, JPG, PNG or WebP body scan up to 4 MB.',
+    );
+  let raw: unknown;
+  try {
+    raw = await requestMiseWorker(connection, '/profile/extract', validated, signal);
+  } catch (error) {
+    if (
+      error instanceof GeminiError &&
+      (error.code === 'not_found' || (validated.model && error.code === 'invalid_request'))
+    )
+      throw new GeminiError(
+        'worker_update',
+        'Update your Cloudflare Worker with the latest Mise Worker file to read profile reports. You can paste and edit the report text now.',
+      );
+    throw error;
+  }
+  const result = parseAiBodyScanReply(raw);
+  if (!result)
+    throw new GeminiError(
+      'invalid_response',
+      'Gemini could not return a readable report for review. Try another image or paste the text.',
+    );
+  return result;
+}
+
 /** Extract stated daily recommendations for review; this never applies targets. */
 export async function extractGeminiNutrition(
   connection: GeminiConnection,
   input: AiExtractRequest,
   signal?: AbortSignal,
 ): Promise<AiNutritionReply> {
-  const validated = parseNutritionExtractRequest(input);
+  const validated = parseNutritionExtractRequest({
+    ...input,
+    ...(connection.model ? { model: connection.model } : {}),
+  });
   if (!validated)
     throw new GeminiError(
       'invalid_request',
@@ -305,7 +391,10 @@ export async function extractGeminiNutrition(
   try {
     raw = await requestMiseWorker(connection, '/nutrition/extract', validated, signal);
   } catch (error) {
-    if (error instanceof GeminiError && error.code === 'not_found')
+    if (
+      error instanceof GeminiError &&
+      (error.code === 'not_found' || (validated.model && error.code === 'invalid_request'))
+    )
       throw new GeminiError(
         'worker_update',
         'Update your Cloudflare Worker with the latest Mise Worker file to extract nutrition reports. You can enter your targets manually now.',
@@ -326,13 +415,27 @@ export async function extractGeminiRecipe(
   input: AiExtractRequest,
   signal?: AbortSignal,
 ): Promise<AiReply> {
-  const validated = parseExtractRequest(input);
+  const validated = parseExtractRequest({
+    ...input,
+    ...(connection.model ? { model: connection.model } : {}),
+  });
   if (!validated)
     throw new GeminiError(
       'invalid_request',
       'Add recipe text or a supported image/video under 1 MB. A link alone cannot be extracted.',
     );
-  const result = parseAiReply(await requestMiseWorker(connection, '/extract', validated, signal));
+  let raw: unknown;
+  try {
+    raw = await requestMiseWorker(connection, '/extract', validated, signal);
+  } catch (error) {
+    if (validated.model && error instanceof GeminiError && error.code === 'invalid_request')
+      throw new GeminiError(
+        'worker_update',
+        'Update your Cloudflare Worker with the latest Mise Worker file to switch Gemini models inside Mise.',
+      );
+    throw error;
+  }
+  const result = parseAiReply(raw);
   if (!result)
     throw new GeminiError('invalid_response', 'Gemini returned a recipe Mise cannot safely save.');
   return result;
@@ -343,6 +446,20 @@ export async function fileToGeminiMedia(file: File): Promise<AiMedia> {
     throw new GeminiError('file_size', 'Choose an image or a short video under 1 MB.');
   if (!(MEDIA_TYPES as readonly string[]).includes(file.type))
     throw new GeminiError('file_type', 'Use a JPG, PNG, WebP image, or an MP4/WebM video.');
+  return readMediaFile(file, file.type);
+}
+
+export async function fileToBodyScanMedia(file: File): Promise<AiMedia> {
+  if (file.size === 0 || file.size > MAX_BODY_SCAN_BYTES)
+    throw new GeminiError('file_size', 'Choose a body scan file up to 4 MB.');
+  const mimeType =
+    !file.type && file.name.toLowerCase().endsWith('.pdf') ? 'application/pdf' : file.type;
+  if (!(BODY_SCAN_MEDIA_TYPES as readonly string[]).includes(mimeType))
+    throw new GeminiError('file_type', 'Use a PDF, JPG, PNG or WebP body scan.');
+  return readMediaFile(file, mimeType);
+}
+
+async function readMediaFile(file: File, mimeType: string): Promise<AiMedia> {
   const data = await new Promise<string>((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = () => {
@@ -354,7 +471,7 @@ export async function fileToGeminiMedia(file: File): Promise<AiMedia> {
     reader.onabort = () => reject(new GeminiError('cancelled', 'File reading cancelled.'));
     reader.readAsDataURL(file);
   });
-  return { mimeType: file.type, data };
+  return { mimeType, data };
 }
 
 /** Import embedded Recipe JSON-LD without making a Gemini generation request. */

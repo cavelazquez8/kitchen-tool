@@ -5,6 +5,7 @@ import {
   type NutritionTargets,
   type RecipeNutritionMapping,
 } from '../nutrition/types';
+import { isBodyScanCollection, type BodyScan } from '../profile/types';
 export type StorageLocation = 'fridge' | 'freezer' | 'pantry';
 export type StapleStatus = 'stocked' | 'low' | 'empty';
 
@@ -64,6 +65,7 @@ export interface InventoryState {
   chatHistory?: ChatMessage[];
   nutritionTargets?: NutritionTargets;
   recipeNutrition?: (RecipeNutritionMapping & { recipeId: string })[];
+  bodyScans?: BodyScan[];
 }
 
 export interface InventoryGroup {
@@ -236,6 +238,7 @@ export function isInventoryState(value: unknown): value is InventoryState {
     return false;
   if (value.nutritionTargets !== undefined && !isNutritionTargets(value.nutritionTargets))
     return false;
+  if (value.bodyScans !== undefined && !isBodyScanCollection(value.bodyScans)) return false;
   if (
     value.recipeNutrition !== undefined &&
     (!Array.isArray(value.recipeNutrition) ||

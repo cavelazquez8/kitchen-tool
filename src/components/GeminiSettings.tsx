@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Sparkles } from 'lucide-react';
+import { ALLOWED_MODELS, isGeminiModel } from '../ai/protocol';
+import { Choice } from './Choice';
 import {
   generateGeminiAccessToken,
   checkGeminiConnection,
@@ -158,6 +160,36 @@ export function GeminiSettings({ onToast }: { onToast: (message: string) => void
         Connection credentials stay on this device and are excluded from backups. Free-tier requests
         may be used by Google for product improvement.
       </p>
+      <div className="gemini-model-setting">
+        <h4>Gemini model</h4>
+        <Choice
+          label="Gemini model"
+          value={draft.model ?? ''}
+          options={[
+            { value: '', label: 'Worker default' },
+            ...ALLOWED_MODELS.map((model) => ({
+              value: model,
+              label:
+                model === 'gemini-3.5-flash-lite'
+                  ? 'Gemini 3.5 Flash-Lite · Recommended'
+                  : model === 'gemini-3.1-flash-lite'
+                    ? 'Gemini 3.1 Flash-Lite'
+                    : 'Gemini 3.8 Flash',
+            })),
+          ]}
+          onChange={(model) => {
+            if (busy) return;
+            const next = { ...draft };
+            if (isGeminiModel(model)) next.model = model;
+            else delete next.model;
+            updateDraft(next);
+          }}
+        />
+        <p className="settings-note">
+          Save below to use this model for messages and document reading. These models offer a free
+          API tier with usage limits. Model switching needs the latest Worker code above.
+        </p>
+      </div>
       <div className="hub-actions">
         <button
           className="button primary"
