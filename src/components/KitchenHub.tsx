@@ -18,6 +18,11 @@ import { formatQuantity } from '../domain/inventory';
 import { matchRecipe, buildShoppingList } from '../recipes/matching';
 import { canPersistProviderRecipe } from '../recipes/providers';
 import { isRecipe, type Recipe } from '../recipes/types';
+import { loadLocalRecipes } from '../recipes/localLibrary';
+import { recommendRecipes } from '../recipes/recommendations';
+import { reviewedRecipeEstimate } from '../nutrition/recipeEstimate';
+import { recipeNutritionKey } from '../nutrition/estimate';
+import { parseChatRequest, type AiRecipeCandidate } from '../ai/protocol';
 import {
   normalizeAiRecipe,
   boundedChatHistory,
@@ -39,8 +44,12 @@ import { Autocomplete } from './Autocomplete';
 import { RecipeEditor } from './RecipeEditor';
 import { FinishCooking } from './FinishCooking';
 import { RecipeBrowser } from './RecipeBrowser';
+import { RecipeDiscovery } from './RecipeDiscovery';
+import { NutritionTargetsEditor } from './NutritionTargetsEditor';
+import { RecipeNutrition } from './RecipeNutrition';
 import './recipeProviders.css';
 import './kitchenPolish.css';
+import './recipeGuidance.css';
 
 export type HubPage = 'recipes' | 'shopping' | 'assistant';
 interface Props {
@@ -168,6 +177,11 @@ export function KitchenHub({
   const [message, setMessage] = useState('');
   const [candidates, setCandidates] = useState<Recipe[]>([]);
   const [chatRecipes, setChatRecipes] = useState<Recipe[]>([]);
+  const [library, setLibrary] = useState<Recipe[]>([]);
+  const [libraryLoading, setLibraryLoading] = useState(true);
+  const [libraryError, setLibraryError] = useState('');
+  const [grounded, setGrounded] = useState(true);
+  const [nutritionOpen, setNutritionOpen] = useState(false);
   const [clearShoppingOpen, setClearShoppingOpen] = useState(false);
   const [clearingShopping, setClearingShopping] = useState(false);
   const [clearShoppingError, setClearShoppingError] = useState('');
@@ -194,6 +208,26 @@ export function KitchenHub({
         : inventory,
     [inventory, useSelection, selectedBatchIds],
   );
+  useEffect(() => {
+    let active = true;
+    void loadLocalRecipes()
+      .then((recipes) => {
+        if (active) {
+          setLibrary(recipes);
+          setLibraryError('');
+        }
+      })
+      .catch(() => {
+        if (active)
+          setLibraryError('The cookbook could not load. Saved recipes are still available.');
+      })
+      .finally(() => {
+        if (active) setLibraryLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
   useEffect(() => {
     if (!Object.keys(timers).length) return;
     const timer = window.setInterval(() => setNow(Date.now()), 1000);
@@ -350,6 +384,82 @@ export function KitchenHub({
     setError('');
     const user = { id: crypto.randomUUID(), role: 'user' as const, text: prompt.trim() };
     try {
+      const availableLibrary =
+        grounded && !chatRecipes.length && libraryLoading ? await loadLocalRecipes() : library;
+      const retrieved =
+        grounded && !chatRecipes.length
+          ? recommendRecipes(
+              [...saved, ...availableLibrary].filter(canPersistProviderRecipe),
+              relevant,
+              {
+                query: `${history
+                  .filter((item) => item.role === 'user')
+                  .slice(-2)
+                  .map((item) => item.text)
+                  .join(' ')} ${prompt}`,
+                limit: 12,
+                fallbackToStarters: true,
+              },
+            )
+          : [];
+      const sourceRecipes = retrieved;
+      const recipeCandidates: AiRecipeCandidate[] = [];
+      for (const recipe of sourceRecipes) {
+        if (recipe.ingredients.length > 60) continue;
+        const match = matchRecipe(recipe, relevant);
+        const mapping = inventory.recipeNutrition?.find((item) => item.recipeId === recipe.id);
+        const nutrition = reviewedRecipeEstimate(recipe, mapping);
+        const candidate: AiRecipeCandidate = {
+          id: recipe.id,
+          title: recipe.title,
+          servings: recipe.servings,
+          ingredients: recipe.ingredients.map((item) =>
+            (item.original ?? `${item.quantity ?? 'Unspecified'} ${item.unit} ${item.name}`).slice(
+              0,
+              400,
+            ),
+          ),
+          missingIngredients: match.ingredients
+            .filter((item) => item.status !== 'available')
+            .map(
+              (item) =>
+                `${item.ingredient.name}${item.status === 'check' ? ' (check amount)' : ''}`,
+            ),
+          source: (recipe.source.name ?? sourceLabels[recipe.source.type]).slice(0, 300),
+          ...(nutrition?.perServing
+            ? { nutrition: { perServing: nutrition.perServing, complete: nutrition.complete } }
+            : {}),
+        };
+        if (
+          parseChatRequest({
+            message: 'Recipe recommendation',
+            inventory: '',
+            candidates: [candidate],
+          }) &&
+          JSON.stringify([...recipeCandidates, candidate]).length <= 24000
+        )
+          recipeCandidates.push(candidate);
+      }
+      if (grounded && !chatRecipes.length && !recipeCandidates.length) {
+        throw new Error(
+          libraryLoading
+            ? 'The cookbook is still opening. Try again in a moment.'
+            : 'No cookbook recipes are available for this request. Try a simpler description, browse recipes, or choose Create with my inventory.',
+        );
+      }
+      let attachedContext = chatRecipes.map(recipeContext).join('\n\n');
+      if (attachedContext.length > 12000)
+        throw new Error(
+          'Remove a recipe from Gemini context before sending these recipes together.',
+        );
+      for (const recipe of chatRecipes) {
+        const estimate = reviewedRecipeEstimate(
+          recipe,
+          inventory.recipeNutrition?.find((item) => item.recipeId === recipe.id),
+        );
+        const note = `\n${recipe.title} · Reviewed nutrition: ${JSON.stringify(estimate ? { perServing: estimate.perServing, complete: estimate.complete } : { recorded: false })}`;
+        if (attachedContext.length + note.length <= 12000) attachedContext += note;
+      }
       await mutate((state) => ({
         ...state,
         chatHistory: [...(state.chatHistory ?? []), user].slice(-80),
@@ -358,7 +468,9 @@ export function KitchenHub({
       const reply = await sendGeminiChat(connection, {
         message: prompt.trim(),
         inventory: boundedInventoryContext(generateMarkdown(relevant, { includeTools: true })),
-        ...(chatRecipes.length ? { recipe: chatRecipes.map(recipeContext).join('\n\n') } : {}),
+        ...(attachedContext ? { recipe: attachedContext } : {}),
+        ...(recipeCandidates.length ? { candidates: recipeCandidates } : {}),
+        ...(inventory.nutritionTargets ? { nutritionTargets: inventory.nutritionTargets } : {}),
         history: boundedChatHistory(history),
       });
       const assistant = {
@@ -375,6 +487,14 @@ export function KitchenHub({
         chatHistory: [...(state.chatHistory ?? []), assistant].slice(-80),
       }));
       reviewReply(reply);
+      if (reply.recommendedRecipeIds) {
+        setCandidates(
+          reply.recommendedRecipeIds.flatMap((id) => {
+            const recipe = sourceRecipes.find((item) => item.id === id);
+            return recipe ? [recipe] : [];
+          }),
+        );
+      }
       if (reply.warnings.length) setError(reply.warnings.join(' '));
     } catch (e) {
       setError(
@@ -493,6 +613,20 @@ export function KitchenHub({
     <div className="kitchen-hub">
       {page === 'recipes' && (
         <>
+          <RecipeDiscovery
+            recipes={library}
+            inventory={relevant}
+            loading={libraryLoading}
+            error={libraryError}
+            onOpen={(recipe) => {
+              setDetail(recipe);
+              setDetailServings(recipe.servings ? String(recipe.servings) : '');
+            }}
+            onChoose={() => {
+              setGrounded(true);
+              onNavigate('assistant');
+            }}
+          />
           <RecipeBrowser
             inventory={inventory}
             relevant={relevant}
@@ -782,16 +916,20 @@ export function KitchenHub({
           <div className="assistant-intro">
             <Sparkles size={28} />
             <h2>What would you like to cook?</h2>
-            <p>
-              Gemini can use your inventory and kitchen tools, then answer questions as you cook.
-            </p>
+            <p>Choose an established recipe, see what to buy, and ask questions as you cook.</p>
           </div>
           <div className="hub-actions prompt-actions">
             {[
-              'Make something with what I have',
-              'Suggest meals using ingredients expiring soon',
-              'Help me plan three meals',
-            ].map((prompt) => (
+              {
+                label: 'Help me choose dinner',
+                prompt: 'Help me choose a familiar dinner. Ask me a question if you need to.',
+              },
+              {
+                label: 'Use ingredients expiring soon',
+                prompt: 'Find cookbook meals that use ingredients expiring soon',
+              },
+              { label: 'Plan three meals', prompt: 'Help me choose three meals to prep' },
+            ].map(({ label, prompt }) => (
               <button
                 className="button secondary"
                 key={prompt}
@@ -800,10 +938,54 @@ export function KitchenHub({
                   void ask(prompt);
                 }}
               >
-                {prompt}
+                {label}
               </button>
             ))}
           </div>
+          <div className="guided-options">
+            <label>
+              <input
+                type="radio"
+                name="recipe-guidance-mode"
+                checked={grounded}
+                onChange={() => setGrounded(true)}
+              />{' '}
+              Choose from the cookbook
+            </label>
+            <label>
+              <input
+                type="radio"
+                name="recipe-guidance-mode"
+                checked={!grounded}
+                onChange={() => setGrounded(false)}
+              />{' '}
+              Create with my inventory
+            </label>
+            <button className="text-button" onClick={() => setNutritionOpen(true)}>
+              {inventory.nutritionTargets ? 'Edit nutrition targets' : 'Add nutrition targets'}
+            </button>
+          </div>
+          {inventory.nutritionTargets && (
+            <p className="nutrition-summary">
+              Daily targets ·{' '}
+              {[
+                inventory.nutritionTargets.caloriesKcal !== null
+                  ? `${inventory.nutritionTargets.caloriesKcal} kcal`
+                  : '',
+                inventory.nutritionTargets.proteinGrams !== null
+                  ? `${inventory.nutritionTargets.proteinGrams} g protein`
+                  : '',
+                inventory.nutritionTargets.carbsGrams !== null
+                  ? `${inventory.nutritionTargets.carbsGrams} g carbs`
+                  : '',
+                inventory.nutritionTargets.fatGrams !== null
+                  ? `${inventory.nutritionTargets.fatGrams} g fat`
+                  : '',
+              ]
+                .filter(Boolean)
+                .join(' · ') || 'No values entered'}
+            </p>
+          )}
           <div className="hub-preferences">
             {selectedBatchIds.length > 0 && (
               <label>
@@ -869,7 +1051,9 @@ export function KitchenHub({
             ))}
             {aiBusy && (
               <p role="status" className="settings-note">
-                Gemini is thinking…
+                {libraryLoading && grounded && !chatRecipes.length
+                  ? 'Opening the cookbook…'
+                  : 'Gemini is thinking…'}
               </p>
             )}
             <div ref={endRef} />
@@ -886,7 +1070,10 @@ export function KitchenHub({
                     setDetail(recipe);
                     setDetailServings(recipe.servings ? String(recipe.servings) : '');
                   }}
-                  onSave={() => openEditor(recipe)}
+                  onSave={() => {
+                    if (recipe.source.type === 'ai') openEditor(recipe);
+                    else void saveRecipe(recipe).catch(() => {});
+                  }}
                 />
               ))}
             </div>
@@ -914,6 +1101,13 @@ export function KitchenHub({
             <p className="settings-note">
               Connect your free Gemini backend in Settings. Copy for Gemini on the inventory screen
               remains available.
+            </p>
+          )}
+          {grounded && !chatRecipes.length && (
+            <p className="field-note">
+              Mise searches the cookbook on your device and sends Gemini a shortlist.
+              Recommendations keep the source recipe intact; you can buy what’s missing. Nutrition
+              is used only when it has been reviewed.
             </p>
           )}
         </section>
@@ -1030,6 +1224,39 @@ export function KitchenHub({
               ))}
             </ul>
             <h3>Let’s cook</h3>
+            <RecipeNutrition
+              key={detail.id + recipeNutritionKey(detail)}
+              recipe={detail}
+              mapping={inventory.recipeNutrition?.find((item) => item.recipeId === detail.id)}
+              onSave={async (mapping) => {
+                await mutate(
+                  (state) => ({
+                    ...state,
+                    recipeNutrition: [
+                      ...(state.recipeNutrition ?? []).filter(
+                        (item) => item.recipeId !== detail.id,
+                      ),
+                      { recipeId: detail.id, ...mapping },
+                    ],
+                  }),
+                  'Nutrition estimate saved.',
+                );
+              }}
+              onConfigure={onConfigure}
+            />
+            <button
+              className="text-button"
+              onClick={() => {
+                if (!addToGemini(detail)) return;
+                setMessage(
+                  'Help me choose servings of this recipe using my reviewed nutrition targets and recipe nutrition. Ask what share of my daily targets I want for this meal if needed. Keep the original recipe intact and tell me if information is missing.',
+                );
+                setDetail(null);
+                onNavigate('assistant');
+              }}
+            >
+              <Sparkles size={16} /> Ask Gemini about portions
+            </button>
             <label className="hub-preferences">
               <input type="checkbox" checked={awake} onChange={(e) => setAwake(e.target.checked)} />
               Keep screen awake while cooking
@@ -1147,6 +1374,19 @@ export function KitchenHub({
           </>
         )}
       </Modal>
+      {nutritionOpen && (
+        <NutritionTargetsEditor
+          targets={inventory.nutritionTargets}
+          onClose={() => setNutritionOpen(false)}
+          onConfigure={onConfigure}
+          onSave={async (nutritionTargets) => {
+            await mutate(
+              (state) => ({ ...state, nutritionTargets }),
+              'Daily nutrition targets saved.',
+            );
+          }}
+        />
+      )}
       <Modal
         open={!!recipeToDelete}
         onClose={() => {

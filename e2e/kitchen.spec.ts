@@ -887,7 +887,12 @@ test('retains Gemini setup after failed checks, returning from chat and reload, 
     return route.fulfill({
       status: 200,
       contentType: 'application/json',
-      body: JSON.stringify({ message: 'Ready to help with dinner.', recipes: [], warnings: [] }),
+      body: JSON.stringify({
+        message: 'Ready to help with dinner.',
+        recipes: [],
+        warnings: [],
+        recommendedRecipeIds: [],
+      }),
     });
   });
   await page.getByRole('button', { name: 'Local only', exact: true }).click();
@@ -1024,6 +1029,7 @@ test('uses mocked Gemini recipes, keeps follow-up context, bounds history, and e
   await navigate(page, 'Gemini');
   const message = page.getByRole('textbox', { name: 'Message Gemini', exact: true });
   const ask = page.getByRole('button', { name: 'Ask Gemini', exact: true });
+  await page.getByRole('radio', { name: 'Create with my inventory', exact: true }).check();
   await message.fill('Make me a familiar chicken recipe.');
   await ask.click();
   const card = page
