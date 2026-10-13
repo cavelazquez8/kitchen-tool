@@ -1,6 +1,7 @@
 import { readFile } from 'node:fs/promises';
 import { expect, test, type Page } from '@playwright/test';
 import type { Recipe } from '../src/recipes/types';
+import { recipeNutritionKey } from '../src/nutrition/estimate';
 
 const key = 'kitchen-wrapper.inventory.v1';
 const backend = 'https://mise.example.workers.dev';
@@ -40,6 +41,68 @@ test.beforeEach(async ({ page }) => {
   await page.goto('/');
 });
 
+test('shows reviewed whole-recipe nutrition when the source yield is missing', async ({ page }) => {
+  const recipe: Recipe = {
+    id: 'imported:nutrition-display-fixture',
+    title: 'Synthetic nutrition display fixture',
+    servings: null,
+    ingredients: [{ name: 'Carrots', quantity: 180, unit: 'g' }],
+    steps: ['Synthetic fixture only.'],
+    source: { type: 'imported' },
+  };
+  await page.addInitScript(
+    ({ key, recipe, recipeKey }) => {
+      const state = {
+        products: [],
+        batches: [],
+        tools: [],
+        recipes: [recipe],
+        recipeNutrition: [
+          {
+            recipeId: recipe.id,
+            recipeKey,
+            ingredients: [
+              {
+                ingredientIndex: 0,
+                grams: 180,
+                confirmed: true,
+                food: {
+                  fdcId: 123,
+                  description: 'Synthetic fixture carrots',
+                  dataType: 'Foundation',
+                  sourceUrl: 'https://fdc.nal.usda.gov/food-details/123/nutrients',
+                  per100g: { caloriesKcal: 40, proteinGrams: 1, carbsGrams: 9, fatGrams: 0 },
+                  portions: [],
+                },
+              },
+            ],
+          },
+        ],
+      };
+      localStorage.setItem(key, JSON.stringify({ schemaVersion: 1, state }));
+    },
+    { key, recipe, recipeKey: recipeNutritionKey(recipe) },
+  );
+  await page.reload();
+  await recipesPage(page);
+  await page.getByRole('button', { name: 'Imported recipes', exact: true }).click();
+  await page
+    .locator('.recipe-card')
+    .filter({ hasText: recipe.title })
+    .getByRole('button', { name: 'View recipe', exact: true })
+    .click();
+  const panel = page.getByRole('region', { name: 'Recipe nutrition' });
+  await expect(panel.getByText('72 kcal', { exact: true })).toBeVisible();
+  await expect(panel.getByText('1.8 g', { exact: true })).toBeVisible();
+  await expect(panel.getByRole('button', { name: 'Per serving', exact: true })).toBeDisabled();
+  await expect(panel).toContainText('All nutrients available');
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(
+    true,
+  );
+  if (['cover', 'unfolded'].includes(test.info().project.name))
+    await panel.screenshot({ path: `/tmp/mise-nutrition-totals-${test.info().project.name}.png` });
+});
+
 test('shuffles everyday dishes and the whole cookbook without changing kitchen data', async ({
   page,
 }) => {
@@ -75,7 +138,7 @@ test('shuffles everyday dishes and the whole cookbook without changing kitchen d
     await page.screenshot({ path: '/tmp/mise-shuffle-cover.png', fullPage: true });
 });
 
-test('verifies USDA through one live lookup and leaves nutrition matches unconfirmed', async ({
+test('reviews real ingredients through USDA without diagnostic tests or auto-confirming foods', async ({
   page,
 }) => {
   let searches = 0;
@@ -84,10 +147,10 @@ test('verifies USDA through one live lookup and leaves nutrition matches unconfi
   );
   await page.route(`${backend}/nutrition/search`, (route) => {
     searches++;
-    expect(route.request().postDataJSON()).toEqual({ query: 'Carrots' });
+    expect(route.request().postDataJSON().query).toBeTruthy();
     return route.fulfill({
       json: {
-        query: 'Carrots',
+        query: route.request().postDataJSON().query,
         rejectedCount: 0,
         foods: [
           {
@@ -113,17 +176,17 @@ test('verifies USDA through one live lookup and leaves nutrition matches unconfi
   });
   const nutrition = detail.getByRole('region', { name: 'Recipe nutrition' });
   await nutrition.getByRole('button', { name: 'Estimate with USDA' }).click();
-  await expect(nutrition).toContainText('USDA key configured. Live access has not been verified.');
   expect(searches).toBe(0);
-  await nutrition.getByRole('button', { name: 'Test USDA lookup' }).click();
-  await expect(nutrition).toContainText('Live USDA access verified.');
-  await expect(nutrition).toContainText('1 food returned for “Carrots”');
+  await expect(nutrition.getByRole('button', { name: 'Test USDA lookup' })).toHaveCount(0);
+  await nutrition.getByRole('button', { name: 'Match food', exact: true }).first().click();
+  await nutrition.getByRole('button', { name: 'Search USDA', exact: true }).click();
+  await expect(nutrition.getByRole('button', { name: /Synthetic fixture carrots/ })).toBeVisible();
   expect(searches).toBe(1);
   const state = await page.evaluate((key) => JSON.parse(localStorage.getItem(key)!).state, key);
   expect(state.recipeNutrition).toBeUndefined();
   expect(state.recipes).toBeUndefined();
   await expect(nutrition).toContainText(
-    `0 of ${fixtures.find((recipe) => recipe.id === 'wikibooks:202116')!.ingredients.length} ingredients reviewed`,
+    'Match ingredients to USDA foods to see calories and macros.',
   );
   if (test.info().project.name === 'cover')
     await page.screenshot({ path: '/tmp/mise-usda-verified-cover.png' });

@@ -1,0 +1,80 @@
+.recipe-nutrition .nutrition-heading {
+  align-items: flex-start;
+  gap: 12px;
+}
+.nutrition-heading h3 {
+  margin-bottom: 4px;
+}
+.nutrition-heading p {
+  margin: 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+.nutrition-basis {
+  display: flex;
+  padding: 4px;
+  gap: 4px;
+  margin: 18px 0 14px;
+  border-radius: 12px;
+  background: #ffffff05;
+  border: 1px solid var(--line);
+}
+.nutrition-basis button {
+  flex: 1;
+  border: 0;
+  padding: 11px 8px;
+  min-height: 44px;
+  color: var(--muted);
+  background: transparent;
+  border-radius: 9px;
+  font: inherit;
+  font-size: 12px;
+}
+.nutrition-basis button[aria-pressed='true'] {
+  color: #e1ece6;
+  background: #ffffff0e;
+  box-shadow: 0 1px 5px #0002;
+}
+.nutrition-basis button:disabled {
+  opacity: 0.4;
+}
+.recipe-nutrition .nutrition-macros {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+.recipe-nutrition .nutrition-macros > span {
+  background: #ffffff04;
+  padding: 12px 8px;
+  border-radius: 10px;
+}
+.recipe-nutrition .nutrition-macros strong {
+  font-size: 17px;
+  white-space: nowrap;
+}
+.recipe-nutrition .nutrition-macros small {
+  font-size: 10px;
+  line-height: 1.4;
+}
+.nutrition-progress {
+  color: #a7cbb7;
+  font-size: 12px;
+  line-height: 1.6;
+}
+.gemini-model-setting {
+  margin: 20px 0;
+}
+.gemini-model-setting h4 {
+  margin-bottom: 10px;
+}
+.gemini-model-setting .choice-button {
+  width: 100%;
+}
+@media (max-width: 450px) {
+  .recipe-nutrition .nutrition-heading {
+    flex-direction: column;
+  }
+  .recipe-nutrition .nutrition-macros {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}

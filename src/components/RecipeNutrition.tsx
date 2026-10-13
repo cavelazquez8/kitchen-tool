@@ -1,12 +1,13 @@
 import { useEffect, useRef, useState } from 'react';
 import { convertQuantity } from '../domain/inventory';
 import { readGeminiConnection } from '../ai/client';
-import { getNutritionFood, nutritionStatus, searchNutritionFoods } from '../nutrition/client';
+import { getNutritionFood, searchNutritionFoods } from '../nutrition/client';
 import { recipeNutritionKey } from '../nutrition/estimate';
 import { reviewedRecipeEstimate } from '../nutrition/recipeEstimate';
 import type { FoodNutrition, RecipeNutritionMapping } from '../nutrition/types';
 import type { Recipe } from '../recipes/types';
 import { Choice } from './Choice';
+import './nutritionPresentation.css';
 
 function sourceGrams(recipe: Recipe, index: number) {
   const ingredient = recipe.ingredients[index];
@@ -23,11 +24,13 @@ export function RecipeNutrition({
   mapping,
   onSave,
   onConfigure,
+  onEditRecipe,
 }: {
   recipe: Recipe;
   mapping?: RecipeNutritionMapping;
   onSave: (mapping: RecipeNutritionMapping) => Promise<void>;
   onConfigure: () => void;
+  onEditRecipe?: () => void;
 }) {
   const currentKey = recipeNutritionKey(recipe);
   const [draft, setDraft] = useState<RecipeNutritionMapping>(() =>
@@ -36,9 +39,7 @@ export function RecipeNutrition({
       : { recipeKey: currentKey, ingredients: [] },
   );
   const [open, setOpen] = useState(false);
-  const [configured, setConfigured] = useState<boolean | null>(null);
-  const [liveLookup, setLiveLookup] = useState<'untested' | 'verified' | 'failed'>('untested');
-  const [testNotice, setTestNotice] = useState('');
+  const [basis, setBasis] = useState<'recipe' | 'serving'>(recipe.servings ? 'serving' : 'recipe');
   const [active, setActive] = useState<number | null>(null);
   const [query, setQuery] = useState('');
   const [foods, setFoods] = useState<FoodNutrition[]>([]);
@@ -57,59 +58,6 @@ export function RecipeNutrition({
     [],
   );
   const estimate = reviewedRecipeEstimate(recipe, draft);
-  async function begin() {
-    setOpen((value) => !value);
-    if (open || configured !== null) return;
-    const connection = readGeminiConnection();
-    if (!connection) return;
-    const id = ++attempt.current;
-    controller.current?.abort();
-    controller.current = new AbortController();
-    try {
-      const result = await nutritionStatus(connection, controller.current.signal);
-      if (id === attempt.current) setConfigured(result.configured);
-    } catch (e) {
-      if (id === attempt.current)
-        setError(e instanceof Error ? e.message : 'Could not check nutrition lookup.');
-    }
-  }
-  async function testLookup() {
-    const connection = readGeminiConnection();
-    if (!connection) {
-      onConfigure();
-      return;
-    }
-    const id = ++attempt.current;
-    controller.current?.abort();
-    controller.current = new AbortController();
-    setBusy(true);
-    setError('');
-    setTestNotice('');
-    try {
-      const status = await nutritionStatus(connection, controller.current.signal);
-      if (id !== attempt.current) return;
-      setConfigured(status.configured);
-      if (!status.configured) {
-        setLiveLookup('untested');
-        return;
-      }
-      const result = await searchNutritionFoods(connection, 'Carrots', controller.current.signal);
-      if (id !== attempt.current) return;
-      setLiveLookup('verified');
-      setTestNotice(
-        result.foods.length
-          ? `USDA lookup verified: ${result.foods.length} food${result.foods.length === 1 ? '' : 's'} returned for “Carrots”.`
-          : 'USDA lookup verified: USDA responded, but no foods matched “Carrots”.',
-      );
-    } catch (e) {
-      if (id === attempt.current) {
-        setLiveLookup('failed');
-        setError(e instanceof Error ? e.message : 'Could not verify live USDA access.');
-      }
-    } finally {
-      if (id === attempt.current) setBusy(false);
-    }
-  }
   function edit(index: number) {
     attempt.current++;
     controller.current?.abort();
@@ -140,18 +88,12 @@ export function RecipeNutrition({
         const food = await getNutritionFood(connection, foodId, controller.current.signal);
         if (id === attempt.current) {
           setChosen(food);
-          setConfigured(true);
-          setLiveLookup('verified');
-          setTestNotice('');
         }
       } else {
         const result = await searchNutritionFoods(connection, query, controller.current.signal);
         if (id === attempt.current) {
           setFoods(result.foods);
           setChosen(null);
-          setConfigured(true);
-          setLiveLookup('verified');
-          setTestNotice('');
           setNotice(
             result.foods.length
               ? 'Choose the food and preparation that match your recipe.'
@@ -161,8 +103,6 @@ export function RecipeNutrition({
       }
     } catch (e) {
       if (id === attempt.current) {
-        setLiveLookup('failed');
-        setTestNotice('');
         setError(e instanceof Error ? e.message : 'Food lookup failed.');
       }
     } finally {
@@ -204,42 +144,98 @@ export function RecipeNutrition({
   }
   return (
     <section className="recipe-nutrition" aria-label="Recipe nutrition">
-      <div className="hub-section-title">
-        <h3>Nutrition</h3>
-        <button className="text-button" onClick={() => void begin()}>
+      <div className="hub-section-title nutrition-heading">
+        <div>
+          <h3>Nutrition</h3>
+          <p>From foods and amounts you’ve reviewed</p>
+        </div>
+        <button className="text-button" onClick={() => setOpen((value) => !value)}>
           {open
             ? 'Close nutrition review'
-            : estimate?.complete
-              ? 'Review food matches'
+            : estimate?.mappedIngredientCount
+              ? 'Review ingredients'
               : 'Estimate with USDA'}
         </button>
       </div>
-      {estimate && (
-        <div className="nutrition-macros">
-          {(
-            [
-              ['caloriesKcal', 'Calories', 'kcal'],
-              ['proteinGrams', 'Protein', 'g'],
-              ['carbsGrams', 'Carbs', 'g'],
-              ['fatGrams', 'Fat', 'g'],
-            ] as const
-          ).map(([key, label, unit]) => (
+      <div className="nutrition-basis" role="group" aria-label="Nutrition amounts">
+        <button type="button" aria-pressed={basis === 'recipe'} onClick={() => setBasis('recipe')}>
+          Whole recipe
+        </button>
+        <button
+          type="button"
+          aria-pressed={basis === 'serving'}
+          disabled={!recipe.servings}
+          onClick={() => setBasis('serving')}
+        >
+          Per serving{recipe.servings ? ` · ${recipe.servings} in recipe` : ''}
+        </button>
+      </div>
+      <div
+        className="nutrition-macros"
+        aria-label={basis === 'serving' ? 'Nutrition per serving' : 'Whole recipe nutrition'}
+      >
+        {(
+          [
+            ['caloriesKcal', 'Calories', 'kcal'],
+            ['proteinGrams', 'Protein', 'g'],
+            ['carbsGrams', 'Carbs', 'g'],
+            ['fatGrams', 'Fat', 'g'],
+          ] as const
+        ).map(([key, label, unit]) => {
+          const completeValue =
+            basis === 'serving' ? estimate?.perServing?.[key] : estimate?.totals[key];
+          const subtotal = estimate?.knownSubtotal[key];
+          const partial = completeValue == null && subtotal != null;
+          const value =
+            completeValue ??
+            (subtotal == null
+              ? null
+              : basis === 'serving' && recipe.servings
+                ? subtotal / recipe.servings
+                : subtotal);
+          return (
             <span key={key}>
               {label}
-              <strong>
-                {estimate.perServing?.[key] !== null && estimate.perServing?.[key] !== undefined
-                  ? `${Math.round(estimate.perServing[key]!)} ${unit}`
-                  : '—'}
-              </strong>
+              <strong>{value == null ? '—' : `${Math.round(value * 10) / 10} ${unit}`}</strong>
+              <small>
+                {partial ? 'Partial estimate' : value == null ? 'Not recorded' : 'Estimated'}
+              </small>
             </span>
-          ))}
-        </div>
-      )}
-      <p className="field-note">
-        {estimate?.complete && estimate.perServing
-          ? 'Estimated per original recipe serving, using your reviewed USDA foods and edible weights.'
-          : `${estimate?.mappedIngredientCount ?? 0} of ${recipe.ingredients.length} ingredients reviewed. Complete nutrition needs every ingredient and a recorded serving yield.`}
+          );
+        })}
+      </div>
+      <p className="nutrition-progress" role="status">
+        {estimate?.mappedIngredientCount
+          ? `${estimate.mappedIngredientCount} of ${recipe.ingredients.length} ingredients reviewed${estimate.complete ? ' · All nutrients available' : ''}.`
+          : 'Match ingredients to USDA foods to see calories and macros.'}
       </p>
+      {!!estimate?.missingIngredientIndexes.length && !!estimate.mappedIngredientCount && (
+        <p className="field-note">
+          Partial values cover reviewed ingredients only. Review the remaining ingredients for the
+          full recipe.
+        </p>
+      )}
+      {!!estimate?.mappedIngredientCount &&
+        estimate.missingNutrients.length > 0 &&
+        estimate.missingIngredientIndexes.length === 0 && (
+          <p className="field-note">
+            Some selected foods don’t report every nutrient. Partial values exclude that missing
+            data; choose another USDA match to fill the gaps.
+          </p>
+        )}
+      {!recipe.servings && (
+        <p className="field-note">
+          Whole-recipe amounts are shown because the serving count hasn’t been recorded.
+          {onEditRecipe && (
+            <>
+              {' '}
+              <button className="text-button" onClick={onEditRecipe}>
+                Add serving count
+              </button>
+            </>
+          )}
+        </p>
+      )}
       {mapping && mapping.recipeKey !== currentKey && (
         <p className="field-note">This recipe changed. Review the food matches again.</p>
       )}
@@ -249,41 +245,6 @@ export function RecipeNutrition({
             <button className="button secondary" onClick={onConfigure}>
               Connect nutrition lookup
             </button>
-          )}
-          {configured === true && (
-            <p className="field-note" role="status">
-              {liveLookup === 'verified'
-                ? 'Live USDA access verified.'
-                : liveLookup === 'failed'
-                  ? 'USDA key configured. The last live lookup failed.'
-                  : 'USDA key configured. Live access has not been verified.'}
-            </p>
-          )}
-          {configured === false && (
-            <p className="field-note">
-              Add the free USDA key as <code>USDA_API_KEY</code> in your Cloudflare Worker.{' '}
-              <a href="https://fdc.nal.usda.gov/api-key-signup/" target="_blank" rel="noreferrer">
-                Get a free key
-              </a>
-              . Your reviewed matches remain available locally.
-            </p>
-          )}
-          {readGeminiConnection() && (
-            <div className="hub-actions">
-              <button
-                className="button secondary"
-                disabled={busy}
-                onClick={() => void testLookup()}
-              >
-                Test USDA lookup
-              </button>
-              <small>Checks one food search. Your recipe stays unchanged.</small>
-            </div>
-          )}
-          {testNotice && (
-            <p className="field-note" role="status">
-              {testNotice}
-            </p>
           )}
           <p className="field-note">
             Choose the exact food, including raw or cooked, and confirm grams for the whole original
@@ -416,7 +377,7 @@ export function RecipeNutrition({
           )}
           {busy && (
             <p className="field-note" role="status">
-              Looking up nutrition…
+              Updating nutrition…
             </p>
           )}
           {error && (
@@ -424,7 +385,7 @@ export function RecipeNutrition({
               {error}
             </p>
           )}
-          <small>Food data: USDA FoodData Central · CC0. No guessed food weights.</small>
+          <small>Estimated from USDA FoodData Central. Cooking losses are not included.</small>
         </>
       )}
     </section>
