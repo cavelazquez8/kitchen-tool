@@ -105,6 +105,12 @@ test.beforeEach(async ({ page }) => {
   await page.route('https://www.themealdb.com/api/**', (route) =>
     route.fulfill({ json: { meals: null } }),
   );
+  await page.route(`${worker}/models**`, (route) =>
+    route.fulfill({
+      status: 404,
+      json: { error: { code: 'not_found', message: 'Older test Worker.' } },
+    }),
+  );
   await page.goto('/');
 });
 
@@ -333,7 +339,7 @@ test('saves the chosen Gemini model, verifies its backend setting, and uses it f
   const choices = page.getByRole('dialog', { name: 'Gemini model', exact: true });
   await choices.getByRole('option', { name: 'Gemini 3.1 Flash-Lite', exact: true }).click();
   await settings.getByRole('button', { name: 'Save & check connection', exact: true }).click();
-  await expect(settings.getByRole('status')).toContainText('Backend connected');
+  await expect(settings.getByRole('status').filter({ hasText: 'Backend connected' })).toBeVisible();
   expect(health).toEqual([`${worker}/health?model=gemini-3.1-flash-lite`]);
   expect(
     await page.evaluate((key) => JSON.parse(localStorage.getItem(key)!).model, connectionKey),

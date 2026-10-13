@@ -1,0 +1,135 @@
+.gemini-model-setting {
+  min-width: 0;
+}
+.model-picker-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.model-picker-heading h4 {
+  margin: 0;
+}
+.model-picker-heading .text-button {
+  min-height: 44px;
+}
+.model-discovery-note,
+.model-discovery-error {
+  font-size: 12px;
+  line-height: 1.65;
+  margin: 10px 0;
+  color: var(--muted);
+}
+.model-discovery-error {
+  color: #dfbf96;
+}
+.model-discovery {
+  margin-top: 18px;
+  border-top: 1px solid var(--line);
+  padding-top: 14px;
+}
+.model-discovery summary {
+  cursor: pointer;
+  min-height: 44px;
+  font-size: 13px;
+}
+.model-discovery summary span {
+  margin-left: 6px;
+  color: var(--muted);
+}
+.model-discovery > p,
+.model-review > p {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.7;
+}
+.model-discovery > input {
+  width: 100%;
+  min-height: 44px;
+  margin-bottom: 14px;
+}
+.discovered-models {
+  display: grid;
+  gap: 10px;
+}
+.discovered-model {
+  border: 1px solid var(--line);
+  padding: 16px;
+  border-radius: 12px;
+  min-width: 0;
+}
+.discovered-model > div {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  justify-content: space-between;
+}
+.discovered-model h5 {
+  margin: 0;
+  font-size: 14px;
+}
+.discovered-model > small {
+  display: block;
+  margin-top: 6px;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+  font-size: 11px;
+}
+.discovered-model p {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.6;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.discovered-model .button {
+  max-width: 100%;
+  white-space: normal;
+  text-align: left;
+}
+.model-tier {
+  font-size: 10px;
+  color: var(--muted);
+  border-radius: 6px;
+  background: #ffffff06;
+  padding: 4px 7px;
+}
+.model-tier.verified {
+  color: #b4d9a9;
+  background: #b9d1b20a;
+}
+.model-disabled-note {
+  font-size: 11px;
+  color: var(--muted);
+  line-height: 1.6;
+}
+.model-review {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+}
+.model-review p {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.model-review-check {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 14px;
+  min-height: 48px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  font-size: 13px;
+  line-height: 1.6;
+}
+.model-review-check input {
+  width: 18px;
+  height: 18px;
+  margin-top: 2px;
+  flex-shrink: 0;
+}

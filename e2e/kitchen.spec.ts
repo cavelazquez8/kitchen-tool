@@ -865,6 +865,11 @@ test('retains Gemini setup after failed checks, returning from chat and reload, 
   await page.route(`https://${hostname}/**`, (route) => {
     if (route.request().method() === 'OPTIONS') return route.fulfill({ status: 204 });
     const paired = route.request().headers().authorization === `Bearer ${correctToken}`;
+    if (new URL(route.request().url()).pathname === '/models')
+      return route.fulfill({
+        status: 404,
+        json: { error: { code: 'not_found', message: 'Older test Worker.' } },
+      });
     if (route.request().url().endsWith('/health')) {
       healthChecks++;
       return route.fulfill({
@@ -931,7 +936,7 @@ test('retains Gemini setup after failed checks, returning from chat and reload, 
   expect(backup).not.toContain(hostname);
   await token.fill(correctToken);
   await connect.click();
-  await expect(settings.getByRole('status')).toContainText('Backend connected');
+  await expect(settings.getByRole('status').filter({ hasText: 'Backend connected' })).toBeVisible();
   await expect(address).toHaveValue(`https://${hostname}`);
   expect(healthChecks).toBe(2);
   expect(
@@ -969,6 +974,11 @@ test('uses mocked Gemini recipes, keeps follow-up context, bounds history, and e
   };
   await page.route(`${backend}/**`, (route) => {
     if (route.request().method() === 'OPTIONS') return route.fulfill({ status: 204, headers });
+    if (new URL(route.request().url()).pathname === '/models')
+      return route.fulfill({
+        status: 404,
+        json: { error: { code: 'not_found', message: 'Older test Worker.' } },
+      });
     if (route.request().url().endsWith('/health')) {
       healthChecks++;
       return route.fulfill({

@@ -476,6 +476,7 @@ export function KitchenHub({
         ...(inventory.nutritionTargets ? { nutritionTargets: inventory.nutritionTargets } : {}),
         ...(profile ? { profile } : {}),
         ...(connection.model ? { model: connection.model } : {}),
+        ...(connection.modelReviewed ? { modelReviewed: true } : {}),
         history: boundedChatHistory(history),
       });
       if (!request)
