@@ -1,5 +1,5 @@
 import { isInventoryState, type InventoryState } from '../domain/types';
-import type { Recipe } from '../recipes/types';
+import { copyRecipeMetadata, type Recipe } from '../recipes/types';
 import { copyNutritionValues, copyRecipeNutritionMapping } from '../nutrition/types';
 import { copyBodyScan } from '../profile/types';
 
@@ -31,9 +31,7 @@ function copyRecipe(recipe: Recipe): Recipe {
       ...(recipe.source.license === undefined ? {} : { license: recipe.source.license }),
       ...(recipe.source.licenseUrl === undefined ? {} : { licenseUrl: recipe.source.licenseUrl }),
     },
-    ...(recipe.imageUrl === undefined ? {} : { imageUrl: recipe.imageUrl }),
-    ...(recipe.category === undefined ? {} : { category: recipe.category }),
-    ...(recipe.cuisine === undefined ? {} : { cuisine: recipe.cuisine }),
+    ...copyRecipeMetadata(recipe),
   };
 }
 
@@ -106,6 +104,19 @@ export function buildInventoryBackup(state: InventoryState): InventoryBackup {
             role: message.role,
             text: message.text,
           })),
+        }),
+    ...(state.assistantSession === undefined
+      ? {}
+      : {
+          assistantSession: {
+            recipes: state.assistantSession.recipes.map(copyRecipe),
+            attachedRecipes: state.assistantSession.attachedRecipes.map(copyRecipe),
+            draft: state.assistantSession.draft,
+            mode: state.assistantSession.mode,
+            ...(state.assistantSession.bodyScanIds
+              ? { bodyScanIds: [...state.assistantSession.bodyScanIds] }
+              : {}),
+          },
         }),
     ...(state.nutritionTargets === undefined
       ? {}

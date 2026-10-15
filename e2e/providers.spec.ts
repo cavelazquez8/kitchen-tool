@@ -23,6 +23,8 @@ async function navigate(page: Page, name: 'Recipes' | 'Inventory') {
   await page.getByRole('button', { name, exact: true }).filter({ visible: true }).first().click();
 }
 async function selectSource(page: Page, label: string) {
+  if (!(await page.getByRole('combobox', { name: 'Recipe source', exact: true }).isVisible()))
+    await page.getByText('Other recipe sources', { exact: true }).click();
   await page.getByRole('combobox', { name: 'Recipe source', exact: true }).click();
   await page.getByRole('option', { name: label, exact: true }).click();
 }
@@ -59,6 +61,12 @@ test.beforeEach(async ({ page }) => {
       status: 200,
       contentType: 'application/json',
       body: JSON.stringify({ meals: null }),
+    }),
+  );
+  await page.route('https://mise.example.workers.dev/models**', (route) =>
+    route.fulfill({
+      status: 404,
+      json: { error: { code: 'not_found', message: 'Older test Worker.' } },
     }),
   );
 });
@@ -126,9 +134,9 @@ test('saves a selected RecipeAPI recipe with attribution and loads another page'
     expect.objectContaining({ query: 'soup', page: 2 }),
   ]);
   await page.getByRole('button', { name: 'Saved recipes', exact: true }).click();
-  await expect(page.getByRole('combobox', { name: 'Recipe source', exact: true })).toHaveText(
-    'Your cookbook',
-  );
+  await expect(
+    page.getByRole('combobox', { name: 'Recipe source', exact: true, includeHidden: true }),
+  ).toHaveText('Your collection & community cookbook');
   await expect(page.locator('.kitchen-hub .recipe-grid .recipe-card')).toHaveCount(1);
   await expect(page.getByRole('heading', { name: 'Test-only carrot soup 1' })).toBeVisible();
 });
@@ -217,7 +225,7 @@ test('explains updating an older Worker without disturbing the saved Gemini conn
   await page.getByRole('button', { name: 'Local only', exact: true }).click();
   const settings = page.getByRole('dialog', { name: 'Your kitchen, your way' });
   await settings.getByRole('button', { name: 'Check recipe sources', exact: true }).click();
-  await expect(settings.getByRole('status')).toContainText('latest Worker');
+  await expect(settings.locator('.settings-note[role="status"]')).toContainText('latest Worker');
   await expect(settings.getByLabel('Backend address', { exact: true })).toHaveValue(
     'https://mise.example.workers.dev',
   );

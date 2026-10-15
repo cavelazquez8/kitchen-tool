@@ -52,6 +52,37 @@ describe('bounded AI context', () => {
     expect(result[11].text).toBe('turn 19');
     expect(history[20].text).toBe('  ');
   });
+  it('keeps publisher metadata and original source for imports and makes declared nutrition available to follow-ups', () => {
+    const publisherDraft: AiRecipeDraft = {
+      ...draft,
+      source: {
+        type: 'imported',
+        url: 'https://example.com/original',
+        name: 'Recipe publisher',
+        attribution: 'Ada Cook · Recipe publisher',
+      },
+      imageUrl: 'https://example.com/soup.jpg',
+      author: 'Ada Cook',
+      totalMinutes: 25,
+      publisherNutrition: { servingSize: '1 bowl', calories: '230 kcal', protein: '12 g' },
+    };
+    const imported = normalizeAiRecipe(publisherDraft, 'publisher:one', {
+      type: 'imported',
+      url: 'https://example.com/redirect',
+    });
+    expect(isRecipe(imported)).toBe(true);
+    expect(imported.source.url).toBe('https://example.com/original');
+    expect(imported.imageUrl).toBe(publisherDraft.imageUrl);
+    const context = recipeContext(imported);
+    expect(context).toContain('Original source URL: https://example.com/original');
+    expect(context).toContain('Total time: 25 minutes');
+    expect(context).toContain('230 kcal');
+    expect(context).toContain('1 bowl');
+    expect(context).toContain('do not assume a serving basis');
+    expect(
+      normalizeAiRecipe(publisherDraft, 'ai:one', { type: 'ai', name: 'Gemini' }).source.type,
+    ).toBe('ai');
+  });
 
   it('bounds long valid answers so the next question remains valid for the API', () => {
     const history: AiMessage[] = Array.from({ length: 12 }, (_, index) => ({

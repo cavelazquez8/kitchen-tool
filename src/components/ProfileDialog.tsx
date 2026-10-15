@@ -15,7 +15,13 @@ import {
   MAX_BODY_SCAN_TEXT_LENGTH,
   type BodyScan,
   type BodyScanFile,
+  type BodyScanReading,
 } from '../profile/types';
+import {
+  formatReportReadings,
+  hasReviewedReport,
+  readingsFromReportText,
+} from '../profile/readings';
 import { Modal } from './Modal';
 import { NutritionTargetsEditor } from './NutritionTargetsEditor';
 import './profile.css';
@@ -233,7 +239,9 @@ export function ProfileDialog({
                     </button>
                   </div>
                   <p className="profile-scan-preview">
-                    {scan.text.trim() ||
+                    {(scan.readings?.length
+                      ? formatReportReadings(scan.readings)
+                      : scan.text.trim()) ||
                       'Original saved. Read the report or add text before sending it to Gemini.'}
                   </p>
                   <div className="profile-card-actions">
@@ -247,7 +255,7 @@ export function ProfileDialog({
                     <button
                       className="button primary"
                       onClick={() => onAttach(scan.id)}
-                      disabled={busy || !scan.text.trim()}
+                      disabled={busy || !hasReviewedReport(scan)}
                     >
                       <Sparkles size={16} aria-hidden="true" />
                       {selectedScanIds.includes(scan.id) ? 'Open in Gemini' : 'Add to Gemini'}
@@ -330,6 +338,9 @@ function BodyScanEditor({
   const [file, setFile] = useState<File | null>(null);
   const [keepOriginal, setKeepOriginal] = useState(true);
   const [targets, setTargets] = useState<NutritionTargets | undefined>(scan?.targets);
+  const [readings, setReadings] = useState<BodyScanReading[]>(
+    () => scan?.readings ?? readingsFromReportText(scan?.text ?? ''),
+  );
   const [action, setAction] = useState<'reading' | 'saving' | 'file' | null>(null);
   const [error, setError] = useState('');
   const [warnings, setWarnings] = useState<string[]>([]);
@@ -353,6 +364,7 @@ function BodyScanEditor({
       setFile(new File([next], next.name, { type: mimeType, lastModified: next.lastModified }));
       setWarnings([]);
       setTargets(undefined);
+      setReadings([]);
       if (!name.trim()) setName(next.name.replace(/\.[^.]+$/, '').slice(0, 160));
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'Could not open this file.');
@@ -395,6 +407,7 @@ function BodyScanEditor({
       setText(result.text);
       if (result.recordedOn) setDate(result.recordedOn);
       setTargets(result.targets);
+      setReadings(result.readings ?? readingsFromReportText(result.text));
       setWarnings(result.warnings);
     } catch (reason) {
       if (!nextController.signal.aborted)
@@ -415,7 +428,14 @@ function BodyScanEditor({
       setError('Give this report a name.');
       return;
     }
-    if (!text.trim() && !file && !savedFile) {
+    const completeReadings = readings.filter(
+      (reading) => reading.label.trim() || reading.value.trim(),
+    );
+    if (completeReadings.some((reading) => !reading.label.trim() || !reading.value.trim())) {
+      setError('Give each report field a name and a value, or remove the unfinished field.');
+      return;
+    }
+    if (!text.trim() && !file && !savedFile && !completeReadings.length) {
       setError('Choose a file or add report text.');
       return;
     }
@@ -431,6 +451,15 @@ function BodyScanEditor({
         text: text.trim(),
         ...(original ? { file: original } : {}),
         ...(targets ? { targets } : {}),
+        ...(completeReadings.length
+          ? {
+              readings: completeReadings.map((reading) => ({
+                label: reading.label.trim(),
+                value: reading.value.trim(),
+                kind: reading.kind,
+              })),
+            }
+          : {}),
       };
       if (!isBodyScan(next))
         throw new Error('Check the report date and text, then try saving again.');
@@ -482,7 +511,7 @@ function BodyScanEditor({
         if (!busy) onClose();
       }}
       title={scan ? 'Your body scan' : 'Add a body scan'}
-      description="Save the original and review its text before adding it to Gemini."
+      description="Read your report into editable fields, then choose what to share with Gemini."
       className="profile-modal profile-editor-modal"
     >
       <form
@@ -571,8 +600,8 @@ function BodyScanEditor({
         </div>
         <div className="profile-read-section">
           <div>
-            <h3>Make the report readable</h3>
-            <p>Gemini can read PDFs and pictures. You can also paste the text below.</p>
+            <h3>Fill in your report</h3>
+            <p>Gemini reads your PDF or picture and fills in the fields for you to review.</p>
           </div>
           <button
             type="button"
@@ -596,23 +625,157 @@ function BodyScanEditor({
             </button>
           )}
         </div>
-        <label className="profile-report-text">
-          Report text
-          <textarea
-            rows={8}
-            maxLength={MAX_BODY_SCAN_TEXT_LENGTH}
-            value={text}
-            disabled={busy}
-            onChange={(event) => {
-              setText(event.target.value);
-              setTargets(undefined);
+        <section className="profile-readings" aria-label="Editable report fields">
+          <div className="profile-section-heading">
+            <div>
+              <h3>Report fields</h3>
+              <p>Keep values, ranges, and units exactly as printed.</p>
+            </div>
+            <button
+              type="button"
+              className="text-button"
+              disabled={busy || readings.length >= 24}
+              onClick={() =>
+                setReadings((current) => [
+                  ...current,
+                  { label: '', value: '', kind: 'measurement' },
+                ])
+              }
+            >
+              <Plus size={15} aria-hidden="true" /> Add field
+            </button>
+          </div>
+          {readings.length === 0 && (
+            <p className="profile-note">Read a report to fill these in, or add a field yourself.</p>
+          )}
+          {(['measurement', 'recommendation'] as const).map((kind) => {
+            const entries = readings
+              .map((reading, index) => ({ reading, index }))
+              .filter(({ reading }) => reading.kind === kind);
+            if (!entries.length) return null;
+            return (
+              <fieldset className="profile-reading-group" key={kind}>
+                <legend>
+                  {kind === 'measurement'
+                    ? 'Body measurements'
+                    : 'Recommended intake from the report'}
+                </legend>
+                {entries.map(({ reading, index }) => (
+                  <div className="profile-reading-row" key={index}>
+                    <label>
+                      Field name
+                      <input
+                        aria-label={`Report field ${index + 1}`}
+                        value={reading.label}
+                        maxLength={100}
+                        disabled={busy}
+                        placeholder="e.g. Body fat"
+                        onChange={(event) =>
+                          setReadings((current) =>
+                            current.map((item, row) =>
+                              row === index ? { ...item, label: event.target.value } : item,
+                            ),
+                          )
+                        }
+                      />
+                    </label>
+                    <label>
+                      Value as printed
+                      <input
+                        aria-label={`Report value ${index + 1}`}
+                        value={reading.value}
+                        maxLength={160}
+                        disabled={busy}
+                        placeholder="e.g. 20.5%"
+                        onChange={(event) =>
+                          setReadings((current) =>
+                            current.map((item, row) =>
+                              row === index ? { ...item, value: event.target.value } : item,
+                            ),
+                          )
+                        }
+                      />
+                    </label>
+                    <button
+                      type="button"
+                      className="icon-button"
+                      aria-label={`Remove report field ${index + 1}`}
+                      disabled={busy}
+                      onClick={() =>
+                        setReadings((current) => current.filter((_, row) => row !== index))
+                      }
+                    >
+                      <Trash2 size={16} />
+                    </button>
+                    <button
+                      type="button"
+                      className="text-button profile-reading-kind"
+                      disabled={busy}
+                      onClick={() =>
+                        setReadings((current) =>
+                          current.map((item, row) =>
+                            row === index
+                              ? {
+                                  ...item,
+                                  kind: kind === 'measurement' ? 'recommendation' : 'measurement',
+                                }
+                              : item,
+                          ),
+                        )
+                      }
+                    >
+                      {kind === 'measurement'
+                        ? 'Mark as recommended intake'
+                        : 'Mark as a measurement'}
+                    </button>
+                  </div>
+                ))}
+              </fieldset>
+            );
+          })}
+          {readings.some((reading) => reading.kind === 'recommendation') && (
+            <p className="profile-note">
+              Report recommendations stay separate from the daily goals you approve in your profile.
+            </p>
+          )}
+        </section>
+        <details className="profile-source-text" open={readings.length === 0}>
+          <summary>Original report text</summary>
+          <label className="profile-report-text">
+            Report text
+            <textarea
+              rows={8}
+              maxLength={MAX_BODY_SCAN_TEXT_LENGTH}
+              value={text}
+              disabled={busy}
+              onChange={(event) => {
+                setText(event.target.value);
+                setTargets(undefined);
+              }}
+              placeholder="Paste report text, enter it yourself, or choose Read with Gemini…"
+            />
+            <span className="profile-text-count">
+              {text.length.toLocaleString()} / {MAX_BODY_SCAN_TEXT_LENGTH.toLocaleString()}
+            </span>
+          </label>
+          <button
+            type="button"
+            className="text-button"
+            disabled={busy || !text.trim()}
+            onClick={() => {
+              const parsed = readingsFromReportText(text);
+              if (parsed.length) {
+                setReadings(parsed);
+                setError('');
+              } else
+                setError(
+                  'No clearly labelled values were found. Read with Gemini or add the fields yourself.',
+                );
             }}
-            placeholder="Paste report text, enter it yourself, or choose Read with Gemini…"
-          />
-          <span className="profile-text-count">
-            {text.length.toLocaleString()} / {MAX_BODY_SCAN_TEXT_LENGTH.toLocaleString()}
-          </span>
-        </label>
+          >
+            Fill fields from text
+          </button>
+        </details>
         {warnings.length > 0 && (
           <div className="profile-review-notes" role="status">
             {warnings.map((warning, index) => (
@@ -627,7 +790,7 @@ function BodyScanEditor({
           </p>
         )}
         <p className="profile-note">
-          Check the readings and date before saving. Keep ranges as written; you can set your daily
+          Check the fields and date before saving. Keep ranges as written; you can set your daily
           goals separately in your profile.
         </p>
         <p className="profile-privacy">

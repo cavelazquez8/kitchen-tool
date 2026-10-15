@@ -1,4 +1,12 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+  type ReactNode,
+} from 'react';
 import {
   Check,
   Clipboard,
@@ -10,6 +18,11 @@ import {
   Utensils,
   Upload,
   X,
+  ArrowUp,
+  ChefHat,
+  Clock3,
+  SlidersHorizontal,
+  PackageCheck,
 } from 'lucide-react';
 import type { InventoryState, ShoppingItem } from '../domain/types';
 import type { InventoryReducer } from '../lib/repository';
@@ -24,6 +37,14 @@ import { reviewedRecipeEstimate } from '../nutrition/recipeEstimate';
 import { recipeNutritionKey } from '../nutrition/estimate';
 import { parseChatRequest, type AiRecipeCandidate } from '../ai/protocol';
 import { bodyScanContext } from '../profile/context';
+import {
+  emptyAssistantSession,
+  conversationRecipes,
+  updateAssistantSession,
+  beginAssistantRequest,
+  getAssistantActivity,
+  subscribeAssistantActivity,
+} from '../ai/conversation';
 import {
   normalizeAiRecipe,
   boundedChatHistory,
@@ -48,9 +69,11 @@ import { RecipeBrowser } from './RecipeBrowser';
 import { RecipeDiscovery } from './RecipeDiscovery';
 import { NutritionTargetsEditor } from './NutritionTargetsEditor';
 import { RecipeNutrition } from './RecipeNutrition';
+import { ConversationText } from './ConversationText';
 import './recipeProviders.css';
 import './kitchenPolish.css';
 import './recipeGuidance.css';
+import './assistantExperience.css';
 
 export type HubPage = 'recipes' | 'shopping' | 'assistant';
 interface Props {
@@ -93,29 +116,47 @@ function blankRecipe(): Recipe {
     source: { type: 'manual' },
   };
 }
+function NutritionDisclosure({ publisher, children }: { publisher: boolean; children: ReactNode }) {
+  return publisher ? (
+    <>{children}</>
+  ) : (
+    <details className="recipe-nutrition-review">
+      <summary>Review nutrition and portion estimates</summary>
+      {children}
+    </details>
+  );
+}
 function RecipeCard({
   recipe,
   inventory,
   onOpen,
   onSave,
   saved,
+  onDiscuss,
 }: {
   recipe: Recipe;
   inventory: InventoryState;
   onOpen: () => void;
   onSave: () => void;
   saved: boolean;
+  onDiscuss?: () => void;
 }) {
   const match = matchRecipe(recipe, inventory);
+  const [imageFailed, setImageFailed] = useState(false);
+  const duration =
+    recipe.totalMinutes ??
+    (recipe.prepMinutes !== undefined && recipe.cookMinutes !== undefined
+      ? recipe.prepMinutes + recipe.cookMinutes
+      : undefined);
   return (
     <article className="recipe-card">
-      {recipe.imageUrl && safeLink(recipe.imageUrl) && (
-        <img src={recipe.imageUrl} alt="" loading="lazy" />
+      {recipe.imageUrl && safeLink(recipe.imageUrl) && !imageFailed && (
+        <img src={recipe.imageUrl} alt="" loading="lazy" onError={() => setImageFailed(true)} />
       )}
-      {!safeLink(recipe.imageUrl) && (
+      {(!safeLink(recipe.imageUrl) || imageFailed) && (
         <div className="recipe-art" aria-hidden="true">
           <Utensils size={30} strokeWidth={1.3} />
-          <span>{recipe.category ?? 'From the cookbook'}</span>
+          <span>{recipe.category ?? recipe.source.name ?? 'Your recipe'}</span>
         </div>
       )}
       <div className="recipe-card-body">
@@ -133,9 +174,15 @@ function RecipeCard({
           {recipe.source.name ?? sourceLabels[recipe.source.type]}
           {recipe.servings ? ` · ${recipe.servings} servings` : ' · Yield not recorded'}
         </small>
+        {duration !== undefined && (
+          <small className="assistant-recipe-time">
+            <Clock3 size={14} /> {duration} minutes
+          </small>
+        )}
+        {recipe.author && <small>By {recipe.author}</small>}
         <div className="hub-actions">
           <button className="button secondary" onClick={onOpen}>
-            View recipe
+            Choose recipe
           </button>
           <button
             className="icon-button"
@@ -146,6 +193,11 @@ function RecipeCard({
             {saved ? <Check size={18} /> : <Plus size={18} />}
           </button>
         </div>
+        {onDiscuss && (
+          <button className="text-button assistant-recipe-question" onClick={onDiscuss}>
+            Ask about this recipe
+          </button>
+        )}
       </div>
     </article>
   );
@@ -180,14 +232,23 @@ export function KitchenHub({
   const [importText, setImportText] = useState('');
   const [importUrl, setImportUrl] = useState('');
   const [media, setMedia] = useState<File | null>(null);
-  const [aiBusy, setAiBusy] = useState(false);
-  const [message, setMessage] = useState('');
-  const [candidates, setCandidates] = useState<Recipe[]>([]);
-  const [chatRecipes, setChatRecipes] = useState<Recipe[]>([]);
+  const [operationBusy, setAiBusy] = useState(false);
+  const activity = useSyncExternalStore(subscribeAssistantActivity, getAssistantActivity);
+  const aiBusy = operationBusy || activity.busy;
+  const previousActivity = useRef(activity);
+  const [message, setMessage] = useState(inventory.assistantSession?.draft ?? '');
+  const [candidates, setCandidates] = useState<Recipe[]>(inventory.assistantSession?.recipes ?? []);
+  const [chatRecipes, setChatRecipes] = useState<Recipe[]>(
+    inventory.assistantSession?.attachedRecipes ?? [],
+  );
   const [library, setLibrary] = useState<Recipe[]>([]);
   const [libraryLoading, setLibraryLoading] = useState(true);
   const [libraryError, setLibraryError] = useState('');
-  const [grounded, setGrounded] = useState(true);
+  const [conversationMode, setConversationMode] = useState(
+    inventory.assistantSession?.mode ?? 'discover',
+  );
+  const [conversationOptionsOpen, setConversationOptionsOpen] = useState(false);
+  const grounded = conversationMode === 'library';
   const [nutritionOpen, setNutritionOpen] = useState(false);
   const [clearShoppingOpen, setClearShoppingOpen] = useState(false);
   const [clearingShopping, setClearingShopping] = useState(false);
@@ -201,6 +262,7 @@ export function KitchenHub({
   const [savedReveal, setSavedReveal] = useState<Recipe | null>(null);
   const savedRevealHandled = useCallback(() => setSavedReveal(null), []);
   const endRef = useRef<HTMLDivElement>(null);
+  const composerRef = useRef<HTMLTextAreaElement>(null);
   const saved = useMemo(() => inventory.recipes ?? [], [inventory.recipes]);
   const plan = inventory.mealPlan ?? [];
   const shopping = inventory.shoppingList ?? [];
@@ -215,6 +277,27 @@ export function KitchenHub({
         : inventory,
     [inventory, useSelection, selectedBatchIds],
   );
+  useEffect(() => {
+    const previous = previousActivity.current;
+    if (previous.busy && !activity.busy) {
+      if (message.trim() === previous.prompt) setMessage(inventory.assistantSession?.draft ?? '');
+      setCandidates(inventory.assistantSession?.recipes ?? []);
+      setChatRecipes(inventory.assistantSession?.attachedRecipes ?? []);
+      if (activity.error) setError(activity.error);
+    }
+    previousActivity.current = activity;
+  }, [activity, message, inventory.assistantSession]);
+  useEffect(() => {
+    if (message === (inventory.assistantSession?.draft ?? '')) return;
+    const timer = window.setTimeout(() => {
+      void update((state) => updateAssistantSession(state, { draft: message })).catch(() => {
+        setError(
+          'Your message could not be saved on this device. Keep this screen open and try again.',
+        );
+      });
+    }, 300);
+    return () => window.clearTimeout(timer);
+  }, [message, inventory.assistantSession?.draft, update]);
   useEffect(() => {
     let active = true;
     void loadLocalRecipes()
@@ -241,7 +324,7 @@ export function KitchenHub({
     return () => clearInterval(timer);
   }, [timers]);
   useEffect(() => {
-    endRef.current?.scrollIntoView({ block: 'nearest' });
+    endRef.current?.scrollIntoView?.({ block: 'nearest' });
   }, [history.length, aiBusy]);
   useEffect(() => {
     if (!awake || !detail) return;
@@ -279,6 +362,17 @@ export function KitchenHub({
       throw e;
     }
   }
+  function setMode(mode: 'discover' | 'create' | 'library') {
+    setConversationMode(mode);
+    void mutate((state) => updateAssistantSession(state, { mode })).catch(() => {});
+  }
+  function setAttachedRecipes(recipes: Recipe[]) {
+    const next = conversationRecipes(recipes);
+    setChatRecipes(next);
+    void mutate((state) => updateAssistantSession(state, { attachedRecipes: next })).catch(
+      () => {},
+    );
+  }
   async function saveRecipe(recipe: Recipe, reveal = false) {
     if (!canPersistProviderRecipe(recipe))
       throw new Error('Open the original source to use this online discovery recipe.');
@@ -314,13 +408,23 @@ export function KitchenHub({
               ? 'This recipe is no longer a saved import. Close this review and try again.'
               : 'This saved recipe changed. Close this review and try again.',
           );
-        return {
+        const next = {
           ...state,
           recipes: (state.recipes ?? []).filter((item) => item.id !== recipe.id),
           ...(state.mealPlan
             ? { mealPlan: state.mealPlan.filter((item) => item.recipeId !== recipe.id) }
             : {}),
         };
+        return state.assistantSession
+          ? updateAssistantSession(next, {
+              recipes: (state.assistantSession?.recipes ?? []).filter(
+                (item) => item.id !== recipe.id,
+              ),
+              attachedRecipes: (state.assistantSession?.attachedRecipes ?? []).filter(
+                (item) => item.id !== recipe.id,
+              ),
+            })
+          : next;
       }, 'Recipe deleted.');
       setDetail((current) => (current?.id === recipe.id ? null : current));
       setSavedReveal((current) => (current?.id === recipe.id ? null : current));
@@ -366,7 +470,7 @@ export function KitchenHub({
       onToast('Gemini context is full. Remove a recipe to add another.');
       return false;
     }
-    setChatRecipes(next);
+    setAttachedRecipes(next);
     onToast('Recipe added to Gemini context.');
     return true;
   }
@@ -374,10 +478,6 @@ export function KitchenHub({
     const recipes = reply.recipes.map((draft) =>
       normalizeAiRecipe(draft, crypto.randomUUID(), { type: 'ai', name: 'Gemini' }),
     );
-    if (recipes.length) {
-      setCandidates(recipes);
-      setChatRecipes((current) => (current.length ? current : [recipes[0]]));
-    }
     return recipes;
   }
   async function ask(prompt = message) {
@@ -387,16 +487,28 @@ export function KitchenHub({
       onConfigure();
       return;
     }
+    const finishRequest = beginAssistantRequest(prompt.trim());
+    if (!finishRequest) return;
+    let requestError: string | undefined;
     setAiBusy(true);
     setError('');
-    const user = { id: crypto.randomUUID(), role: 'user' as const, text: prompt.trim() };
+    setMessage(prompt.trim());
+    const previousTurn = history.at(-1);
+    const user = {
+      id:
+        previousTurn?.role === 'user' && previousTurn.text === prompt.trim()
+          ? previousTurn.id
+          : crypto.randomUUID(),
+      role: 'user' as const,
+      text: prompt.trim(),
+    };
     try {
       const availableLibrary =
         grounded && !chatRecipes.length && libraryLoading ? await loadLocalRecipes() : library;
       const retrieved =
-        grounded && !chatRecipes.length
+        conversationMode !== 'create'
           ? recommendRecipes(
-              [...saved, ...availableLibrary].filter(canPersistProviderRecipe),
+              [...saved, ...(grounded ? availableLibrary : [])].filter(canPersistProviderRecipe),
               relevant,
               {
                 query: `${history
@@ -405,11 +517,12 @@ export function KitchenHub({
                   .map((item) => item.text)
                   .join(' ')} ${prompt}`,
                 limit: 12,
-                fallbackToStarters: true,
+                fallbackToStarters: grounded,
               },
             )
           : [];
-      const sourceRecipes = retrieved;
+      const sourceRecipes =
+        conversationMode === 'create' ? [] : conversationRecipes([...candidates, ...retrieved]);
       const recipeCandidates: AiRecipeCandidate[] = [];
       for (const recipe of sourceRecipes) {
         if (recipe.ingredients.length > 60) continue;
@@ -432,7 +545,10 @@ export function KitchenHub({
               (item) =>
                 `${item.ingredient.name}${item.status === 'check' ? ' (check amount)' : ''}`,
             ),
-          source: (recipe.source.name ?? sourceLabels[recipe.source.type]).slice(0, 300),
+          source: ((recipe.source.url?.length ?? 301) <= 300
+            ? recipe.source.url!
+            : (recipe.source.name ?? sourceLabels[recipe.source.type])
+          ).slice(0, 300),
           ...(nutrition?.perServing
             ? { nutrition: { perServing: nutrition.perServing, complete: nutrition.complete } }
             : {}),
@@ -455,6 +571,13 @@ export function KitchenHub({
         );
       }
       let attachedContext = chatRecipes.map(recipeContext).join('\n\n');
+      if (!chatRecipes.length && candidates.length) {
+        for (const recipe of candidates.slice(0, 3)) {
+          const context = recipeContext(recipe);
+          if (attachedContext.length + context.length + 2 <= 12000)
+            attachedContext += (attachedContext ? '\n\n' : '') + context;
+        }
+      }
       const profile = bodyScanContext(inventory.bodyScans ?? [], attachedBodyScanIds);
       if (attachedContext.length > 12000)
         throw new Error(
@@ -473,21 +596,29 @@ export function KitchenHub({
         inventory: boundedInventoryContext(generateMarkdown(relevant, { includeTools: true })),
         ...(attachedContext ? { recipe: attachedContext } : {}),
         ...(recipeCandidates.length ? { candidates: recipeCandidates } : {}),
+        ...(conversationMode === 'discover' ? { discover: true } : {}),
         ...(inventory.nutritionTargets ? { nutritionTargets: inventory.nutritionTargets } : {}),
         ...(profile ? { profile } : {}),
         ...(connection.model ? { model: connection.model } : {}),
         ...(connection.modelReviewed ? { modelReviewed: true } : {}),
-        history: boundedChatHistory(history),
+        history: boundedChatHistory(
+          history.at(-1)?.role === 'user' && history.at(-1)?.text === prompt.trim()
+            ? history.slice(0, -1)
+            : history,
+        ),
       });
       if (!request)
         throw new Error(
           'This conversation has too much context. Remove a recipe or body scan, or shorten your message.',
         );
       await mutate((state) => ({
-        ...state,
-        chatHistory: [...(state.chatHistory ?? []), user].slice(-80),
+        ...updateAssistantSession(state, { draft: prompt.trim() }),
+        chatHistory: (state.chatHistory?.at(-1)?.role === 'user' &&
+        state.chatHistory.at(-1)?.text === user.text
+          ? state.chatHistory
+          : [...(state.chatHistory ?? []), user]
+        ).slice(-80),
       }));
-      setMessage('');
       const reply = await sendGeminiChat(connection, request);
       const assistant = {
         id: crypto.randomUUID(),
@@ -498,28 +629,36 @@ export function KitchenHub({
             ? 'Here are recipes to review below.'
             : 'No answer was returned. Try a shorter question.'),
       };
-      await mutate((state) => ({
-        ...state,
-        chatHistory: [...(state.chatHistory ?? []), assistant].slice(-80),
-      }));
-      reviewReply(reply);
-      if (reply.recommendedRecipeIds) {
-        setCandidates(
-          reply.recommendedRecipeIds.flatMap((id) => {
-            const recipe = sourceRecipes.find((item) => item.id === id);
-            return recipe ? [recipe] : [];
+      const originals = conversationRecipes([...(reply.sourceRecipes ?? []), ...sourceRecipes]);
+      const recommendations = reply.recommendedRecipeIds?.length
+        ? reply.recommendedRecipeIds.flatMap((id) => originals.find((item) => item.id === id) ?? [])
+        : (reply.sourceRecipes ?? []);
+      const proposed = conversationRecipes([...recommendations, ...reviewReply(reply)]);
+      await mutate((state) => {
+        if (!state.chatHistory?.some((turn) => turn.id === user.id))
+          throw new Error(
+            'This conversation changed while Gemini was replying. Your current kitchen has been kept.',
+          );
+        return {
+          ...updateAssistantSession(state, {
+            ...(state.assistantSession?.draft === prompt.trim() ? { draft: '' } : {}),
+            ...(proposed.length ? { recipes: proposed } : {}),
           }),
-        );
-      }
+          chatHistory: [...(state.chatHistory ?? []), assistant].slice(-80),
+        };
+      });
+      if (proposed.length) setCandidates(proposed);
+      setMessage((current) => (current.trim() === prompt.trim() ? '' : current));
       if (reply.warnings.length) setError(reply.warnings.join(' '));
     } catch (e) {
-      setError(
+      requestError =
         e instanceof Error
           ? e.message
-          : 'Gemini is unavailable. Copy your inventory to continue externally.',
-      );
+          : 'Gemini is unavailable. Copy your inventory to continue externally.';
+      setError(requestError);
     } finally {
       setAiBusy(false);
+      finishRequest(requestError);
     }
   }
   async function importRecipe(useAi: boolean) {
@@ -620,6 +759,59 @@ export function KitchenHub({
     );
     setError(result.warnings.join(' '));
   }
+  async function chooseAndShop(recipe: Recipe) {
+    if (!canPersistProviderRecipe(recipe))
+      throw new Error('Open the original source to use this recipe.');
+    const servings = recipe.servings
+      ? detailServings.trim()
+        ? Number(detailServings)
+        : recipe.servings
+      : null;
+    if (servings !== null && (!Number.isFinite(servings) || servings <= 0)) {
+      setError('Enter a positive number of servings.');
+      return;
+    }
+    const requestId = crypto.randomUUID();
+    await mutate((state) => {
+      const recipes = [...(state.recipes ?? []).filter((item) => item.id !== recipe.id), recipe];
+      const mealPlan = [
+        ...(state.mealPlan ?? []).filter((item) => item.recipeId !== recipe.id),
+        { recipeId: recipe.id, servings },
+      ];
+      const result = buildShoppingList(
+        mealPlan.flatMap((item) => {
+          const planned = recipes.find((entry) => entry.id === item.recipeId);
+          return planned
+            ? [{ recipe: planned, ...(item.servings !== null ? { servings: item.servings } : {}) }]
+            : [];
+        }),
+        state,
+      );
+      return {
+        ...state,
+        recipes,
+        mealPlan,
+        shoppingList: [
+          ...(state.shoppingList ?? []).filter(
+            (item) => !item.checked && !item.id.startsWith('recipe:'),
+          ),
+          ...result.items.map((item, index) => ({
+            id: `recipe:${requestId}:${index}`,
+            name: item.name,
+            quantity: item.quantity,
+            unit: item.unit,
+            status: item.status,
+            checked: false,
+            ...(item.reason ? { note: item.reason } : {}),
+          })),
+        ],
+      };
+    }, 'Recipe chosen. Your shopping list is ready.');
+    setError('');
+    setDetail(null);
+    setAwake(false);
+    onNavigate('shopping');
+  }
   const detailMatch = detail
     ? matchRecipe(detail, relevant, {
         ...(detail.servings && detailServings ? { servings: Number(detailServings) } : {}),
@@ -629,20 +821,60 @@ export function KitchenHub({
     <div className="kitchen-hub">
       {page === 'recipes' && (
         <>
-          <RecipeDiscovery
-            recipes={library}
-            inventory={relevant}
-            loading={libraryLoading}
-            error={libraryError}
-            onOpen={(recipe) => {
-              setDetail(recipe);
-              setDetailServings(recipe.servings ? String(recipe.servings) : '');
-            }}
-            onChoose={() => {
-              setGrounded(true);
-              onNavigate('assistant');
-            }}
-          />
+          <section className="recipe-assistant-entry">
+            <div>
+              <span className="eyebrow">FIND YOUR NEXT MEAL</span>
+              <h2>Cook something you’ll enjoy.</h2>
+              <p>Ask Gemini for real recipes, discuss your options, and make a shopping list.</p>
+            </div>
+            <button
+              className="button primary"
+              onClick={() => {
+                setMode('discover');
+                onNavigate('assistant');
+              }}
+            >
+              <Sparkles size={18} />
+              Help me choose
+            </button>
+          </section>
+          <details className="community-cookbook">
+            <summary>Explore the community cookbook</summary>
+            <RecipeDiscovery
+              recipes={library}
+              inventory={relevant}
+              loading={libraryLoading}
+              error={libraryError}
+              onOpen={(recipe) => {
+                setDetail(recipe);
+                setDetailServings(recipe.servings ? String(recipe.servings) : '');
+              }}
+              onChoose={() => {
+                setMode('discover');
+                onNavigate('assistant');
+              }}
+            />
+            <p className="footnote">
+              Built-in recipes adapted from{' '}
+              <a
+                href="https://en.wikibooks.org/wiki/Cookbook:Table_of_Contents"
+                target="_blank"
+                rel="noreferrer"
+              >
+                Wikibooks contributors
+              </a>{' '}
+              under{' '}
+              <a
+                href="https://creativecommons.org/licenses/by-sa/4.0/"
+                target="_blank"
+                rel="noreferrer"
+              >
+                CC BY-SA 4.0
+              </a>
+              . Source links and attribution stay with saved recipes. Unknown amounts and yields
+              stay flagged.
+            </p>
+          </details>
           <RecipeBrowser
             inventory={inventory}
             relevant={relevant}
@@ -671,26 +903,6 @@ export function KitchenHub({
             savedReveal={savedReveal}
             onSavedRevealHandled={savedRevealHandled}
           />
-          <p className="footnote">
-            Built-in recipes adapted from{' '}
-            <a
-              href="https://en.wikibooks.org/wiki/Cookbook:Table_of_Contents"
-              target="_blank"
-              rel="noreferrer"
-            >
-              Wikibooks contributors
-            </a>{' '}
-            under{' '}
-            <a
-              href="https://creativecommons.org/licenses/by-sa/4.0/"
-              target="_blank"
-              rel="noreferrer"
-            >
-              CC BY-SA 4.0
-            </a>
-            . Source links and attribution stay with saved recipes. Unknown amounts and yields stay
-            flagged.
-          </p>
         </>
       )}
       {page === 'shopping' && (
@@ -733,9 +945,21 @@ export function KitchenHub({
               </div>
             </div>
             {!plan.length && (
-              <p className="settings-note">
-                Open a recipe and choose Add to meal plan to get started.
-              </p>
+              <div className="empty-meal-plan">
+                <p className="settings-note">
+                  Not sure what to make? Start with a few appealing options.
+                </p>
+                <button
+                  className="button secondary"
+                  onClick={() => {
+                    setMode('discover');
+                    onNavigate('assistant');
+                  }}
+                >
+                  <Sparkles size={17} />
+                  Help me choose
+                </button>
+              </div>
             )}
             {plan.map((item) => {
               const recipe = saved.find((r) => r.id === item.recipeId);
@@ -928,209 +1152,236 @@ export function KitchenHub({
         </>
       )}
       {page === 'assistant' && (
-        <section className="assistant-panel">
-          <div className="assistant-intro">
-            <Sparkles size={28} />
-            <h2>What would you like to cook?</h2>
-            <p>Choose an established recipe, see what to buy, and ask questions as you cook.</p>
-          </div>
-          <div className="hub-actions prompt-actions">
-            {[
-              {
-                label: 'Help me choose dinner',
-                prompt: 'Help me choose a familiar dinner. Ask me a question if you need to.',
-              },
-              {
-                label: 'Use ingredients expiring soon',
-                prompt: 'Find cookbook meals that use ingredients expiring soon',
-              },
-              { label: 'Plan three meals', prompt: 'Help me choose three meals to prep' },
-            ].map(({ label, prompt }) => (
-              <button
-                className="button secondary"
-                key={prompt}
-                disabled={aiBusy}
-                onClick={() => {
-                  void ask(prompt);
-                }}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
-          <div className="guided-options">
-            <label>
-              <input
-                type="radio"
-                name="recipe-guidance-mode"
-                checked={grounded}
-                onChange={() => setGrounded(true)}
-              />{' '}
-              Choose from the cookbook
-            </label>
-            <label>
-              <input
-                type="radio"
-                name="recipe-guidance-mode"
-                checked={!grounded}
-                onChange={() => setGrounded(false)}
-              />{' '}
-              Create with my inventory
-            </label>
-            <button className="text-button" onClick={onProfile ?? (() => setNutritionOpen(true))}>
-              {onProfile
-                ? 'Your profile'
-                : inventory.nutritionTargets
-                  ? 'Edit nutrition targets'
-                  : 'Add nutrition targets'}
+        <section className="assistant-panel mise-conversation">
+          <div className="conversation-heading">
+            <div className="assistant-brand">
+              <Sparkles size={20} />
+              <span>YOUR KITCHEN ASSISTANT</span>
+            </div>
+            <button
+              className="icon-button conversation-options-button"
+              aria-label="Conversation options"
+              aria-expanded={conversationOptionsOpen}
+              onClick={() => setConversationOptionsOpen((current) => !current)}
+            >
+              <SlidersHorizontal size={19} />
             </button>
           </div>
+          {!history.length && (
+            <div className="assistant-intro">
+              <h2>Let’s make dinner easier.</h2>
+              <p>
+                Find something you’ll enjoy, figure out what to buy, and ask anything along the way.
+              </p>
+              <div className="assistant-starters">
+                {[
+                  {
+                    label: 'Help me choose dinner',
+                    description: 'A few good options to start with',
+                    icon: ChefHat,
+                    prompt:
+                      'Help me choose dinner using real recipes. I am happy to shop for ingredients. Ask a brief question if it would help narrow down appealing options.',
+                  },
+                  {
+                    label: 'Find meals to prep',
+                    description: 'Cook once, make the week easier',
+                    icon: Utensils,
+                    prompt:
+                      'Help me find real recipes that work well for meal prep. I am happy to buy missing ingredients. Help me decide what to make and ask about portions or effort when needed.',
+                  },
+                  {
+                    label: 'Use what I have',
+                    description: 'Put your groceries to good use',
+                    icon: PackageCheck,
+                    prompt:
+                      'Help me find real recipes using what I have, prioritizing items expiring soon. Explain what is missing and keep the original recipe intact unless I ask for substitutions.',
+                  },
+                ].map(({ label, description, icon: Icon, prompt }) => (
+                  <button
+                    className="assistant-starter"
+                    aria-label={label}
+                    key={label}
+                    disabled={aiBusy}
+                    onClick={() => void ask(prompt)}
+                  >
+                    <Icon size={21} />
+                    <strong>{label}</strong>
+                    <span>{description}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+          <div className="assistant-context" aria-label="Gemini context">
+            <span className="context-chip inventory-context">
+              <PackageCheck size={15} />
+              Inventory included
+            </span>
+            <button
+              className="context-chip"
+              aria-label="Your profile"
+              onClick={onProfile ?? (() => setNutritionOpen(true))}
+            >
+              <Plus size={15} />
+              {inventory.nutritionTargets ? 'Nutrition profile' : 'Add profile'}
+            </button>
+            {(inventory.bodyScans ?? [])
+              .filter((scan) => attachedBodyScanIds.includes(scan.id))
+              .map((scan) => (
+                <span className="context-chip attached" key={scan.id}>
+                  <button className="context-chip-title" onClick={onProfile}>
+                    {scan.name}
+                  </button>
+                  <button
+                    className="context-chip-remove"
+                    aria-label={'Remove ' + scan.name + ' from Gemini context'}
+                    onClick={() =>
+                      onBodyScanAttachmentsChange?.(
+                        attachedBodyScanIds.filter((id) => id !== scan.id),
+                      )
+                    }
+                  >
+                    <X size={14} />
+                  </button>
+                </span>
+              ))}
+            {chatRecipes.map((recipe) => (
+              <span className="context-chip attached" key={recipe.id}>
+                <button
+                  className="context-chip-title"
+                  onClick={() => {
+                    setDetail(recipe);
+                    setDetailServings(recipe.servings ? String(recipe.servings) : '');
+                  }}
+                >
+                  {recipe.title}
+                </button>
+                <button
+                  className="context-chip-remove"
+                  aria-label={'Remove ' + recipe.title + ' from Gemini context'}
+                  onClick={() =>
+                    setAttachedRecipes(chatRecipes.filter((item) => item.id !== recipe.id))
+                  }
+                >
+                  <X size={14} />
+                </button>
+              </span>
+            ))}
+          </div>
+          <p className="assistant-context-note">
+            Buy what you need. Mise remembers what you already have.
+          </p>
           {inventory.nutritionTargets && (
             <p className="nutrition-summary">
               Daily targets ·{' '}
               {[
                 inventory.nutritionTargets.caloriesKcal !== null
-                  ? `${inventory.nutritionTargets.caloriesKcal} kcal`
+                  ? inventory.nutritionTargets.caloriesKcal + ' kcal'
                   : '',
                 inventory.nutritionTargets.proteinGrams !== null
-                  ? `${inventory.nutritionTargets.proteinGrams} g protein`
+                  ? inventory.nutritionTargets.proteinGrams + ' g protein'
                   : '',
                 inventory.nutritionTargets.carbsGrams !== null
-                  ? `${inventory.nutritionTargets.carbsGrams} g carbs`
+                  ? inventory.nutritionTargets.carbsGrams + ' g carbs'
                   : '',
                 inventory.nutritionTargets.fatGrams !== null
-                  ? `${inventory.nutritionTargets.fatGrams} g fat`
+                  ? inventory.nutritionTargets.fatGrams + ' g fat'
                   : '',
               ]
                 .filter(Boolean)
                 .join(' · ') || 'No values entered'}
             </p>
           )}
-          <div className="hub-preferences">
-            {selectedBatchIds.length > 0 && (
-              <label>
-                <input
-                  type="checkbox"
-                  checked={useSelection}
-                  onChange={(e) => setUseSelection(e.target.checked)}
-                />
-                Use only selected inventory
-              </label>
-            )}
-            <button className="text-button" onClick={onConfigure}>
-              Connection settings
-            </button>
-            {history.length > 0 && (
-              <button
-                className="text-button"
-                disabled={aiBusy}
-                onClick={() => setClearChatOpen(true)}
-              >
-                Clear conversation
-              </button>
-            )}
-          </div>
-          {(inventory.bodyScans ?? []).some((scan) => attachedBodyScanIds.includes(scan.id)) && (
-            <section className="gemini-recipe-context" aria-label="Gemini body scan context">
-              <div className="hub-section-title">
-                <h3>Body scans in context</h3>
-                <button className="text-button" onClick={() => onBodyScanAttachmentsChange?.([])}>
-                  Clear body scans
-                </button>
-              </div>
-              {(inventory.bodyScans ?? [])
-                .filter((scan) => attachedBodyScanIds.includes(scan.id))
-                .map((scan) => (
-                  <div className="gemini-context-row" key={scan.id}>
-                    <button className="text-button" onClick={onProfile}>
-                      {scan.name}
-                    </button>
-                    <button
-                      className="icon-button"
-                      aria-label={`Remove ${scan.name} from Gemini context`}
-                      onClick={() =>
-                        onBodyScanAttachmentsChange?.(
-                          attachedBodyScanIds.filter((id) => id !== scan.id),
-                        )
-                      }
-                    >
-                      <X size={17} />
-                    </button>
-                  </div>
+          {conversationOptionsOpen && (
+            <section className="conversation-options" aria-label="Assistant preferences">
+              <h3>Conversation options</h3>
+              <fieldset className="assistant-mode-options">
+                <legend>Recipe suggestions</legend>
+                {[
+                  {
+                    value: 'discover' as const,
+                    label: 'Find recipes and discuss them',
+                    note: 'Search publisher recipes when web discovery is connected.',
+                  },
+                  {
+                    value: 'library' as const,
+                    label: 'Choose from the cookbook',
+                    note: 'Search your saved recipes and the built-in collection.',
+                  },
+                  {
+                    value: 'create' as const,
+                    label: 'Create with my inventory',
+                    note: 'Ask Gemini for an original recipe.',
+                  },
+                ].map((mode) => (
+                  <label key={mode.value}>
+                    <input
+                      type="radio"
+                      name="recipe-guidance-mode"
+                      aria-label={mode.label}
+                      checked={conversationMode === mode.value}
+                      onChange={() => setMode(mode.value)}
+                    />
+                    <span>
+                      <strong>{mode.label}</strong>
+                      <small>{mode.note}</small>
+                    </span>
+                  </label>
                 ))}
-              <p className="settings-note">
-                Only these reports’ reviewed text will be sent with your next message.
-              </p>
-            </section>
-          )}
-          {chatRecipes.length > 0 && (
-            <section className="gemini-recipe-context" aria-label="Gemini recipe context">
-              <div className="hub-section-title">
-                <h3>Recipes in context · {chatRecipes.length}</h3>
-                <button className="text-button" onClick={() => setChatRecipes([])}>
-                  Clear recipes
+              </fieldset>
+              {selectedBatchIds.length > 0 && (
+                <label className="assistant-selection">
+                  <input
+                    type="checkbox"
+                    checked={useSelection}
+                    onChange={(e) => setUseSelection(e.target.checked)}
+                  />
+                  Include only selected inventory
+                </label>
+              )}
+              <div className="hub-actions">
+                <button className="text-button" onClick={onConfigure}>
+                  Connection settings
                 </button>
-              </div>
-              {chatRecipes.map((recipe) => (
-                <div className="gemini-context-row" key={recipe.id}>
+                {!!chatRecipes.length && (
+                  <button className="text-button" onClick={() => setAttachedRecipes([])}>
+                    Clear recipes
+                  </button>
+                )}
+                {!!attachedBodyScanIds.length && (
+                  <button className="text-button" onClick={() => onBodyScanAttachmentsChange?.([])}>
+                    Clear body scans
+                  </button>
+                )}
+                {history.length > 0 && (
                   <button
                     className="text-button"
-                    onClick={() => {
-                      setDetail(recipe);
-                      setDetailServings(recipe.servings ? String(recipe.servings) : '');
-                    }}
+                    disabled={aiBusy}
+                    onClick={() => setClearChatOpen(true)}
                   >
-                    {recipe.title}
+                    Clear conversation
                   </button>
-                  <button
-                    className="icon-button"
-                    aria-label={`Remove ${recipe.title} from Gemini context`}
-                    onClick={() =>
-                      setChatRecipes((current) => current.filter((item) => item.id !== recipe.id))
-                    }
-                  >
-                    <X size={17} />
-                  </button>
-                </div>
-              ))}
+                )}
+              </div>
             </section>
           )}
           <div className="chat-history" aria-label="Gemini conversation">
             {history.map((item) => (
-              <div key={item.id} className={`chat-message ${item.role}`}>
+              <div key={item.id} className={'chat-message ' + item.role}>
                 <small>{item.role === 'user' ? 'YOU' : 'GEMINI'}</small>
-                <p>{item.text}</p>
+                <ConversationText text={item.text} />
               </div>
             ))}
             {aiBusy && (
-              <p role="status" className="settings-note">
-                {libraryLoading && grounded && !chatRecipes.length
-                  ? 'Opening the cookbook…'
-                  : 'Gemini is thinking…'}
-              </p>
+              <div role="status" className="assistant-thinking">
+                <span />
+                <span />
+                <span />
+                Gemini is thinking…
+              </div>
             )}
             <div ref={endRef} />
           </div>
-          {candidates.length > 0 && (
-            <div className="recipe-grid ai-recipes">
-              {candidates.map((recipe) => (
-                <RecipeCard
-                  key={recipe.id}
-                  recipe={recipe}
-                  inventory={relevant}
-                  saved={saved.some((r) => r.id === recipe.id)}
-                  onOpen={() => {
-                    setDetail(recipe);
-                    setDetailServings(recipe.servings ? String(recipe.servings) : '');
-                  }}
-                  onSave={() => {
-                    if (recipe.source.type === 'ai') openEditor(recipe);
-                    else void saveRecipe(recipe).catch(() => {});
-                  }}
-                />
-              ))}
-            </div>
-          )}
           <form
             className="chat-composer"
             onSubmit={(e) => {
@@ -1140,29 +1391,102 @@ export function KitchenHub({
           >
             <textarea
               aria-label="Message Gemini"
+              ref={composerRef}
+              disabled={aiBusy}
               value={message}
               onChange={(e) => setMessage(e.target.value)}
-              rows={3}
-              placeholder="e.g. Something quick with chicken—and can I use my air fryer?"
+              onBlur={() => {
+                if (message !== (inventory.assistantSession?.draft ?? ''))
+                  void mutate((state) => updateAssistantSession(state, { draft: message })).catch(
+                    () => {},
+                  );
+              }}
+              rows={2}
+              placeholder="What sounds good? Ask Gemini…"
               maxLength={6000}
             />
-            <button className="button primary" disabled={aiBusy || !message.trim()}>
-              {aiBusy ? 'Thinking…' : 'Ask Gemini'}
+            <button
+              className="button primary"
+              aria-label={aiBusy ? 'Gemini is thinking' : 'Ask Gemini'}
+              disabled={aiBusy || !message.trim()}
+            >
+              <ArrowUp size={20} />
+              <span>{aiBusy ? 'Thinking…' : 'Send'}</span>
             </button>
           </form>
+          {candidates.length > 0 && (
+            <section className="assistant-suggestions" aria-label="Recipe suggestions">
+              <div className="assistant-suggestions-heading">
+                <div>
+                  <span className="eyebrow">YOUR OPTIONS</span>
+                  <h3>Something worth cooking</h3>
+                </div>
+                <button className="text-button" onClick={() => onNavigate('recipes')}>
+                  Your recipes
+                </button>
+              </div>
+              <div className="recipe-grid ai-recipes">
+                {candidates.map((recipe) => (
+                  <RecipeCard
+                    key={recipe.id}
+                    recipe={recipe}
+                    inventory={inventory}
+                    saved={saved.some((r) => r.id === recipe.id)}
+                    onOpen={() => {
+                      setDetail(recipe);
+                      setDetailServings(recipe.servings ? String(recipe.servings) : '');
+                    }}
+                    onSave={() => {
+                      if (recipe.source.type === 'ai') openEditor(recipe);
+                      else void saveRecipe(recipe).catch(() => {});
+                    }}
+                    onDiscuss={() => {
+                      if (addToGemini(recipe)) {
+                        setMessage(
+                          'Tell me about ' +
+                            recipe.title +
+                            '. Would it be a good choice for what we discussed?',
+                        );
+                        composerRef.current?.focus();
+                        composerRef.current?.scrollIntoView?.({ block: 'center' });
+                      }
+                    }}
+                  />
+                ))}
+              </div>
+            </section>
+          )}
           {!readGeminiConnection() && (
-            <p className="settings-note">
-              Connect your free Gemini backend in Settings. Copy for Gemini on the inventory screen
-              remains available.
-            </p>
+            <div className="assistant-connection-note">
+              <p>
+                Connect Gemini to have the conversation here. You can also copy your kitchen
+                context.
+              </p>
+              <button className="button secondary" onClick={onConfigure}>
+                Connect Gemini
+              </button>
+            </div>
           )}
-          {grounded && !chatRecipes.length && (
-            <p className="field-note">
-              Mise searches the cookbook on your device and sends Gemini a shortlist.
-              Recommendations keep the source recipe intact; you can buy what’s missing. Nutrition
-              is used only when it has been reviewed.
-            </p>
-          )}
+          <button
+            className="text-button assistant-copy-context"
+            onClick={() => {
+              const text = [
+                generateMarkdown(inventory, { includeTools: true }),
+                ...chatRecipes.map(recipeContext),
+              ].join('\n\n');
+              void navigator.clipboard
+                .writeText(text)
+                .then(() => onToast('Kitchen context copied.'))
+                .catch(() =>
+                  setError(
+                    'Clipboard unavailable. Copy for Gemini is also available on your inventory screen.',
+                  ),
+                );
+            }}
+          >
+            <Clipboard size={15} />
+            Copy kitchen context
+          </button>
         </section>
       )}
       {error && (
@@ -1182,6 +1506,33 @@ export function KitchenHub({
       >
         {detail && detailMatch && (
           <>
+            {detail.imageUrl && safeLink(detail.imageUrl) && (
+              <img className="recipe-detail-photo" src={detail.imageUrl} alt={detail.title} />
+            )}
+            {(detail.author || detail.totalMinutes !== undefined) && (
+              <p className="recipe-detail-byline">
+                {detail.author ? 'By ' + detail.author : ''}
+                {detail.author && detail.totalMinutes !== undefined ? ' · ' : ''}
+                {detail.totalMinutes !== undefined ? detail.totalMinutes + ' minutes' : ''}
+              </p>
+            )}
+            {detail.servings ? (
+              <label className="recipe-servings">
+                Cooking for
+                <input
+                  type="number"
+                  min="0.1"
+                  step="any"
+                  value={detailServings}
+                  onChange={(e) => setDetailServings(e.target.value)}
+                />
+                servings
+              </label>
+            ) : (
+              <p className="field-note">
+                Original recipe quantities shown. Record the original yield before scaling portions.
+              </p>
+            )}
             <div className="hub-actions">
               <span className={`match-badge ${detailMatch.status}`}>
                 {labels[detailMatch.status]}
@@ -1196,7 +1547,7 @@ export function KitchenHub({
                 Edit & save
               </button>
               <button
-                className="button primary"
+                className="button secondary"
                 onClick={() => {
                   void addToPlan(detail).catch(() => {});
                 }}
@@ -1204,6 +1555,15 @@ export function KitchenHub({
                 {plan.some((item) => item.recipeId === detail.id)
                   ? 'Update meal plan'
                   : 'Add to meal plan'}
+              </button>
+              <button
+                className="button primary"
+                onClick={() => {
+                  void chooseAndShop(detail).catch(() => {});
+                }}
+              >
+                <ShoppingCart size={17} />
+                Make shopping list
               </button>
               <button
                 className="button secondary"
@@ -1229,23 +1589,6 @@ export function KitchenHub({
                   {detail.source.type === 'imported' ? 'Delete recipe' : 'Remove saved recipe'}
                 </button>
               )}
-            {detail.servings ? (
-              <label className="recipe-servings">
-                Cooking for
-                <input
-                  type="number"
-                  min="0.1"
-                  step="any"
-                  value={detailServings}
-                  onChange={(e) => setDetailServings(e.target.value)}
-                />
-                servings
-              </label>
-            ) : (
-              <p className="field-note">
-                Original recipe quantities shown. Record the original yield before scaling portions.
-              </p>
-            )}
             <h3>Ingredients</h3>
             <ul className="recipe-ingredient-list">
               {detailMatch.ingredients.map((item, index) => (
@@ -1276,41 +1619,43 @@ export function KitchenHub({
                 </li>
               ))}
             </ul>
+            <NutritionDisclosure publisher={!!detail.publisherNutrition}>
+              <RecipeNutrition
+                key={detail.id + recipeNutritionKey(detail)}
+                recipe={detail}
+                mapping={inventory.recipeNutrition?.find((item) => item.recipeId === detail.id)}
+                onSave={async (mapping) => {
+                  await mutate(
+                    (state) => ({
+                      ...state,
+                      recipeNutrition: [
+                        ...(state.recipeNutrition ?? []).filter(
+                          (item) => item.recipeId !== detail.id,
+                        ),
+                        { recipeId: detail.id, ...mapping },
+                      ],
+                    }),
+                    'Nutrition estimate saved.',
+                  );
+                }}
+                onConfigure={onConfigure}
+                onEditRecipe={() => openEditor(detail)}
+              />
+              <button
+                className="text-button"
+                onClick={() => {
+                  if (!addToGemini(detail)) return;
+                  setMessage(
+                    'Help me choose servings of this recipe using my reviewed nutrition targets and recipe nutrition. Ask what share of my daily targets I want for this meal if needed. Keep the original recipe intact and tell me if information is missing.',
+                  );
+                  setDetail(null);
+                  onNavigate('assistant');
+                }}
+              >
+                <Sparkles size={16} /> Ask Gemini about portions
+              </button>
+            </NutritionDisclosure>
             <h3>Let’s cook</h3>
-            <RecipeNutrition
-              key={detail.id + recipeNutritionKey(detail)}
-              recipe={detail}
-              mapping={inventory.recipeNutrition?.find((item) => item.recipeId === detail.id)}
-              onSave={async (mapping) => {
-                await mutate(
-                  (state) => ({
-                    ...state,
-                    recipeNutrition: [
-                      ...(state.recipeNutrition ?? []).filter(
-                        (item) => item.recipeId !== detail.id,
-                      ),
-                      { recipeId: detail.id, ...mapping },
-                    ],
-                  }),
-                  'Nutrition estimate saved.',
-                );
-              }}
-              onConfigure={onConfigure}
-              onEditRecipe={() => openEditor(detail)}
-            />
-            <button
-              className="text-button"
-              onClick={() => {
-                if (!addToGemini(detail)) return;
-                setMessage(
-                  'Help me choose servings of this recipe using my reviewed nutrition targets and recipe nutrition. Ask what share of my daily targets I want for this meal if needed. Keep the original recipe intact and tell me if information is missing.',
-                );
-                setDetail(null);
-                onNavigate('assistant');
-              }}
-            >
-              <Sparkles size={16} /> Ask Gemini about portions
-            </button>
             <label className="hub-preferences">
               <input type="checkbox" checked={awake} onChange={(e) => setAwake(e.target.checked)} />
               Keep screen awake while cooking
@@ -1589,11 +1934,17 @@ export function KitchenHub({
           <button
             className="button primary"
             onClick={() => {
-              void mutate((state) => ({ ...state, chatHistory: [] }))
+              void mutate((state) => ({
+                ...state,
+                chatHistory: [],
+                assistantSession: emptyAssistantSession(),
+              }))
                 .then(() => {
                   setClearChatOpen(false);
                   setCandidates([]);
                   setChatRecipes([]);
+                  setMessage('');
+                  setConversationMode('discover');
                 })
                 .catch(() => {});
             }}

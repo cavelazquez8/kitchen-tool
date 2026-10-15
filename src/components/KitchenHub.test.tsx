@@ -1,5 +1,5 @@
 import { useSyncExternalStore } from 'react';
-import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createEmptyInventory, type InventoryState } from '../domain/types';
@@ -7,12 +7,18 @@ import { createLocalRepository, LOCAL_STORAGE_KEY } from '../lib/localRepository
 import type { InventoryRepository } from '../lib/repository';
 import { loadLocalRecipes } from '../recipes/localLibrary';
 import type { Recipe } from '../recipes/types';
+import { readGeminiConnection, sendGeminiChat, type AiReply } from '../ai/client';
 import { KitchenHub, type HubPage } from './KitchenHub';
 
 vi.mock('../recipes/localLibrary', () => ({
   loadLocalRecipes: vi.fn().mockResolvedValue([]),
   recipeFacets: () => ({ categories: [], cuisines: [] }),
   searchLocalRecipes: (recipes: Recipe[]) => recipes,
+}));
+vi.mock('../ai/client', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../ai/client')>()),
+  readGeminiConnection: vi.fn(),
+  sendGeminiChat: vi.fn(),
 }));
 
 const imported: Recipe = {
@@ -70,10 +76,227 @@ function setup(inventory: InventoryState, page: HubPage = 'recipes') {
 beforeEach(() => {
   localStorage.clear();
   vi.mocked(loadLocalRecipes).mockReset().mockResolvedValue([]);
+  vi.mocked(readGeminiConnection).mockReset().mockReturnValue(null);
+  vi.mocked(sendGeminiChat).mockReset();
 });
 afterEach(() => {
   cleanup();
   localStorage.clear();
+});
+
+describe('a conversation that leads to groceries', () => {
+  const publisherRecipe: Recipe = {
+    ...imported,
+    ingredients: [...imported.ingredients, { name: 'Onion', quantity: 1, unit: 'each' }],
+    source: {
+      type: 'imported',
+      name: 'Recipe publisher',
+      url: 'https://example.com/carrot-soup',
+      attribution: 'Recipe publisher · Ada Cook',
+    },
+    author: 'Ada Cook',
+    totalMinutes: 25,
+    imageUrl: 'https://example.com/carrot-soup.jpg',
+    publisherNutrition: { servingSize: '1 bowl', calories: '230 kcal', protein: '12 g' },
+  };
+  function connect() {
+    vi.mocked(readGeminiConnection).mockReturnValue({
+      url: 'https://mise.example.workers.dev',
+      token: 'a'.repeat(32),
+    });
+  }
+
+  it('retains original recipe cards, chosen context and the draft after leaving the assistant or reloading', async () => {
+    connect();
+    vi.mocked(sendGeminiChat).mockResolvedValue({
+      message: 'This soup is a useful option. You can buy the onion.',
+      recipes: [],
+      warnings: [],
+      sourceRecipes: [publisherRecipe],
+      recommendedRecipeIds: [publisherRecipe.id],
+    });
+    const { repository, unmount } = setup(createEmptyInventory(), 'assistant');
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: /Help me choose dinner/ }));
+    expect(await screen.findByRole('heading', { name: publisherRecipe.title })).toBeVisible();
+    expect(screen.getByText('25 minutes')).toBeVisible();
+    expect(screen.getByText('By Ada Cook')).toBeVisible();
+    expect(vi.mocked(sendGeminiChat).mock.calls[0][1]).toMatchObject({ discover: true });
+    expect(vi.mocked(sendGeminiChat).mock.calls[0][1].message).toContain('happy to shop');
+    expect(repository.getSnapshot().state.assistantSession?.recipes).toEqual([publisherRecipe]);
+    await user.click(screen.getByRole('button', { name: 'Ask about this recipe' }));
+    await waitFor(() =>
+      expect(repository.getSnapshot().state.assistantSession?.draft).toContain(
+        publisherRecipe.title,
+      ),
+    );
+    expect(repository.getSnapshot().state.assistantSession?.attachedRecipes).toEqual([
+      publisherRecipe,
+    ]);
+    const snapshot = repository.getSnapshot().state;
+    unmount();
+    const restored = createLocalRepository(localStorage);
+    const next = renderKitchen(restored, vi.fn(restored.update), 'assistant');
+    expect(await screen.findByRole('heading', { name: publisherRecipe.title })).toBeVisible();
+    expect(screen.getByRole('textbox', { name: 'Message Gemini' })).toHaveValue(
+      snapshot.assistantSession?.draft,
+    );
+    expect(
+      screen.getByRole('button', { name: 'Remove Carrot soup from Gemini context' }),
+    ).toBeVisible();
+    vi.mocked(sendGeminiChat).mockResolvedValue({
+      message: 'It reheats well. Keep the original quantities.',
+      recipes: [],
+      warnings: [],
+    });
+    await user.clear(screen.getByRole('textbox', { name: 'Message Gemini' }));
+    await user.type(
+      screen.getByRole('textbox', { name: 'Message Gemini' }),
+      'Does this reheat well?',
+    );
+    await user.click(screen.getByRole('button', { name: 'Ask Gemini' }));
+    await screen.findByText('It reheats well. Keep the original quantities.');
+    const request = vi.mocked(sendGeminiChat).mock.calls[1][1];
+    expect(request.recipe).toContain('200 g: Carrots');
+    expect(request.recipe).toContain('1 bowl');
+    expect(request.candidates?.some((recipe) => recipe.id === publisherRecipe.id)).toBe(true);
+    expect(screen.getByRole('heading', { name: publisherRecipe.title })).toBeVisible();
+    expect(restored.getSnapshot().state.assistantSession?.recipes).toEqual([publisherRecipe]);
+    next.unmount();
+  });
+
+  it('keeps the draft and previous recipe options when a request fails, and retries without duplicating the user turn', async () => {
+    connect();
+    vi.mocked(sendGeminiChat).mockRejectedValueOnce(new Error('Gemini took too long. Try again.'));
+    const inventory: InventoryState = {
+      ...createEmptyInventory(),
+      assistantSession: {
+        recipes: [publisherRecipe],
+        attachedRecipes: [],
+        draft: 'Can I freeze this?',
+        mode: 'discover',
+      },
+    };
+    const { repository } = setup(inventory, 'assistant');
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: 'Ask Gemini' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('Gemini took too long');
+    expect(screen.getByRole('textbox', { name: 'Message Gemini' })).toHaveValue(
+      'Can I freeze this?',
+    );
+    expect(screen.getByRole('heading', { name: publisherRecipe.title })).toBeVisible();
+    vi.mocked(sendGeminiChat).mockResolvedValueOnce({
+      message: 'You can freeze it after cooling.',
+      recipes: [],
+      warnings: [],
+    });
+    await user.click(screen.getByRole('button', { name: 'Ask Gemini' }));
+    await screen.findByText('You can freeze it after cooling.');
+    expect(
+      repository.getSnapshot().state.chatHistory?.filter((turn) => turn.role === 'user'),
+    ).toHaveLength(1);
+    expect(repository.getSnapshot().state.assistantSession?.draft).toBe('');
+  });
+  it('keeps one request active across navigation and displays its reply without clearing a newer draft', async () => {
+    connect();
+    let finish!: (reply: AiReply) => void;
+    vi.mocked(sendGeminiChat).mockImplementationOnce(
+      () =>
+        new Promise<AiReply>((resolve) => {
+          finish = resolve;
+        }),
+    );
+    const { repository, unmount } = setup(createEmptyInventory(), 'assistant');
+    const user = userEvent.setup();
+    await user.type(
+      screen.getByRole('textbox', { name: 'Message Gemini' }),
+      'Help me choose dinner',
+    );
+    await user.click(screen.getByRole('button', { name: 'Ask Gemini' }));
+    await waitFor(() => expect(sendGeminiChat).toHaveBeenCalledTimes(1));
+    unmount();
+    renderKitchen(repository, vi.fn(repository.update), 'assistant');
+    expect(screen.getByRole('textbox', { name: 'Message Gemini' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Gemini is thinking' })).toBeDisabled();
+    await act(async () => {
+      await repository.update((state) => ({
+        ...state,
+        assistantSession: { ...state.assistantSession!, draft: 'What about next week?' },
+      }));
+      finish({
+        message: 'Here is a real recipe to start with.',
+        recipes: [],
+        warnings: [],
+        sourceRecipes: [publisherRecipe],
+        recommendedRecipeIds: [publisherRecipe.id],
+      });
+    });
+    expect(await screen.findByText('Here is a real recipe to start with.')).toBeVisible();
+    expect(await screen.findByRole('heading', { name: publisherRecipe.title })).toBeVisible();
+    expect(screen.getByRole('textbox', { name: 'Message Gemini' })).toBeEnabled();
+    expect(screen.getByRole('textbox', { name: 'Message Gemini' })).toHaveValue(
+      'What about next week?',
+    );
+    expect(repository.getSnapshot().state.assistantSession?.draft).toBe('What about next week?');
+    expect(sendGeminiChat).toHaveBeenCalledTimes(1);
+  });
+
+  it('chooses portions and creates the shopping list directly without buying the recorded stock twice', async () => {
+    const inventory: InventoryState = {
+      ...createEmptyInventory(),
+      products: [
+        {
+          id: 'carrots',
+          name: 'Store brand baby carrots',
+          ingredientName: 'Carrots',
+          isStaple: false,
+        },
+      ],
+      batches: [
+        {
+          id: 'batch',
+          productId: 'carrots',
+          quantity: 100,
+          unit: 'g',
+          location: 'fridge',
+          purchasedOn: '2026-10-13',
+          expiresOn: null,
+        },
+      ],
+      assistantSession: {
+        recipes: [publisherRecipe],
+        attachedRecipes: [],
+        draft: '',
+        mode: 'discover',
+      },
+    };
+    const { repository, unmount } = setup(inventory, 'assistant');
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: 'Choose recipe' }));
+    const detail = screen.getByRole('dialog', { name: publisherRecipe.title });
+    expect(within(detail).getByText('230 kcal')).toBeVisible();
+    const portions = within(detail).getByRole('spinbutton', { name: /Cooking for/ });
+    await user.clear(portions);
+    await user.type(portions, '4');
+    await user.click(within(detail).getByRole('button', { name: 'Make shopping list' }));
+    await waitFor(() => expect(repository.getSnapshot().state.shoppingList).toHaveLength(2));
+    const state = repository.getSnapshot().state;
+    expect(state.recipes).toEqual([publisherRecipe]);
+    expect(state.mealPlan).toEqual([{ recipeId: publisherRecipe.id, servings: 4 }]);
+    expect(state.shoppingList).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ name: 'Carrots', quantity: 300, unit: 'g' }),
+        expect.objectContaining({ name: 'Onion', quantity: 2, unit: 'each' }),
+      ]),
+    );
+    expect(state.batches).toEqual(inventory.batches);
+    unmount();
+    const restored = createLocalRepository(localStorage);
+    renderKitchen(restored, vi.fn(restored.update), 'shopping');
+    expect(await screen.findByRole('heading', { name: 'What to buy' })).toBeVisible();
+    expect(screen.getByText('300 g')).toBeVisible();
+    expect(restored.getSnapshot().state.mealPlan).toEqual(state.mealPlan);
+  });
 });
 
 describe('imported recipe deletion', () => {
@@ -127,6 +350,7 @@ describe('imported recipe deletion', () => {
     expect(update).toHaveBeenCalledTimes(1);
     expect(toast).toHaveBeenCalledWith('Recipe deleted.');
     expect(screen.queryByRole('heading', { name: imported.title })).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'All recipes' }));
     expect(screen.getByRole('heading', { name: builtIn.title })).toBeVisible();
 
     unmount();
@@ -168,6 +392,7 @@ describe('imported recipe deletion', () => {
     vi.mocked(loadLocalRecipes).mockResolvedValue([builtIn, discovered]);
     const { repository, update } = setup({ ...createEmptyInventory(), recipes: [builtIn] });
     const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: 'All recipes' }));
     for (const recipe of [builtIn, discovered]) {
       await user.click(await screen.findByRole('button', { name: recipe.title }));
       const detail = screen.getByRole('dialog', { name: recipe.title });

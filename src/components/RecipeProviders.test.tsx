@@ -81,6 +81,7 @@ describe('optional recipe source UI', () => {
         page="recipes"
       />,
     );
+    await user.click(screen.getByRole('button', { name: 'All recipes' }));
     await screen.findByRole('heading', { name: 'Carrot soup' });
     await user.click(screen.getByText('Refine recipes', { exact: true }));
     await user.click(screen.getByRole('checkbox', { name: 'Use only selected inventory' }));

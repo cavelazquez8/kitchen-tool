@@ -1,5 +1,6 @@
 import type { BodyScan } from './types';
 import { NUTRITION_KEYS } from '../nutrition/types';
+import { formatReportReadings, hasReviewedReport } from './readings';
 
 function reportRecommendations(scan: BodyScan): string {
   if (!scan.targets || !NUTRITION_KEYS.some((key) => scan.targets![key] !== null)) return '';
@@ -20,12 +21,12 @@ export function bodyScanContext(
   selectedIds: readonly string[],
 ): string {
   const selected = scans.filter((scan) => selectedIds.includes(scan.id));
-  if (selected.some((scan) => !scan.text.trim()))
+  if (selected.some((scan) => !hasReviewedReport(scan)))
     throw new Error('Read or enter report text before adding this body scan to Gemini.');
   const text = selected
     .map(
       (scan) =>
-        `Body scan: ${scan.name}\nRecorded: ${scan.recordedOn ?? 'Date not recorded'}\n${scan.text}${reportRecommendations(scan)}`,
+        `Body scan: ${scan.name}\nRecorded: ${scan.recordedOn ?? 'Date not recorded'}\n${scan.readings?.length ? `${formatReportReadings(scan.readings)}\nThese are user-reviewed report values. Measurements are not dietary goals; recorded recommendations have not automatically been adopted as daily goals.` : scan.text}${reportRecommendations(scan)}`,
     )
     .join('\n\n');
   if (text.length > 24_000)

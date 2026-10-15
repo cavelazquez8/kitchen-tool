@@ -241,7 +241,7 @@ test('saves originals in IndexedDB, transfers them in a backup, and edits or del
   await expect(profile.getByText('Your reports belong here', { exact: true })).toBeVisible();
 });
 
-test('shares only explicitly attached report text and clears selection after a reload', async ({
+test('shares only explicitly attached report context and preserves it after a reload', async ({
   page,
 }) => {
   test.setTimeout(60_000);
@@ -272,6 +272,7 @@ test('shares only explicitly attached report text and clears selection after a r
     });
   });
   await navigateGemini(page);
+  await page.getByRole('button', { name: 'Conversation options', exact: true }).click();
   await page.getByRole('radio', { name: 'Create with my inventory', exact: true }).check();
   await ask(page, 'Suggest a simple dinner.');
   await expect.poll(() => requests.length).toBe(1);
@@ -283,7 +284,7 @@ test('shares only explicitly attached report text and clears selection after a r
   await card(profile, 'First report')
     .getByRole('button', { name: 'Add to Gemini', exact: true })
     .click();
-  const context = page.getByRole('region', { name: 'Gemini body scan context' });
+  const context = page.locator('.assistant-context');
   await expect(context).toContainText('First report');
   await expect(context).not.toContainText('Second report');
   await ask(page, 'Consider the report I attached.');
@@ -309,11 +310,14 @@ test('shares only explicitly attached report text and clears selection after a r
   expect(requests[3].profile).toContain(reports[1].text);
   await page.reload();
   await navigateGemini(page);
-  await expect(context).toHaveCount(0);
+  await expect(context).toContainText('Second report');
+  await expect(context).not.toContainText('First report');
+  await page.getByRole('button', { name: 'Conversation options', exact: true }).click();
   await page.getByRole('radio', { name: 'Create with my inventory', exact: true }).check();
   await ask(page, 'Suggest another dinner.');
   await expect.poll(() => requests.length).toBe(5);
-  expect(requests[4].profile).toBeUndefined();
+  expect(requests[4].profile).toContain(reports[1].text);
+  expect(requests[4].profile).not.toContain(reports[0].text);
   expect((await stateOf(page)).bodyScans).toEqual(reports);
 });
 
@@ -351,6 +355,7 @@ test('saves the chosen Gemini model, verifies its backend setting, and uses it f
   ).toContainText('Gemini 3.1 Flash-Lite');
   await reloadedSettings.getByRole('button', { name: 'Close', exact: true }).click();
   await navigateGemini(page);
+  await page.getByRole('button', { name: 'Conversation options', exact: true }).click();
   await page.getByRole('radio', { name: 'Create with my inventory', exact: true }).check();
   await ask(page, 'Help me choose a meal.');
   await expect.poll(() => requests.length).toBe(1);

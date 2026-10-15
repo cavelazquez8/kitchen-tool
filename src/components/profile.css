@@ -318,6 +318,48 @@
   border-top: 1px solid var(--line, #3b4b3c);
   padding-top: 20px;
 }
+.profile-readings {
+  display: grid;
+  gap: 16px;
+}
+.profile-reading-group {
+  padding: 14px;
+  margin: 0;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  min-width: 0;
+}
+.profile-reading-group legend {
+  padding: 0 7px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.profile-reading-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 40px;
+  align-items: end;
+  gap: 10px;
+}
+.profile-reading-row + .profile-reading-row {
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid var(--line);
+}
+.profile-reading-kind {
+  grid-column: 1 / -1;
+  justify-self: start;
+  font-size: 11px;
+}
+.profile-source-text summary {
+  cursor: pointer;
+  padding: 12px 0;
+  font-size: 13px;
+  color: var(--muted);
+}
+.profile-source-text[open] {
+  display: grid;
+  gap: 12px;
+}
 .profile-editor .form-error,
 .profile-content .form-error {
   margin: 0;

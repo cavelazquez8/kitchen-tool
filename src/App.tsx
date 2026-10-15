@@ -55,6 +55,7 @@ import {
   type ProfileBackup,
 } from './profile/backup';
 import { bodyScanContext } from './profile/context';
+import { updateAssistantSession } from './ai/conversation';
 import { ProfileDialog } from './components/ProfileDialog';
 import { useInventoryRepository } from './lib/useInventoryRepository';
 import { GroceryScannerSession } from './scanner/GroceryScannerSession';
@@ -133,7 +134,17 @@ export default function App() {
   const [toast, setToast] = useState('');
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
-  const [attachedBodyScanIds, setAttachedBodyScanIds] = useState<string[]>([]);
+  const [hubSessionRevision, setHubSessionRevision] = useState(0);
+  const attachedBodyScanIds = (inventory.assistantSession?.bodyScanIds ?? []).filter((id) =>
+    inventory.bodyScans?.some((scan) => scan.id === id),
+  );
+  function setAttachedBodyScanIds(ids: string[]) {
+    void repository
+      .update((state) => updateAssistantSession(state, { bodyScanIds: [...new Set(ids)] }))
+      .catch((error: unknown) =>
+        setToast(error instanceof Error ? error.message : 'Could not save the selected reports.'),
+      );
+  }
   const [exportOpen, setExportOpen] = useState(false);
   const [exportSelected, setExportSelected] = useState(false);
   const [scannerOpen, setScannerOpen] = useState(false);
@@ -692,7 +703,7 @@ export default function App() {
                   : page === 'tools'
                     ? 'Your kitchen tools'
                     : page === 'recipes'
-                      ? 'Recipes for your kitchen'
+                      ? 'Your recipes'
                       : page === 'shopping'
                         ? 'Your shopping list'
                         : 'Cook with Gemini'}
@@ -703,7 +714,7 @@ export default function App() {
                   : page === 'tools'
                     ? 'The right tools make all the difference.'
                     : page === 'recipes'
-                      ? 'Find a favorite. See what you can make.'
+                      ? 'Keep favorites. Bring good recipes into your kitchen.'
                       : page === 'shopping'
                         ? 'Plan meals. Buy just what’s missing.'
                         : 'Your ingredients, your recipes, your conversation.'}
@@ -729,6 +740,7 @@ export default function App() {
           </div>
           {page === 'recipes' || page === 'shopping' || page === 'assistant' ? (
             <KitchenHub
+              key={`${snapshot.user?.uid ?? 'local'}:${hubSessionRevision}`}
               page={page}
               inventory={inventory}
               selectedBatchIds={selected}
@@ -1430,7 +1442,7 @@ export default function App() {
                   setBackupToImport(null);
                   setSelected([]);
                   setExpanded(null);
-                  setAttachedBodyScanIds([]);
+                  setHubSessionRevision((revision) => revision + 1);
                 }
               });
             }}

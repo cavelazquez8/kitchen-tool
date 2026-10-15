@@ -58,6 +58,8 @@ export function RecipeNutrition({
     [],
   );
   const estimate = reviewedRecipeEstimate(recipe, draft);
+  const published = recipe.publisherNutrition;
+  const showReviewedEstimate = !published || open || !!estimate?.mappedIngredientCount;
   function edit(index: number) {
     attempt.current++;
     controller.current?.abort();
@@ -147,7 +149,11 @@ export function RecipeNutrition({
       <div className="hub-section-title nutrition-heading">
         <div>
           <h3>Nutrition</h3>
-          <p>From foods and amounts you’ve reviewed</p>
+          <p>
+            {published
+              ? 'The original recipe’s published estimate'
+              : 'From foods and amounts you’ve reviewed'}
+          </p>
         </div>
         <button className="text-button" onClick={() => setOpen((value) => !value)}>
           {open
@@ -157,87 +163,125 @@ export function RecipeNutrition({
               : 'Estimate with USDA'}
         </button>
       </div>
-      <div className="nutrition-basis" role="group" aria-label="Nutrition amounts">
-        <button type="button" aria-pressed={basis === 'recipe'} onClick={() => setBasis('recipe')}>
-          Whole recipe
-        </button>
-        <button
-          type="button"
-          aria-pressed={basis === 'serving'}
-          disabled={!recipe.servings}
-          onClick={() => setBasis('serving')}
-        >
-          Per serving{recipe.servings ? ` · ${recipe.servings} in recipe` : ''}
-        </button>
-      </div>
-      <div
-        className="nutrition-macros"
-        aria-label={basis === 'serving' ? 'Nutrition per serving' : 'Whole recipe nutrition'}
-      >
-        {(
-          [
-            ['caloriesKcal', 'Calories', 'kcal'],
-            ['proteinGrams', 'Protein', 'g'],
-            ['carbsGrams', 'Carbs', 'g'],
-            ['fatGrams', 'Fat', 'g'],
-          ] as const
-        ).map(([key, label, unit]) => {
-          const completeValue =
-            basis === 'serving' ? estimate?.perServing?.[key] : estimate?.totals[key];
-          const subtotal = estimate?.knownSubtotal[key];
-          const partial = completeValue == null && subtotal != null;
-          const value =
-            completeValue ??
-            (subtotal == null
-              ? null
-              : basis === 'serving' && recipe.servings
-                ? subtotal / recipe.servings
-                : subtotal);
-          return (
-            <span key={key}>
-              {label}
-              <strong>{value == null ? '—' : `${Math.round(value * 10) / 10} ${unit}`}</strong>
-              <small>
-                {partial ? 'Partial estimate' : value == null ? 'Not recorded' : 'Estimated'}
-              </small>
-            </span>
-          );
-        })}
-      </div>
-      <p className="nutrition-progress" role="status">
-        {estimate?.mappedIngredientCount
-          ? `${estimate.mappedIngredientCount} of ${recipe.ingredients.length} ingredients reviewed${estimate.complete ? ' · All nutrients available' : ''}.`
-          : 'Match ingredients to USDA foods to see calories and macros.'}
-      </p>
-      {!!estimate?.missingIngredientIndexes.length && !!estimate.mappedIngredientCount && (
-        <p className="field-note">
-          Partial values cover reviewed ingredients only. Review the remaining ingredients for the
-          full recipe.
-        </p>
-      )}
-      {!!estimate?.mappedIngredientCount &&
-        estimate.missingNutrients.length > 0 &&
-        estimate.missingIngredientIndexes.length === 0 && (
-          <p className="field-note">
-            Some selected foods don’t report every nutrient. Partial values exclude that missing
-            data; choose another USDA match to fill the gaps.
+      {published && (
+        <div className="publisher-nutrition" aria-label="Publisher nutrition">
+          <p className="nutrition-progress">
+            {published.servingSize
+              ? `As published for ${published.servingSize}`
+              : 'Serving basis not recorded. Check the original recipe before scaling nutrition.'}
           </p>
-        )}
-      {!recipe.servings && (
-        <p className="field-note">
-          Whole-recipe amounts are shown because the serving count hasn’t been recorded.
-          {onEditRecipe && (
-            <>
-              {' '}
-              <button className="text-button" onClick={onEditRecipe}>
-                Add serving count
-              </button>
-            </>
-          )}
-        </p>
+          <div className="nutrition-macros">
+            {(
+              [
+                ['calories', 'Calories'],
+                ['protein', 'Protein'],
+                ['carbohydrates', 'Carbs'],
+                ['fat', 'Fat'],
+              ] as const
+            ).map(([key, label]) => (
+              <span key={key}>
+                {label}
+                <strong>{published[key] ?? '—'}</strong>
+                <small>{published[key] ? 'Publisher estimate' : 'Not recorded'}</small>
+              </span>
+            ))}
+          </div>
+          <p className="field-note">
+            These are the publisher’s values for the original recipe. Ingredient changes and serving
+            adjustments can affect them.
+          </p>
+        </div>
       )}
-      {mapping && mapping.recipeKey !== currentKey && (
-        <p className="field-note">This recipe changed. Review the food matches again.</p>
+      {showReviewedEstimate && (
+        <>
+          {published && <p className="nutrition-progress">Your ingredient-based USDA estimate</p>}
+          <div className="nutrition-basis" role="group" aria-label="Nutrition amounts">
+            <button
+              type="button"
+              aria-pressed={basis === 'recipe'}
+              onClick={() => setBasis('recipe')}
+            >
+              Whole recipe
+            </button>
+            <button
+              type="button"
+              aria-pressed={basis === 'serving'}
+              disabled={!recipe.servings}
+              onClick={() => setBasis('serving')}
+            >
+              Per serving{recipe.servings ? ` · ${recipe.servings} in recipe` : ''}
+            </button>
+          </div>
+          <div
+            className="nutrition-macros"
+            aria-label={basis === 'serving' ? 'Nutrition per serving' : 'Whole recipe nutrition'}
+          >
+            {(
+              [
+                ['caloriesKcal', 'Calories', 'kcal'],
+                ['proteinGrams', 'Protein', 'g'],
+                ['carbsGrams', 'Carbs', 'g'],
+                ['fatGrams', 'Fat', 'g'],
+              ] as const
+            ).map(([key, label, unit]) => {
+              const completeValue =
+                basis === 'serving' ? estimate?.perServing?.[key] : estimate?.totals[key];
+              const subtotal = estimate?.knownSubtotal[key];
+              const partial = completeValue == null && subtotal != null;
+              const value =
+                completeValue ??
+                (subtotal == null
+                  ? null
+                  : basis === 'serving' && recipe.servings
+                    ? subtotal / recipe.servings
+                    : subtotal);
+              return (
+                <span key={key}>
+                  {label}
+                  <strong>{value == null ? '—' : `${Math.round(value * 10) / 10} ${unit}`}</strong>
+                  <small>
+                    {partial ? 'Partial estimate' : value == null ? 'Not recorded' : 'Estimated'}
+                  </small>
+                </span>
+              );
+            })}
+          </div>
+          <p className="nutrition-progress" role="status">
+            {estimate?.mappedIngredientCount
+              ? `${estimate.mappedIngredientCount} of ${recipe.ingredients.length} ingredients reviewed${estimate.complete ? ' · All nutrients available' : ''}.`
+              : 'Match ingredients to USDA foods to see calories and macros.'}
+          </p>
+          {!!estimate?.missingIngredientIndexes.length && !!estimate.mappedIngredientCount && (
+            <p className="field-note">
+              Partial values cover reviewed ingredients only. Review the remaining ingredients for
+              the full recipe.
+            </p>
+          )}
+          {!!estimate?.mappedIngredientCount &&
+            estimate.missingNutrients.length > 0 &&
+            estimate.missingIngredientIndexes.length === 0 && (
+              <p className="field-note">
+                Some selected foods don’t report every nutrient. Partial values exclude that missing
+                data; choose another USDA match to fill the gaps.
+              </p>
+            )}
+          {!recipe.servings && (
+            <p className="field-note">
+              Whole-recipe amounts are shown because the serving count hasn’t been recorded.
+              {onEditRecipe && (
+                <>
+                  {' '}
+                  <button className="text-button" onClick={onEditRecipe}>
+                    Add serving count
+                  </button>
+                </>
+              )}
+            </p>
+          )}
+          {mapping && mapping.recipeKey !== currentKey && (
+            <p className="field-note">This recipe changed. Review the food matches again.</p>
+          )}
+        </>
       )}
       {open && (
         <>

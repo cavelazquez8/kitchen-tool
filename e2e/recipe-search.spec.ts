@@ -42,9 +42,16 @@ async function navigateRecipes(page: Page) {
     .filter({ visible: true })
     .first()
     .click();
+  await page.getByRole('button', { name: 'All recipes', exact: true }).click();
+  await page.getByRole('button', { name: 'For your kitchen', exact: true }).click();
 }
 
 async function choose(page: Page, name: string, option: string) {
+  if (
+    name === 'Recipe source' &&
+    !(await page.getByRole('combobox', { name, exact: true }).isVisible())
+  )
+    await page.getByText('Other recipe sources', { exact: true }).click();
   await page.getByRole('combobox', { name, exact: true }).click();
   await page.getByRole('option', { name: option, exact: true }).click();
 }
@@ -227,7 +234,7 @@ test('searches a chosen provider explicitly and applies filters to its grid and 
   expect(requests).toEqual([
     expect.objectContaining({ provider: 'recipeapi', query: 'dinner', page: 1 }),
   ]);
-  await choose(page, 'Recipe source', 'Your cookbook');
+  await choose(page, 'Recipe source', 'Your collection & community cookbook');
   await page.getByRole('textbox', { name: 'Find recipes', exact: true }).fill('');
   await expectCount(page, 6);
   await expect(page.getByRole('combobox', { name: 'Recipe category', exact: true })).toHaveText(
@@ -293,9 +300,9 @@ test('filters personal imports separately from saved provider, own, and AI recip
   await choose(page, 'Recipe source', 'RecipeAPI.io');
   await expect(cards(page)).toHaveCount(0);
   await choose(page, 'Recipe collection', 'Imported recipes');
-  await expect(page.getByRole('combobox', { name: 'Recipe source', exact: true })).toHaveText(
-    'Your cookbook',
-  );
+  await expect(
+    page.getByRole('combobox', { name: 'Recipe source', exact: true, includeHidden: true }),
+  ).toHaveText('Your collection & community cookbook');
   await expectCount(page, 2);
 });
 
@@ -433,7 +440,7 @@ test('discards provider responses after typing a new query or choosing another s
   ).toHaveCount(0);
   await page.getByRole('button', { name: 'Search RecipeAPI.io', exact: true }).click();
   await expect.poll(() => pending.length).toBe(2);
-  await choose(page, 'Recipe source', 'Your cookbook');
+  await choose(page, 'Recipe source', 'Your collection & community cookbook');
   await query.fill('');
   pending[1].release();
   await pending[1].done;

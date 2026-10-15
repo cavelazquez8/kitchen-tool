@@ -1,4 +1,4 @@
-import type { Recipe } from '../recipes/types';
+import { copyRecipeMetadata, type Recipe } from '../recipes/types';
 import type { AiMessage, AiRecipeDraft } from './protocol';
 
 const HISTORY_ENTRY_LIMIT = 6000;
@@ -32,7 +32,10 @@ export function normalizeAiRecipe(
       ...(ingredient.optional === undefined ? {} : { optional: ingredient.optional }),
     })),
     steps: draft.steps.map((step) => step.trim()),
-    source: { ...source },
+    source: {
+      ...(source.type === 'imported' && draft.source?.type === 'imported' ? draft.source : source),
+    },
+    ...copyRecipeMetadata(draft),
   };
 }
 
@@ -65,7 +68,20 @@ export function boundedChatHistory(history: readonly AiMessage[]): AiMessage[] {
 
 /** Bounded plain-text context keeps amounts explicit and never infers unknowns. */
 export function recipeContext(recipe: Recipe): string {
-  const header = `Recipe: ${shortened(recipe.title, 180, '…')}\nOriginal servings: ${recipe.servings === null ? 'Unknown' : recipe.servings}\n`;
+  const metadata = [
+    `Source: ${recipe.source.name ?? recipe.source.type}`,
+    recipe.source.url ? `Original source URL: ${recipe.source.url}` : '',
+    recipe.author ? `Author: ${recipe.author}` : '',
+    recipe.totalMinutes !== undefined ? `Total time: ${recipe.totalMinutes} minutes` : '',
+    recipe.prepMinutes !== undefined ? `Preparation time: ${recipe.prepMinutes} minutes` : '',
+    recipe.cookMinutes !== undefined ? `Cooking time: ${recipe.cookMinutes} minutes` : '',
+    recipe.publisherNutrition
+      ? `Publisher-declared nutrition (preserve stated units; do not assume a serving basis): ${JSON.stringify(recipe.publisherNutrition)}`
+      : '',
+  ]
+    .filter(Boolean)
+    .join('\n');
+  const header = `Recipe: ${shortened(recipe.title, 180, '…')}\nOriginal servings: ${recipe.servings === null ? 'Unknown' : recipe.servings}\n${shortened(metadata, 2800, '\n[Publisher metadata shortened; ask for the source before assuming omitted values.]')}\n`;
   const ingredients = recipe.ingredients
     .map((ingredient) => {
       const amount =

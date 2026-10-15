@@ -21,6 +21,9 @@ export function GeminiSettings({ onToast }: { onToast: (message: string) => void
   const { url, token } = draft;
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
+  const [discovery, setDiscovery] = useState<{ supported: boolean; configured: boolean } | null>(
+    null,
+  );
   const checkController = useRef<AbortController | null>(null);
   useEffect(() => () => checkController.current?.abort(), []);
   function updateDraft(next: GeminiConnection) {
@@ -41,10 +44,14 @@ export function GeminiSettings({ onToast }: { onToast: (message: string) => void
     setMessage('');
     try {
       const connection = normalizeGeminiConnection(draft);
-      await checkGeminiConnection(connection, controller.signal);
+      const status = await checkGeminiConnection(connection, controller.signal);
       if (controller.signal.aborted) return;
       saveGeminiConnection(connection);
       setDraft(connection);
+      setDiscovery({
+        supported: status?.supportsRecipeDiscovery === true,
+        configured: status?.recipeDiscoveryConfigured === true,
+      });
       setMessage('Backend connected. Send your first request to verify Gemini access.');
       onToast('Gemini connection saved on this device.');
     } catch (error) {
@@ -94,6 +101,51 @@ export function GeminiSettings({ onToast }: { onToast: (message: string) => void
         Add your Cloudflare backend address and personal pairing token. Your Google API key stays in
         Cloudflare.
       </p>
+      <details className="gemini-setup gemini-discovery-setup">
+        <summary>Find recipes from cooking websites</summary>
+        <p className="settings-note">
+          Give Gemini web search so it can find real recipes, discuss them with you, and bring them
+          into Mise.
+        </p>
+        <ol>
+          <li>
+            Download the latest{' '}
+            <a className="text-button" href="/mise-gemini-worker.js" download>
+              Worker code
+            </a>{' '}
+            and replace the code in your existing Cloudflare Worker. Keep your current secrets.
+          </li>
+          <li>
+            Create a free account at{' '}
+            <a
+              className="text-button"
+              href="https://www.tavily.com/"
+              target="_blank"
+              rel="noreferrer"
+            >
+              Tavily
+            </a>
+            . Copy its API key into a Cloudflare secret named <code>TAVILY_API_KEY</code>.
+          </li>
+          <li>
+            Add a Cloudflare variable named <code>TAVILY_PLAN</code> with the value{' '}
+            <code>free</code>, deploy the Worker, then save and check your connection below.
+          </li>
+        </ol>
+        <p className="settings-note">
+          Use the free plan without adding payment details. Search stops when its monthly allowance
+          runs out; your saved recipes remain available.
+        </p>
+        {discovery && (
+          <p className="settings-note" role="status">
+            {discovery.configured
+              ? 'Web recipe discovery is configured. Ask Gemini to find a recipe to verify live search.'
+              : discovery.supported
+                ? 'Your Worker supports web recipes. Add the Tavily free-plan settings to connect search.'
+                : 'Update your Worker code to enable web recipe discovery.'}
+          </p>
+        )}
+      </details>
       <p className="settings-note">
         {initial
           ? 'Connection saved on this device. You can send a message in the Gemini tab.'
@@ -179,6 +231,7 @@ export function GeminiSettings({ onToast }: { onToast: (message: string) => void
               clearGeminiConnection();
               forgetModelPreferences();
               setDraft({ url: '', token: '' });
+              setDiscovery(null);
               setMessage('Disconnected.');
               onToast('Gemini disconnected.');
             }}

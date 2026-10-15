@@ -177,8 +177,8 @@ export function RecipeBrowser({
   const [category, setCategory] = useState('');
   const [cuisine, setCuisine] = useState('');
   const [filter, setFilter] = useState<BrowseFilter>('all');
-  const [collection, setCollection] = useState<RecipeCollection>('all');
-  const [order, setOrder] = useState<BrowseOrder>('kitchen');
+  const [collection, setCollection] = useState<RecipeCollection>('saved');
+  const [order, setOrder] = useState<BrowseOrder>('browse');
   const [prioritize, setPrioritize] = useState(false);
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
   const [local, setLocal] = useState<Recipe[]>([]);
@@ -494,42 +494,45 @@ export function RecipeBrowser({
     <section className="recipe-browser" aria-label="Recipe browser">
       <section className="library-intro">
         <div>
-          <span className="library-eyebrow">YOUR NEXT GOOD MEAL</span>
-          <h2>Find your next meal.</h2>
+          <span className="library-eyebrow">KEEP THE RECIPES YOU LOVE</span>
+          <h2>Your recipe collection.</h2>
           <p>
             {source !== 'library'
               ? `${sourceName} recipes, compared with your kitchen.`
               : collection !== 'all'
                 ? `${recipeCollectionLabel(collection)} from your personal library.`
                 : local.length
-                  ? `${local.length.toLocaleString()} built-in recipes · Your saved favorites, too.`
+                  ? 'Your saved recipes and the optional community cookbook.'
                   : 'Your cookbook and saved favorites.'}
           </p>
         </div>
         <BookOpen size={36} strokeWidth={1.3} aria-hidden="true" />
       </section>
       <div className="recipe-search-panel">
-        <div className="recipe-source-picker">
-          <span className="recipe-source-label">Recipe source</span>
-          <Choice
-            label="Recipe source"
-            value={source}
-            options={[
-              { value: 'library', label: 'Your cookbook' },
-              { value: 'themealdb', label: 'TheMealDB' },
-              { value: 'recipeapi', label: 'RecipeAPI.io' },
-              { value: 'spoonacular', label: 'Spoonacular' },
-            ]}
-            onChange={(value) => changeSource(value as BrowseSource)}
-          />
-          <p>
-            {source === 'library'
-              ? 'Built-in recipes and everything you’ve saved.'
-              : source === 'spoonacular'
-                ? 'Temporary discovery. Open recipes on their original website.'
-                : 'Find more recipes, then save the ones you like.'}
-          </p>
-        </div>
+        <details className="library-refine recipe-other-sources" open={source !== 'library'}>
+          <summary>Other recipe sources{source !== 'library' ? ` · ${sourceName}` : ''}</summary>
+          <div className="recipe-source-picker">
+            <span className="recipe-source-label">Recipe source</span>
+            <Choice
+              label="Recipe source"
+              value={source}
+              options={[
+                { value: 'library', label: 'Your collection & community cookbook' },
+                { value: 'themealdb', label: 'TheMealDB' },
+                { value: 'recipeapi', label: 'RecipeAPI.io' },
+                { value: 'spoonacular', label: 'Spoonacular' },
+              ]}
+              onChange={(value) => changeSource(value as BrowseSource)}
+            />
+            <p>
+              {source === 'library'
+                ? 'Your saved recipes, with community recipes available under All recipes.'
+                : source === 'spoonacular'
+                  ? 'Temporary discovery. Open recipes on their original website.'
+                  : 'Find more recipes, then save the ones you like.'}
+            </p>
+          </div>
+        </details>
         <form
           className="hub-search recipe-search-form"
           onSubmit={(event) => {

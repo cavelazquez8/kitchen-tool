@@ -92,6 +92,7 @@ test('shows reviewed whole-recipe nutrition when the source yield is missing', a
     .getByRole('button', { name: 'View recipe', exact: true })
     .click();
   const panel = page.getByRole('region', { name: 'Recipe nutrition' });
+  await page.getByText('Review nutrition and portion estimates', { exact: true }).click();
   await expect(panel.getByText('72 kcal', { exact: true })).toBeVisible();
   await expect(panel.getByText('1.8 g', { exact: true })).toBeVisible();
   await expect(panel.getByRole('button', { name: 'Per serving', exact: true })).toBeDisabled();
@@ -107,6 +108,7 @@ test('shuffles everyday dishes and the whole cookbook without changing kitchen d
   page,
 }) => {
   await recipesPage(page);
+  await page.getByText('Explore the community cookbook', { exact: true }).click();
   const panel = page.getByRole('region', { name: 'Recipe starting points' });
   const cards = panel.locator('.starter-recipe strong');
   await expect(cards).toHaveCount(3);
@@ -166,6 +168,7 @@ test('reviews real ingredients through USDA without diagnostic tests or auto-con
     });
   });
   await recipesPage(page);
+  await page.getByText('Explore the community cookbook', { exact: true }).click();
   await page
     .getByRole('region', { name: 'Recipe starting points' })
     .getByRole('button', { name: /Southwestern Black Beans and Rice/ })
@@ -175,6 +178,7 @@ test('reviews real ingredients through USDA without diagnostic tests or auto-con
     exact: true,
   });
   const nutrition = detail.getByRole('region', { name: 'Recipe nutrition' });
+  await detail.getByText('Review nutrition and portion estimates', { exact: true }).click();
   await nutrition.getByRole('button', { name: 'Estimate with USDA' }).click();
   expect(searches).toBe(0);
   await expect(nutrition.getByRole('button', { name: 'Test USDA lookup' })).toHaveCount(0);

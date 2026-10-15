@@ -55,6 +55,14 @@ export interface ChatMessage {
   role: 'user' | 'assistant';
   text: string;
 }
+/** Conversation cards and chosen context travel with the user's kitchen backup. */
+export interface AssistantSession {
+  recipes: Recipe[];
+  attachedRecipes: Recipe[];
+  draft: string;
+  mode: 'discover' | 'create' | 'library';
+  bodyScanIds?: string[];
+}
 export interface InventoryState {
   products: Product[];
   batches: Batch[];
@@ -63,6 +71,7 @@ export interface InventoryState {
   mealPlan?: MealPlanItem[];
   shoppingList?: ShoppingItem[];
   chatHistory?: ChatMessage[];
+  assistantSession?: AssistantSession;
   nutritionTargets?: NutritionTargets;
   recipeNutrition?: (RecipeNutritionMapping & { recipeId: string })[];
   bodyScans?: BodyScan[];
@@ -88,6 +97,29 @@ export const LOCATION_LABELS: Record<StorageLocation, string> = {
 
 export function createEmptyInventory(): InventoryState {
   return { products: [], batches: [], tools: [] };
+}
+
+export function isAssistantSession(value: unknown): value is AssistantSession {
+  if (!isRecord(value)) return false;
+  const recipes = (items: unknown) =>
+    Array.isArray(items) &&
+    items.length <= 12 &&
+    items.every(isRecipe) &&
+    new Set(items.map((recipe) => recipe.id)).size === items.length;
+  return (
+    recipes(value.recipes) &&
+    recipes(value.attachedRecipes) &&
+    typeof value.draft === 'string' &&
+    value.draft.length <= 6000 &&
+    (value.bodyScanIds === undefined ||
+      (Array.isArray(value.bodyScanIds) &&
+        value.bodyScanIds.length <= 20 &&
+        value.bodyScanIds.every(
+          (id) => typeof id === 'string' && id.trim().length > 0 && id.length <= 100,
+        ) &&
+        new Set(value.bodyScanIds).size === value.bodyScanIds.length)) &&
+    ['discover', 'create', 'library'].includes(value.mode as string)
+  );
 }
 
 /** A local calendar date, not a UTC timestamp. */
@@ -237,6 +269,8 @@ export function isInventoryState(value: unknown): value is InventoryState {
   )
     return false;
   if (value.nutritionTargets !== undefined && !isNutritionTargets(value.nutritionTargets))
+    return false;
+  if (value.assistantSession !== undefined && !isAssistantSession(value.assistantSession))
     return false;
   if (value.bodyScans !== undefined && !isBodyScanCollection(value.bodyScans)) return false;
   if (

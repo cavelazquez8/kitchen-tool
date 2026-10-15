@@ -48,6 +48,25 @@ afterEach(() => {
 });
 
 describe('recipe food and weight review', () => {
+  it('shows declared publisher nutrition immediately without requiring USDA work or guessing a serving basis', () => {
+    render(
+      <RecipeNutrition
+        recipe={{
+          ...recipe,
+          publisherNutrition: { calories: '400 kcal', protein: '25 g', carbohydrates: '45 g' },
+        }}
+        onSave={vi.fn()}
+        onConfigure={vi.fn()}
+      />,
+    );
+    const published = screen.getByLabelText('Publisher nutrition');
+    expect(within(published).getByText('400 kcal')).toBeVisible();
+    expect(within(published).getByText('25 g')).toBeVisible();
+    expect(within(published).getByText(/Serving basis not recorded/)).toBeVisible();
+    expect(within(published).getByText('Not recorded')).toBeVisible();
+    expect(screen.queryByLabelText('Nutrition amounts')).not.toBeInTheDocument();
+    expect(searchNutritionFoods).not.toHaveBeenCalled();
+  });
   it('opens ingredient review without a diagnostic test or spending a search', async () => {
     render(<RecipeNutrition recipe={recipe} onSave={vi.fn()} onConfigure={vi.fn()} />);
     await userEvent.setup().click(screen.getByRole('button', { name: 'Estimate with USDA' }));

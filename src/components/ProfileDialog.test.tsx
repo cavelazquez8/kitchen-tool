@@ -75,6 +75,44 @@ afterEach(() => {
 });
 
 describe('saved body scans', () => {
+  it('autofills editable report fields and keeps reported ranges separate from approved goals', async () => {
+    const user = userEvent.setup();
+    const update = vi.fn().mockResolvedValue(undefined);
+    vi.mocked(extractGeminiBodyScan).mockResolvedValue({
+      text: 'Body fat: 20%. Recommended calories: 2,000–2,200 kcal.',
+      recordedOn: null,
+      targets: { caloriesKcal: null, proteinGrams: null, carbsGrams: null, fatGrams: null },
+      warnings: [],
+      readings: [
+        { label: 'Body fat', value: '20%', kind: 'measurement' },
+        { label: 'Calories', value: '2,000–2,200 kcal', kind: 'recommendation' },
+      ],
+    });
+    render(
+      <ProfileDialog
+        inventory={blank}
+        update={update}
+        onClose={vi.fn()}
+        onToast={toast}
+        onAttach={attach}
+        onConfigure={configure}
+      />,
+    );
+    await user.click(screen.getByRole('button', { name: 'Add scan' }));
+    await user.type(screen.getByLabelText('Report name'), 'Reviewed example');
+    await user.type(screen.getByLabelText(/Report text/), 'An example report.');
+    await user.click(screen.getByRole('button', { name: 'Read with Gemini' }));
+    const value = await screen.findByLabelText('Report value 1');
+    expect(value).toHaveValue('20%');
+    expect(screen.getByLabelText('Report value 2')).toHaveValue('2,000–2,200 kcal');
+    await user.clear(value);
+    await user.type(value, '20.5%');
+    await user.click(screen.getByRole('button', { name: 'Save report' }));
+    const saved = update.mock.calls[0][0](blank) as InventoryState;
+    expect(saved.bodyScans?.[0].readings?.[0].value).toBe('20.5%');
+    expect(saved.bodyScans?.[0].readings?.[1].value).toBe('2,000–2,200 kcal');
+    expect(saved.nutritionTargets).toBeUndefined();
+  });
   it('saves an original without sending it to Gemini and requires text before attaching it', async () => {
     const user = userEvent.setup();
     render(<Harness />);

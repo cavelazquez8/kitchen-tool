@@ -70,6 +70,7 @@ test('opens a sourced starter offline, preserving its amounts and shopping short
   page,
 }) => {
   await navigate(page, 'Recipes');
+  await page.getByText('Explore the community cookbook', { exact: true }).click();
   const starters = page.getByRole('region', { name: 'Recipe starting points' });
   await expect(starters).toContainText('A good place to start');
   if (['cover', 'unfolded'].includes(test.info().project.name))
@@ -125,11 +126,13 @@ test('Gemini chooses candidate IDs and opens the original recipe without rewriti
     });
   });
   await navigate(page, 'Recipes');
+  await page.getByText('Explore the community cookbook', { exact: true }).click();
   await page
     .getByRole('region', { name: 'Recipe starting points' })
     .getByRole('button', { name: 'Help me choose', exact: true })
     .click();
-  await expect(page.getByRole('radio', { name: 'Choose from the cookbook' })).toBeChecked();
+  await page.getByRole('button', { name: 'Conversation options', exact: true }).click();
+  await page.getByRole('radio', { name: 'Choose from the cookbook', exact: true }).check();
   await page
     .getByRole('button', {
       name: 'Help me choose dinner',
@@ -143,7 +146,7 @@ test('Gemini chooses candidate IDs and opens the original recipe without rewriti
   const selected = requests[0].candidates?.find((candidate) => candidate.id === recipeId);
   expect(selected?.ingredients).toContain('2 cups cooked rice');
   expect(selected?.missingIngredients).toContain('can black beans');
-  expect(selected?.source).toBe('Wikibooks Cookbook');
+  expect(selected?.source).toBe('https://en.wikibooks.org/w/index.php?oldid=4525238');
   expect(selected?.nutrition).toBeUndefined();
   await expect(page.locator('.chat-history')).toContainText('Would you like another protein');
   const card = page
@@ -151,7 +154,7 @@ test('Gemini chooses candidate IDs and opens the original recipe without rewriti
     .filter({ has: page.getByRole('heading', { name: recipeTitle, exact: true }) });
   if (test.info().project.name === 'cover')
     await page.screenshot({ path: '/tmp/mise-guidance-assistant-cover.png', fullPage: true });
-  await card.getByRole('button', { name: 'View recipe', exact: true }).click();
+  await card.getByRole('button', { name: 'Choose recipe', exact: true }).click();
   const detail = page.getByRole('dialog', { name: recipeTitle, exact: true });
   await expect(detail).toContainText('Original: 2 cups cooked rice');
   await expect(detail).toContainText('Serve over hot rice.');
@@ -199,10 +202,12 @@ test('one recommendation request waits for the cookbook to open before contactin
   });
   try {
     await navigate(page, 'Gemini');
+    await page.getByRole('button', { name: 'Conversation options', exact: true }).click();
+    await page.getByRole('radio', { name: 'Choose from the cookbook', exact: true }).check();
     await expect.poll(() => collectionRequests).toBe(1);
     await page.getByRole('button', { name: 'Help me choose dinner', exact: true }).click();
     await expect(
-      page.getByRole('status').filter({ hasText: 'Opening the cookbook…' }),
+      page.getByRole('status').filter({ hasText: 'Gemini is thinking…' }),
     ).toBeVisible();
     expect(requests).toHaveLength(0);
     releaseCollection();

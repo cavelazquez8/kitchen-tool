@@ -281,6 +281,12 @@ async function navigate(page: Page, name: 'Inventory' | 'Recipes' | 'Shopping li
     .first()
     .click();
 }
+async function selectRecipeSource(page: Page, label: string) {
+  if (!(await page.getByRole('combobox', { name: 'Recipe source', exact: true }).isVisible()))
+    await page.getByText('Other recipe sources', { exact: true }).click();
+  await page.getByRole('combobox', { name: 'Recipe source', exact: true }).click();
+  await page.getByRole('option', { name: label, exact: true }).click();
+}
 async function saveOwnRecipe(page: Page, title: string, quantity: number) {
   await page.getByRole('button', { name: 'Your own recipe', exact: true }).click();
   const editor = page.getByRole('dialog', { name: 'Review your recipe' });
@@ -376,8 +382,7 @@ test('searches online recipes, compares quantities, and shows cooking steps', as
   });
   await addItem(page, 'Chicken breast', '500', '', '2026-01-01', 'g');
   await navigate(page, 'Recipes');
-  await page.getByRole('combobox', { name: 'Recipe source', exact: true }).click();
-  await page.getByRole('option', { name: 'TheMealDB', exact: true }).click();
+  await selectRecipeSource(page, 'TheMealDB');
   await page.getByRole('textbox', { name: 'Find recipes', exact: true }).fill('Weeknight chicken');
   await page.getByRole('button', { name: 'Search TheMealDB', exact: true }).click();
   const card = page
@@ -473,7 +478,8 @@ test('browses the real bundled cookbook, loads more, and finds a familiar recipe
 }) => {
   test.setTimeout(60_000);
   await navigate(page, 'Recipes');
-  await expect(page.locator('.library-intro')).toContainText(/\d[\d,]* built-in recipes/);
+  await page.getByRole('button', { name: 'All recipes', exact: true }).click();
+  await expect(page.locator('.library-results')).toContainText(/Showing 24 of \d[\d,]* recipes/);
   const recipes = page.locator('.kitchen-hub .recipe-grid .recipe-card');
   await expect(recipes).toHaveCount(24);
   const firstPage = await recipes.locator('h3').allTextContents();
@@ -511,15 +517,15 @@ test('keeps local browsing during provider failure and saves licensed recipes in
   await page.route('https://www.themealdb.com/api/**', (route) => route.abort());
   await addItem(page, 'Rice', '50', '', '2026-01-01', 'g');
   await navigate(page, 'Recipes');
+  await page.getByRole('button', { name: 'All recipes', exact: true }).click();
+  await page.getByRole('button', { name: 'For your kitchen', exact: true }).click();
   const recipes = page.locator('.kitchen-hub .recipe-grid .recipe-card');
   await expect(recipes).toHaveCount(24);
-  await page.getByRole('combobox', { name: 'Recipe source', exact: true }).click();
-  await page.getByRole('option', { name: 'TheMealDB', exact: true }).click();
+  await selectRecipeSource(page, 'TheMealDB');
   await page.getByRole('button', { name: 'Search TheMealDB', exact: true }).click();
   await expect(page.getByRole('alert')).toContainText('unavailable');
   await expect(recipes).toHaveCount(0);
-  await page.getByRole('combobox', { name: 'Recipe source', exact: true }).click();
-  await page.getByRole('option', { name: 'Your cookbook', exact: true }).click();
+  await selectRecipeSource(page, 'Your collection & community cookbook');
   await expect(recipes).toHaveCount(24);
   await page.getByRole('button', { name: 'Load more recipes', exact: true }).click();
   await expect(recipes).toHaveCount(48);
@@ -606,15 +612,14 @@ test('ignores an old online recipe search after returning to the local cookbook'
     fulfilled();
   });
   await navigate(page, 'Recipes');
+  await page.getByRole('button', { name: 'All recipes', exact: true }).click();
   await expect(page.locator('.recipe-card')).toHaveCount(24);
   const query = page.getByRole('textbox', { name: 'Find recipes', exact: true });
-  await page.getByRole('combobox', { name: 'Recipe source', exact: true }).click();
-  await page.getByRole('option', { name: 'TheMealDB', exact: true }).click();
+  await selectRecipeSource(page, 'TheMealDB');
   await query.fill('rice');
   await page.getByRole('button', { name: 'Search TheMealDB', exact: true }).click();
   await started;
-  await page.getByRole('combobox', { name: 'Recipe source', exact: true }).click();
-  await page.getByRole('option', { name: 'Your cookbook', exact: true }).click();
+  await selectRecipeSource(page, 'Your collection & community cookbook');
   await query.fill('egg');
   await expect(page.locator('.recipe-card')).toHaveCount(20);
   release();
@@ -1039,6 +1044,7 @@ test('uses mocked Gemini recipes, keeps follow-up context, bounds history, and e
   await navigate(page, 'Gemini');
   const message = page.getByRole('textbox', { name: 'Message Gemini', exact: true });
   const ask = page.getByRole('button', { name: 'Ask Gemini', exact: true });
+  await page.getByRole('button', { name: 'Conversation options', exact: true }).click();
   await page.getByRole('radio', { name: 'Create with my inventory', exact: true }).check();
   await message.fill('Make me a familiar chicken recipe.');
   await ask.click();
@@ -1054,6 +1060,7 @@ test('uses mocked Gemini recipes, keeps follow-up context, bounds history, and e
     card.getByRole('button', { name: 'Free Gemini chicken saved', exact: true }),
   ).toBeDisabled();
   expect((await storedKitchen(page)).recipes?.[0].ingredients[0].original).toBeUndefined();
+  await card.getByRole('button', { name: 'Ask about this recipe', exact: true }).click();
   await message.fill('Can I use my frying pan?');
   await ask.click();
   await expect(
