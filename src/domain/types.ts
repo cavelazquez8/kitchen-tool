@@ -55,6 +55,13 @@ export interface ChatMessage {
   role: 'user' | 'assistant';
   text: string;
 }
+/** Controls only the inventory shared with the assistant, never the kitchen itself. */
+export interface AssistantInventoryContext {
+  mode: 'all' | 'selected' | 'none';
+  productIds: string[];
+}
+export const MAX_ASSISTANT_INVENTORY_PRODUCTS = 1000;
+export const MAX_ASSISTANT_PRODUCT_ID_LENGTH = 100;
 /** Conversation cards and chosen context travel with the user's kitchen backup. */
 export interface AssistantSession {
   recipes: Recipe[];
@@ -62,6 +69,7 @@ export interface AssistantSession {
   draft: string;
   mode: 'discover' | 'create' | 'library';
   bodyScanIds?: string[];
+  inventoryContext?: AssistantInventoryContext;
 }
 export interface InventoryState {
   products: Product[];
@@ -99,6 +107,22 @@ export function createEmptyInventory(): InventoryState {
   return { products: [], batches: [], tools: [] };
 }
 
+export function isAssistantInventoryContext(value: unknown): value is AssistantInventoryContext {
+  return (
+    isRecord(value) &&
+    ['all', 'selected', 'none'].includes(value.mode as string) &&
+    Array.isArray(value.productIds) &&
+    value.productIds.length <= MAX_ASSISTANT_INVENTORY_PRODUCTS &&
+    value.productIds.every(
+      (id) =>
+        typeof id === 'string' &&
+        id.trim().length > 0 &&
+        id.length <= MAX_ASSISTANT_PRODUCT_ID_LENGTH,
+    ) &&
+    new Set(value.productIds).size === value.productIds.length
+  );
+}
+
 export function isAssistantSession(value: unknown): value is AssistantSession {
   if (!isRecord(value)) return false;
   const recipes = (items: unknown) =>
@@ -111,6 +135,7 @@ export function isAssistantSession(value: unknown): value is AssistantSession {
     recipes(value.attachedRecipes) &&
     typeof value.draft === 'string' &&
     value.draft.length <= 6000 &&
+    (value.inventoryContext === undefined || isAssistantInventoryContext(value.inventoryContext)) &&
     (value.bodyScanIds === undefined ||
       (Array.isArray(value.bodyScanIds) &&
         value.bodyScanIds.length <= 20 &&

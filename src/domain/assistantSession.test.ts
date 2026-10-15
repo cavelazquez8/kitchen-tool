@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { isAssistantSession, isInventoryState, type InventoryState } from './types';
+import {
+  MAX_ASSISTANT_INVENTORY_PRODUCTS,
+  MAX_ASSISTANT_PRODUCT_ID_LENGTH,
+  isAssistantSession,
+  isInventoryState,
+  type InventoryState,
+} from './types';
 import { buildInventoryBackup } from '../lib/backup';
 import { createLocalRepository } from '../lib/localRepository';
 import type { Recipe } from '../recipes/types';
@@ -57,5 +63,82 @@ describe('persistent assistant recipe context', () => {
     const serialized = JSON.stringify(buildInventoryBackup(withPrivateFields));
     expect(serialized).not.toContain('secret');
     expect(serialized).toContain(recipe.title);
+  });
+
+  it('persists each inventory-sharing mode, including no selected ingredients, through backup restoration', async () => {
+    for (const inventoryContext of [
+      { mode: 'all' as const, productIds: [] },
+      { mode: 'none' as const, productIds: [] },
+      { mode: 'selected' as const, productIds: [] },
+      { mode: 'selected' as const, productIds: ['carrots', 'deleted-product'] },
+    ]) {
+      localStorage.clear();
+      const repository = createLocalRepository();
+      const updatedSession = { ...session, inventoryContext };
+      await repository.update((state) => ({ ...state, assistantSession: updatedSession }));
+      expect(createLocalRepository().getSnapshot().state.assistantSession).toEqual(updatedSession);
+      const backup = buildInventoryBackup(repository.getSnapshot().state);
+      await repository.replace(backup.inventory);
+      expect(createLocalRepository().getSnapshot().state.assistantSession).toEqual(updatedSession);
+      expect(backup.inventory.assistantSession?.inventoryContext).not.toBe(inventoryContext);
+      expect(backup.inventory.assistantSession?.inventoryContext?.productIds).not.toBe(
+        inventoryContext.productIds,
+      );
+    }
+  });
+
+  it('rejects malformed sharing preferences instead of silently restoring full inventory', () => {
+    for (const inventoryContext of [
+      null,
+      {},
+      { mode: 'everything', productIds: [] },
+      { mode: 'all', productIds: null },
+      { mode: 'selected', productIds: ['carrots', 'carrots'] },
+      { mode: 'selected', productIds: [''] },
+      { mode: 'selected', productIds: [' '] },
+      { mode: 'selected', productIds: [42] },
+      { mode: 'selected', productIds: ['x'.repeat(MAX_ASSISTANT_PRODUCT_ID_LENGTH + 1)] },
+      {
+        mode: 'selected',
+        productIds: Array.from(
+          { length: MAX_ASSISTANT_INVENTORY_PRODUCTS + 1 },
+          (_, i) => `id-${i}`,
+        ),
+      },
+    ]) {
+      expect(isAssistantSession({ ...session, inventoryContext })).toBe(false);
+      expect(
+        isInventoryState({
+          products: [],
+          batches: [],
+          tools: [],
+          assistantSession: { ...session, inventoryContext },
+        }),
+      ).toBe(false);
+    }
+  });
+
+  it('does not export unknown fields within inventory-sharing preferences', () => {
+    const state = {
+      products: [],
+      batches: [],
+      tools: [],
+      assistantSession: {
+        ...session,
+        inventoryContext: {
+          mode: 'selected' as const,
+          productIds: ['carrots'],
+          token: 'PRIVATE_CONTEXT_TOKEN',
+        },
+      },
+    };
+    const backup = buildInventoryBackup(state);
+    expect(backup.inventory.assistantSession?.inventoryContext).toEqual({
+      mode: 'selected',
+      productIds: ['carrots'],
+    });
+    expect(JSON.stringify(backup)).not.toContain('PRIVATE_CONTEXT_TOKEN');
+    backup.inventory.assistantSession!.inventoryContext!.productIds.push('new-product');
+    expect(state.assistantSession.inventoryContext.productIds).toEqual(['carrots']);
   });
 });

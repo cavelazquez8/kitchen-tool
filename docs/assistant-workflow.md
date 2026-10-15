@@ -4,6 +4,16 @@ Mise's primary assistant workflow is a conversation about what to cook, followed
 real source recipe and an inventory-aware shopping list. Inventory is context for
 avoiding duplicate purchases. It restricts recommendations only when requested.
 
+The inventory chip in Gemini opens three choices: **All inventory**, **Choose
+ingredients**, or **No inventory**. The searchable ingredient picker includes every
+purchase of each chosen product, across storage locations. This preference controls
+new chat requests, local candidate matching, and copied kitchen context. An empty
+selection shares nothing; unshared ingredients are not reported as missing. Only All
+inventory also includes kitchen tools. The choice survives navigation, reloads,
+backup/restore, and clearing the conversation. Earlier messages may still mention
+previously shared inventory; start a fresh conversation to remove that chat history.
+Shopping list calculations continue to use the complete inventory.
+
 ## Discovery
 
 The optional authenticated Worker conversation uses Gemini function calls to search

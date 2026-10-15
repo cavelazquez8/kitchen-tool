@@ -13,6 +13,19 @@ const recipe: Recipe = {
 };
 
 describe('persistent assistant context', () => {
+  it('preserves the chosen inventory scope through drafts and assistant replies', () => {
+    const inventory = createEmptyInventory();
+    const preference = { mode: 'selected' as const, productIds: [] };
+    const selected = updateAssistantSession(inventory, { inventoryContext: preference });
+    const replied = updateAssistantSession(selected, { recipes: [recipe], draft: 'Next question' });
+    expect(replied.assistantSession?.inventoryContext).toEqual(preference);
+    expect(replied.assistantSession?.inventoryContext).not.toBe(preference);
+    expect(replied.assistantSession?.inventoryContext?.productIds).not.toBe(preference.productIds);
+    expect(
+      updateAssistantSession(replied, { inventoryContext: { mode: 'none', productIds: [] } })
+        .assistantSession?.inventoryContext,
+    ).toEqual({ mode: 'none', productIds: [] });
+  });
   it('excludes temporary provider recipes, duplicates and invalid records without changing originals', () => {
     const temporary: Recipe = {
       ...recipe,

@@ -116,6 +116,14 @@ export function buildInventoryBackup(state: InventoryState): InventoryBackup {
             ...(state.assistantSession.bodyScanIds
               ? { bodyScanIds: [...state.assistantSession.bodyScanIds] }
               : {}),
+            ...(state.assistantSession.inventoryContext === undefined
+              ? {}
+              : {
+                  inventoryContext: {
+                    mode: state.assistantSession.inventoryContext.mode,
+                    productIds: [...state.assistantSession.inventoryContext.productIds],
+                  },
+                }),
           },
         }),
     ...(state.nutritionTargets === undefined

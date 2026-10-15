@@ -84,6 +84,154 @@ afterEach(() => {
   localStorage.clear();
 });
 
+describe('inventory attached to Gemini messages', () => {
+  const stocked: InventoryState = {
+    products: [
+      {
+        id: 'carrots',
+        name: 'Selected Orchard Carrots',
+        ingredientName: 'Carrots',
+        isStaple: false,
+      },
+      { id: 'milk', name: 'Private Meadow Milk', ingredientName: 'Milk', isStaple: false },
+    ],
+    batches: [
+      {
+        id: 'carrot-stock',
+        productId: 'carrots',
+        location: 'fridge',
+        quantity: 100,
+        unit: 'g',
+        purchasedOn: '2026-10-14',
+        expiresOn: null,
+      },
+      {
+        id: 'milk-stock',
+        productId: 'milk',
+        location: 'fridge',
+        quantity: 2,
+        unit: 'cup',
+        purchasedOn: '2026-10-14',
+        expiresOn: null,
+      },
+    ],
+    tools: [{ id: 'mixer', name: 'Private Stand Mixer' }],
+    recipes: [imported],
+  };
+
+  for (const mode of ['all', 'selected', 'none'] as const) {
+    it(`uses the ${mode} inventory choice in the actual chat request`, async () => {
+      vi.mocked(readGeminiConnection).mockReturnValue({
+        url: 'https://mise.example.workers.dev',
+        token: 'a'.repeat(32),
+      });
+      vi.mocked(sendGeminiChat).mockResolvedValue({
+        message: 'Let’s discuss this recipe.',
+        recipes: [],
+        warnings: [],
+        recommendedRecipeIds: [],
+      });
+      const { repository } = setup(
+        {
+          ...stocked,
+          assistantSession: {
+            recipes: [imported],
+            attachedRecipes: [],
+            draft: '',
+            mode: 'discover',
+            inventoryContext: { mode, productIds: ['carrots'] },
+          },
+        },
+        'assistant',
+      );
+      const user = userEvent.setup();
+      await user.type(
+        screen.getByRole('textbox', { name: 'Message Gemini' }),
+        'Tell me about carrot soup.',
+      );
+      await user.click(screen.getByRole('button', { name: 'Ask Gemini' }));
+      await waitFor(() => expect(sendGeminiChat).toHaveBeenCalledOnce());
+      const request = vi.mocked(sendGeminiChat).mock.calls[0][1];
+      const payload = JSON.stringify(request);
+      if (mode === 'all') {
+        expect(request.inventory).toContain('Selected Orchard Carrots');
+        expect(request.inventory).toContain('Private Meadow Milk');
+        expect(request.inventory).toContain('Private Stand Mixer');
+        expect(request.candidates?.[0].missingIngredients).toContain('Carrots');
+      } else {
+        expect(payload).not.toContain('Private Meadow Milk');
+        expect(payload).not.toContain('Private Stand Mixer');
+        expect(request.candidates?.[0].missingIngredients).toEqual([]);
+        if (mode === 'selected') expect(request.inventory).toContain('Selected Orchard Carrots');
+        else {
+          expect(payload).not.toContain('Selected Orchard Carrots');
+          expect(request.inventory).toContain('Inventory not shared');
+        }
+      }
+      expect(repository.getSnapshot().state.batches).toEqual(stocked.batches);
+      await screen.findByText('Let’s discuss this recipe.');
+    });
+  }
+
+  for (const mode of ['selected', 'none'] as const) {
+    it(`copies only the ${mode} inventory context for manual chat`, async () => {
+      const user = userEvent.setup();
+      const writeText = vi.spyOn(navigator.clipboard, 'writeText').mockResolvedValue();
+      setup(
+        {
+          ...stocked,
+          assistantSession: {
+            recipes: [],
+            attachedRecipes: [],
+            draft: '',
+            mode: 'discover',
+            inventoryContext: { mode, productIds: ['carrots'] },
+          },
+        },
+        'assistant',
+      );
+      await user.click(screen.getByRole('button', { name: 'Copy kitchen context' }));
+      expect(writeText).toHaveBeenCalledOnce();
+      const copied = writeText.mock.calls[0][0];
+      expect(copied).not.toContain('Private Meadow Milk');
+      expect(copied).not.toContain('Private Stand Mixer');
+      if (mode === 'selected') expect(copied).toContain('Selected Orchard Carrots');
+      else {
+        expect(copied).not.toContain('Selected Orchard Carrots');
+        expect(copied).toContain('Inventory not shared');
+      }
+      writeText.mockRestore();
+    });
+  }
+
+  it('keeps no-inventory selected when starting a fresh conversation', async () => {
+    const { repository } = setup(
+      {
+        ...stocked,
+        chatHistory: [{ id: 'hello', role: 'assistant', text: 'Hello there.' }],
+        assistantSession: {
+          recipes: [],
+          attachedRecipes: [],
+          draft: '',
+          mode: 'discover',
+          inventoryContext: { mode: 'none', productIds: [] },
+        },
+      },
+      'assistant',
+    );
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: 'Conversation options' }));
+    await user.click(screen.getByRole('button', { name: 'Clear conversation' }));
+    const dialog = screen.getByRole('dialog', { name: 'Clear conversation?' });
+    await user.click(within(dialog).getByRole('button', { name: 'Clear conversation' }));
+    await waitFor(() => expect(repository.getSnapshot().state.chatHistory).toEqual([]));
+    expect(repository.getSnapshot().state.assistantSession?.inventoryContext?.mode).toBe('none');
+    expect(screen.getByRole('button', { name: 'Inventory context' })).toHaveTextContent(
+      'No inventory',
+    );
+  });
+});
+
 describe('a conversation that leads to groceries', () => {
   const publisherRecipe: Recipe = {
     ...imported,

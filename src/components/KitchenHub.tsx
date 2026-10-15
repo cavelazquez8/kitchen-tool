@@ -23,10 +23,10 @@ import {
   Clock3,
   SlidersHorizontal,
   PackageCheck,
+  ChevronDown,
 } from 'lucide-react';
 import type { InventoryState, ShoppingItem } from '../domain/types';
 import type { InventoryReducer } from '../lib/repository';
-import { generateMarkdown } from '../domain/export';
 import { formatQuantity } from '../domain/inventory';
 import { matchRecipe, buildShoppingList } from '../recipes/matching';
 import { canPersistProviderRecipe } from '../recipes/providers';
@@ -37,6 +37,11 @@ import { reviewedRecipeEstimate } from '../nutrition/recipeEstimate';
 import { recipeNutritionKey } from '../nutrition/estimate';
 import { parseChatRequest, type AiRecipeCandidate } from '../ai/protocol';
 import { bodyScanContext } from '../profile/context';
+import {
+  assistantInventory,
+  assistantInventoryContextForSession,
+  assistantInventoryMarkdown,
+} from '../ai/inventoryContext';
 import {
   emptyAssistantSession,
   conversationRecipes,
@@ -70,6 +75,7 @@ import { RecipeDiscovery } from './RecipeDiscovery';
 import { NutritionTargetsEditor } from './NutritionTargetsEditor';
 import { RecipeNutrition } from './RecipeNutrition';
 import { ConversationText } from './ConversationText';
+import { InventoryContextPicker } from './InventoryContextPicker';
 import './recipeProviders.css';
 import './kitchenPolish.css';
 import './recipeGuidance.css';
@@ -248,6 +254,7 @@ export function KitchenHub({
     inventory.assistantSession?.mode ?? 'discover',
   );
   const [conversationOptionsOpen, setConversationOptionsOpen] = useState(false);
+  const [inventoryContextOpen, setInventoryContextOpen] = useState(false);
   const grounded = conversationMode === 'library';
   const [nutritionOpen, setNutritionOpen] = useState(false);
   const [clearShoppingOpen, setClearShoppingOpen] = useState(false);
@@ -267,6 +274,24 @@ export function KitchenHub({
   const plan = inventory.mealPlan ?? [];
   const shopping = inventory.shoppingList ?? [];
   const history = inventory.chatHistory ?? [];
+  const inventoryContext = useMemo(
+    () => assistantInventoryContextForSession(inventory.assistantSession),
+    [inventory.assistantSession],
+  );
+  const chatInventory = useMemo(
+    () => assistantInventory(inventory, inventoryContext),
+    [inventory, inventoryContext],
+  );
+  const selectedIngredientCount = useMemo(
+    () => new Set(chatInventory.batches.map((batch) => batch.productId)).size,
+    [chatInventory.batches],
+  );
+  const inventoryContextLabel =
+    inventoryContext.mode === 'all'
+      ? 'All inventory'
+      : inventoryContext.mode === 'none'
+        ? 'No inventory'
+        : `${selectedIngredientCount} ingredient${selectedIngredientCount === 1 ? '' : 's'}`;
   const relevant = useMemo(
     () =>
       useSelection && selectedBatchIds.length > 0
@@ -509,7 +534,7 @@ export function KitchenHub({
         conversationMode !== 'create'
           ? recommendRecipes(
               [...saved, ...(grounded ? availableLibrary : [])].filter(canPersistProviderRecipe),
-              relevant,
+              chatInventory,
               {
                 query: `${history
                   .filter((item) => item.role === 'user')
@@ -526,7 +551,7 @@ export function KitchenHub({
       const recipeCandidates: AiRecipeCandidate[] = [];
       for (const recipe of sourceRecipes) {
         if (recipe.ingredients.length > 60) continue;
-        const match = matchRecipe(recipe, relevant);
+        const match = matchRecipe(recipe, chatInventory);
         const mapping = inventory.recipeNutrition?.find((item) => item.recipeId === recipe.id);
         const nutrition = reviewedRecipeEstimate(recipe, mapping);
         const candidate: AiRecipeCandidate = {
@@ -539,12 +564,15 @@ export function KitchenHub({
               400,
             ),
           ),
-          missingIngredients: match.ingredients
-            .filter((item) => item.status !== 'available')
-            .map(
-              (item) =>
-                `${item.ingredient.name}${item.status === 'check' ? ' (check amount)' : ''}`,
-            ),
+          missingIngredients:
+            inventoryContext.mode === 'all'
+              ? match.ingredients
+                  .filter((item) => item.status !== 'available')
+                  .map(
+                    (item) =>
+                      `${item.ingredient.name}${item.status === 'check' ? ' (check amount)' : ''}`,
+                  )
+              : [],
           source: ((recipe.source.url?.length ?? 301) <= 300
             ? recipe.source.url!
             : (recipe.source.name ?? sourceLabels[recipe.source.type])
@@ -593,7 +621,7 @@ export function KitchenHub({
       }
       const request = parseChatRequest({
         message: prompt.trim(),
-        inventory: boundedInventoryContext(generateMarkdown(relevant, { includeTools: true })),
+        inventory: boundedInventoryContext(assistantInventoryMarkdown(inventory, inventoryContext)),
         ...(attachedContext ? { recipe: attachedContext } : {}),
         ...(recipeCandidates.length ? { candidates: recipeCandidates } : {}),
         ...(conversationMode === 'discover' ? { discover: true } : {}),
@@ -1202,7 +1230,16 @@ export function KitchenHub({
                     aria-label={label}
                     key={label}
                     disabled={aiBusy}
-                    onClick={() => void ask(prompt)}
+                    onClick={() => {
+                      if (
+                        label === 'Use what I have' &&
+                        (inventoryContext.mode === 'none' || selectedIngredientCount === 0)
+                      ) {
+                        setInventoryContextOpen(true);
+                        return;
+                      }
+                      void ask(prompt);
+                    }}
                   >
                     <Icon size={21} />
                     <strong>{label}</strong>
@@ -1213,10 +1250,18 @@ export function KitchenHub({
             </div>
           )}
           <div className="assistant-context" aria-label="Gemini context">
-            <span className="context-chip inventory-context">
+            <button
+              className="context-chip inventory-context"
+              aria-label="Inventory context"
+              aria-haspopup="dialog"
+              aria-expanded={inventoryContextOpen}
+              disabled={aiBusy}
+              onClick={() => setInventoryContextOpen(true)}
+            >
               <PackageCheck size={15} />
-              Inventory included
-            </span>
+              {inventoryContextLabel}
+              <ChevronDown size={14} aria-hidden="true" />
+            </button>
             <button
               className="context-chip"
               aria-label="Your profile"
@@ -1269,7 +1314,13 @@ export function KitchenHub({
             ))}
           </div>
           <p className="assistant-context-note">
-            Buy what you need. Mise remembers what you already have.
+            {inventoryContext.mode === 'all'
+              ? 'Buy what you need. Mise remembers what you already have.'
+              : inventoryContext.mode === 'none'
+                ? 'Inventory is not attached to new messages.'
+                : selectedIngredientCount
+                  ? 'Only your selected ingredients are attached to new messages.'
+                  : 'No ingredients selected. Inventory is not attached to new messages.'}
           </p>
           {inventory.nutritionTargets && (
             <p className="nutrition-summary">
@@ -1329,16 +1380,6 @@ export function KitchenHub({
                   </label>
                 ))}
               </fieldset>
-              {selectedBatchIds.length > 0 && (
-                <label className="assistant-selection">
-                  <input
-                    type="checkbox"
-                    checked={useSelection}
-                    onChange={(e) => setUseSelection(e.target.checked)}
-                  />
-                  Include only selected inventory
-                </label>
-              )}
               <div className="hub-actions">
                 <button className="text-button" onClick={onConfigure}>
                   Connection settings
@@ -1471,7 +1512,7 @@ export function KitchenHub({
             className="text-button assistant-copy-context"
             onClick={() => {
               const text = [
-                generateMarkdown(inventory, { includeTools: true }),
+                assistantInventoryMarkdown(inventory, inventoryContext),
                 ...chatRecipes.map(recipeContext),
               ].join('\n\n');
               void navigator.clipboard
@@ -1493,6 +1534,18 @@ export function KitchenHub({
         <p className="form-error hub-error" role="alert">
           {error}
         </p>
+      )}
+      {inventoryContextOpen && (
+        <InventoryContextPicker
+          inventory={inventory}
+          value={inventoryContext}
+          onClose={() => setInventoryContextOpen(false)}
+          onSave={async (next) => {
+            await update((state) => updateAssistantSession(state, { inventoryContext: next }));
+            setInventoryContextOpen(false);
+            onToast('Chat inventory updated.');
+          }}
+        />
       )}
       <Modal
         open={!!detail}
@@ -1937,7 +1990,10 @@ export function KitchenHub({
               void mutate((state) => ({
                 ...state,
                 chatHistory: [],
-                assistantSession: emptyAssistantSession(),
+                assistantSession: {
+                  ...emptyAssistantSession(),
+                  inventoryContext: assistantInventoryContextForSession(state.assistantSession),
+                },
               }))
                 .then(() => {
                   setClearChatOpen(false);

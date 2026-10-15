@@ -1,6 +1,7 @@
 import type { AssistantSession, InventoryState } from '../domain/types';
 import { canPersistProviderRecipe } from '../recipes/providers';
 import { isRecipe, type Recipe } from '../recipes/types';
+import { normalizeAssistantInventoryContext } from './inventoryContext';
 
 interface AssistantActivity {
   busy: boolean;
@@ -66,6 +67,9 @@ export function updateAssistantSession(
       draft: session.draft.slice(0, 6000),
       mode: session.mode,
       ...(session.bodyScanIds ? { bodyScanIds: [...session.bodyScanIds] } : {}),
+      ...(session.inventoryContext === undefined
+        ? {}
+        : { inventoryContext: normalizeAssistantInventoryContext(session.inventoryContext) }),
     },
   };
 }
