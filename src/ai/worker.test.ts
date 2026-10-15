@@ -237,6 +237,11 @@ describe('private Gemini Worker', () => {
       recordedOn: '2026-10-01',
       targets: { caloriesKcal: null, proteinGrams: null, carbsGrams: null, fatGrams: null },
       warnings: ['Recommended values are ranges. Review them before choosing daily targets.'],
+      readings: [
+        { label: 'BMR', value: '1600 kcal', kind: 'measurement' },
+        { label: 'Recommended calories', value: '2000–2200 kcal', kind: 'recommendation' },
+        { label: 'Recommended protein', value: '100–120 g (20–25%)', kind: 'recommendation' },
+      ],
     };
     const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
       new Response(
@@ -258,6 +263,7 @@ describe('private Gemini Worker', () => {
       'recordedOn',
       'targets',
       'warnings',
+      'readings',
     ]);
     expect(sent.systemInstruction.parts[0].text).toContain('Preserve all readable report labels');
     expect(sent.systemInstruction.parts[0].text).toContain('Leave absent, ranged, conflicting');
@@ -343,7 +349,12 @@ describe('private Gemini Worker', () => {
       expect(sent.contents.at(-1).parts[0].text).toContain(profile);
       expect(sent.contents.at(-1).parts[0].text).not.toContain('approvedDailyNutritionTargets');
       expect(sent.systemInstruction.parts[0].text).toContain('untrusted data');
-      expect(sent.systemInstruction.parts[0].text).toContain('only approvedDailyNutritionTargets');
+      expect(sent.systemInstruction.parts[0].text).toContain(
+        'approvedDailyNutritionTargets represents explicit user-approved goals',
+      );
+      expect(sent.systemInstruction.parts[0].text).toContain(
+        'use those literal ranges as sourced planning context',
+      );
     }
   });
 

@@ -11,6 +11,28 @@ export const BODY_SCAN_MIME_TYPES = [
 ] as const;
 export type BodyScanMimeType = (typeof BODY_SCAN_MIME_TYPES)[number];
 
+/** Literal report readings, including units and ranges; no calculated health targets. */
+export interface BodyScanReading {
+  label: string;
+  value: string;
+  kind: 'measurement' | 'recommendation';
+}
+
+export function isBodyScanReadings(value: unknown): value is BodyScanReading[] {
+  return (
+    Array.isArray(value) &&
+    value.length <= 24 &&
+    value.every(
+      (item) =>
+        record(item) &&
+        onlyKeys(item, ['label', 'value', 'kind']) &&
+        text(item.label, 100) &&
+        text(item.value, 160) &&
+        ['measurement', 'recommendation'].includes(item.kind as string),
+    )
+  );
+}
+
 /** The original is kept separately in this browser's IndexedDB document store. */
 export interface BodyScanFile {
   id: string;
@@ -27,6 +49,7 @@ export interface BodyScan {
   text: string;
   file?: BodyScanFile;
   targets?: NutritionTargets;
+  readings?: BodyScanReading[];
 }
 
 function record(value: unknown): value is Record<string, unknown> {
@@ -68,15 +91,18 @@ export function isBodyScanFile(value: unknown): value is BodyScanFile {
 export function isBodyScan(value: unknown): value is BodyScan {
   return (
     record(value) &&
-    onlyKeys(value, ['id', 'name', 'recordedOn', 'text', 'file', 'targets']) &&
+    onlyKeys(value, ['id', 'name', 'recordedOn', 'text', 'file', 'targets', 'readings']) &&
     text(value.id, 100) &&
     text(value.name, 160) &&
     (value.recordedOn === null || dateOnly(value.recordedOn)) &&
     typeof value.text === 'string' &&
     value.text.length <= MAX_BODY_SCAN_TEXT_LENGTH &&
     (value.file === undefined || isBodyScanFile(value.file)) &&
-    (value.text.trim().length > 0 || value.file !== undefined) &&
-    (value.targets === undefined || isNutritionTargets(value.targets))
+    (value.text.trim().length > 0 ||
+      value.file !== undefined ||
+      (Array.isArray(value.readings) && value.readings.length > 0)) &&
+    (value.targets === undefined || isNutritionTargets(value.targets)) &&
+    (value.readings === undefined || isBodyScanReadings(value.readings))
   );
 }
 
@@ -110,5 +136,8 @@ export function copyBodyScan(scan: BodyScan): BodyScan {
         }
       : {}),
     ...(scan.targets ? { targets: copyNutritionValues(scan.targets) } : {}),
+    ...(scan.readings
+      ? { readings: scan.readings.map(({ label, value, kind }) => ({ label, value, kind })) }
+      : {}),
   };
 }

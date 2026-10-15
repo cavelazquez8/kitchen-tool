@@ -45,7 +45,10 @@ export type {
 
 const CONNECTION_KEY = 'mise.gemini.connection.v1';
 const CONNECTION_DRAFT_KEY = 'mise.gemini.connection-draft.v1';
-const TIMEOUT_MS = 95_000;
+// A discovery turn may inspect publisher pages between bounded Gemini calls.
+const TIMEOUT_MS = 125_000;
+const discoverySupport = new Map<string, boolean>();
+const explainedLegacyWorkers = new Set<string>();
 
 export class GeminiError extends Error {
   constructor(
@@ -174,6 +177,8 @@ export function saveGeminiConnectionDraft(connection: GeminiConnection): void {
 export function clearGeminiConnection(): void {
   localStorage.removeItem(CONNECTION_KEY);
   localStorage.removeItem(CONNECTION_DRAFT_KEY);
+  discoverySupport.clear();
+  explainedLegacyWorkers.clear();
 }
 
 export function generateGeminiAccessToken(): string {
@@ -282,7 +287,7 @@ export async function requestMiseWorker(
     if (controller.signal.aborted)
       throw new GeminiError(
         'timeout',
-        'Gemini took too long. Try a shorter message or a smaller file.',
+        'The AI connection did not finish in time. Your conversation is preserved. Retry, or choose another available Gemini model in settings.',
       );
     throw new GeminiError(
       'connection',
@@ -298,7 +303,12 @@ export async function requestMiseWorker(
 export async function checkGeminiConnection(
   connection: GeminiConnection,
   signal?: AbortSignal,
-): Promise<{ ok: true; model: string }> {
+): Promise<{
+  ok: true;
+  model: string;
+  supportsRecipeDiscovery?: boolean;
+  recipeDiscoveryConfigured?: boolean;
+}> {
   const configured = normalizeGeminiConnection(connection);
   const selected = configured.model;
   let result: unknown;
@@ -330,7 +340,17 @@ export async function checkGeminiConnection(
       'worker_update',
       'Update your Cloudflare Worker with the latest Mise Worker file to switch Gemini models inside Mise.',
     );
-  return { ok: true, model: result.model };
+  discoverySupport.set(configured.url, result.supportsRecipeDiscovery === true);
+  return {
+    ok: true,
+    model: result.model,
+    ...(typeof result.supportsRecipeDiscovery === 'boolean'
+      ? { supportsRecipeDiscovery: result.supportsRecipeDiscovery }
+      : {}),
+    ...(typeof result.recipeDiscoveryConfigured === 'boolean'
+      ? { recipeDiscoveryConfigured: result.recipeDiscoveryConfigured }
+      : {}),
+  };
 }
 
 /** Discover models and current free-tier status; never selects or generates with them. */
@@ -387,23 +407,56 @@ export async function sendGeminiChat(
       'This message and its context are too large. Shorten the message, remove an attached body scan or recipe, or clear older conversation messages.',
     );
   let raw: unknown;
+  const workerUrl = normalizeGeminiConnection(connection).url;
+  let legacyDiscovery = Boolean(validated.discover && discoverySupport.get(workerUrl) === false);
+  // All context/model fields remain intact; only the unsupported discovery opt-in is omitted.
+  const compatible = { ...validated };
+  if (legacyDiscovery) delete compatible.discover;
   try {
-    raw = await requestMiseWorker(connection, '/chat', validated, signal);
+    try {
+      raw = await requestMiseWorker(connection, '/chat', compatible, signal);
+    } catch (error) {
+      if (
+        !validated.discover ||
+        legacyDiscovery ||
+        !(error instanceof GeminiError) ||
+        error.code !== 'invalid_request'
+      )
+        throw error;
+      delete compatible.discover;
+      legacyDiscovery = true;
+      discoverySupport.set(workerUrl, false);
+      // Older Workers reject unknown fields before making a Google generation request.
+      raw = await requestMiseWorker(connection, '/chat', compatible, signal);
+    }
   } catch (error) {
     if (
-      (validated.candidates || validated.profile !== undefined || validated.model) &&
+      (validated.discover ||
+        validated.candidates ||
+        validated.profile !== undefined ||
+        validated.model) &&
       error instanceof GeminiError &&
       error.code === 'invalid_request'
     )
       throw new GeminiError(
         'worker_update',
-        'Update your Cloudflare Worker with the latest Mise Worker file to use recipe recommendations, attached profile reports and model selection. Your saved recipes still work.',
+        'Update your Cloudflare Worker with the latest Mise Worker file to use the conversational assistant and recipe discovery. Your conversation and saved recipes are preserved.',
       );
     throw error;
   }
   const result = parseAiReply(raw, validated.candidates);
   if (!result)
     throw new GeminiError('invalid_response', 'Gemini returned an answer Mise cannot safely save.');
+  if (legacyDiscovery && !explainedLegacyWorkers.has(workerUrl)) {
+    explainedLegacyWorkers.add(workerUrl);
+    return {
+      ...result,
+      warnings: [
+        ...result.warnings,
+        'Your current Worker supports conversation but not live recipe discovery. Update its code with the latest Mise Worker download, then check the connection.',
+      ],
+    };
+  }
   return result;
 }
 

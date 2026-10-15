@@ -24,11 +24,79 @@ const connection = { url: 'https://mise.example.workers.dev', token: 'a'.repeat(
 const reply = { message: 'Try scrambled eggs.', recipes: [], warnings: [] };
 
 beforeEach(() => {
+  clearGeminiConnection();
   localStorage.clear();
   vi.unstubAllGlobals();
 });
 
 describe('Gemini browser adapter', () => {
+  it('uses the previous Worker conversation without dropping context and explains one required update', async () => {
+    const fetcher = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            error: { code: 'invalid_request', message: 'Unknown discover field.' },
+          }),
+          { status: 400 },
+        ),
+      )
+      .mockResolvedValueOnce(new Response(JSON.stringify(reply)))
+      .mockResolvedValueOnce(new Response(JSON.stringify(reply)));
+    vi.stubGlobal('fetch', fetcher);
+    const context = {
+      message: 'How do I reheat this?',
+      inventory: 'Eggs: 2',
+      recipe: 'Original rice recipe',
+      profile: 'Reviewed recommended values',
+      history: [{ role: 'user' as const, text: 'Plan dinner' }],
+      discover: true as const,
+    };
+    const first = await sendGeminiChat(connection, context);
+    expect(first.warnings.join(' ')).toContain('Update its code');
+    expect(JSON.parse(String(fetcher.mock.calls[0][1]?.body))).toEqual(context);
+    const oldContext: Partial<typeof context> = { ...context };
+    delete oldContext.discover;
+    expect(JSON.parse(String(fetcher.mock.calls[1][1]?.body))).toEqual(oldContext);
+    expect((await sendGeminiChat(connection, context)).warnings).toEqual([]);
+    expect(fetcher).toHaveBeenCalledTimes(3);
+  });
+
+  it('restores discovery after checking an updated Worker without changing its saved model', async () => {
+    const fetcher = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ ok: true, model: 'gemini-3.5-flash-lite' })),
+      )
+      .mockResolvedValueOnce(new Response(JSON.stringify(reply)))
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            ok: true,
+            model: 'gemini-3.5-flash-lite',
+            supportsRecipeDiscovery: true,
+            recipeDiscoveryConfigured: true,
+          }),
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ ...reply, sourceRecipes: [], recommendedRecipeIds: [] })),
+      );
+    vi.stubGlobal('fetch', fetcher);
+    await checkGeminiConnection(connection);
+    await sendGeminiChat(connection, { message: 'Question', inventory: '', discover: true });
+    expect(JSON.parse(String(fetcher.mock.calls[1][1]?.body)).discover).toBeUndefined();
+    expect(await checkGeminiConnection(connection)).toMatchObject({
+      supportsRecipeDiscovery: true,
+      recipeDiscoveryConfigured: true,
+    });
+    await sendGeminiChat(connection, {
+      message: 'Find a real recipe',
+      inventory: '',
+      discover: true,
+    });
+    expect(JSON.parse(String(fetcher.mock.calls[3][1]?.body)).discover).toBe(true);
+  });
   it('accepts a copied Worker hostname and normalizes surrounding whitespace', () => {
     expect(
       normalizeGeminiConnection({

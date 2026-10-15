@@ -10,3 +10,6 @@ ALLOWED_ORIGIN="http://localhost:5173"
 # SPOONACULAR_API_KEY="YOUR_PRIVATE_SPOONACULAR_KEY"
 # SPOONACULAR_PLAN="free"
 # USDA_API_KEY="YOUR_PRIVATE_DATA_GOV_KEY"
+# Optional real publisher search. Choose Tavily's direct Free plan without paid usage.
+# TAVILY_API_KEY="YOUR_PRIVATE_TAVILY_KEY"
+# TAVILY_PLAN="free"

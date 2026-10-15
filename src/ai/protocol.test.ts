@@ -66,6 +66,75 @@ describe('reviewed Gemini model selection', () => {
 });
 
 describe('grounded recommendation protocol', () => {
+  it('preserves generated drafts with empty original lines for existing normalization', () => {
+    const draft = {
+      title: 'Chicken bowls',
+      servings: 2,
+      ingredients: [
+        { name: 'Chicken breast', quantity: 400, unit: 'g', original: '', optional: false },
+        { name: 'Salt', quantity: null, unit: '', original: '  ', optional: true },
+      ],
+      steps: ['Cook the chicken.'],
+    };
+    const reply = { message: 'Review this generated recipe.', warnings: [], recipes: [draft] };
+    expect(parseAiReply(reply)).toEqual(reply);
+    expect(draft.ingredients[0].original).toBe('');
+  });
+
+  it('accepts bounded publisher originals and only recommendations grounded in their IDs', () => {
+    const source = {
+      id: 'publisher-original',
+      title: 'Chicken bowls',
+      servings: 4,
+      ingredients: [{ name: 'rice', quantity: 2, unit: 'cup', original: '2 cups rice' }],
+      steps: ['Cook rice.'],
+      source: { type: 'imported', url: 'https://recipes.example.com/bowls', name: 'Publisher' },
+      imageUrl: 'https://recipes.example.com/image.jpg',
+      author: 'Publisher cook',
+      totalMinutes: 35,
+      rating: { value: 4.8, count: 72 },
+      publisherNutrition: { calories: '400 calories', servingSize: '1 bowl' },
+    };
+    const result = {
+      message: 'Consider this original.',
+      warnings: [],
+      recipes: [],
+      sourceRecipes: [source],
+      recommendedRecipeIds: [source.id],
+    };
+    expect(parseAiReply(result)).toEqual(result);
+    expect(parseAiReply({ ...result, recommendedRecipeIds: ['unknown'] })).toBeNull();
+    expect(parseAiReply({ ...result, sourceRecipes: [source, source] })).toBeNull();
+    expect(
+      parseAiReply({ ...result, sourceRecipes: [{ ...source, source: { type: 'ai' } }] }),
+    ).toBeNull();
+    expect(
+      parseChatRequest({ message: 'Help me choose', inventory: '', discover: true }),
+    ).toMatchObject({ discover: true });
+    expect(
+      parseChatRequest({ message: 'Help me choose', inventory: '', discover: 'true' }),
+    ).toBeNull();
+  });
+
+  it('preserves verified import metadata through the review protocol', () => {
+    const draft = {
+      title: 'Pasta',
+      servings: 2,
+      ingredients: [{ name: 'pasta', quantity: 200, unit: 'g' }],
+      steps: ['Cook.'],
+      source: { type: 'imported', url: 'https://recipes.example.com/pasta', name: 'Publisher' },
+      imageUrl: 'https://recipes.example.com/pasta.jpg',
+      totalMinutes: 25,
+      author: 'Cook',
+      publisherNutrition: { calories: '350 kcal', protein: '12 g' },
+    };
+    expect(
+      parseAiReply({ message: 'Review.', recipes: [draft], warnings: [] })?.recipes[0],
+    ).toEqual(draft);
+    expect(
+      parseAiReply({ message: 'Review.', recipes: [{ ...draft, totalMinutes: -1 }], warnings: [] }),
+    ).toBeNull();
+  });
   it('accepts bounded real candidates and explicitly approved daily targets', () => {
     expect(parseChatRequest({ ...input, nutritionTargets: targets })).toEqual({
       ...input,
@@ -134,6 +203,25 @@ describe('grounded recommendation protocol', () => {
 });
 
 describe('profile report protocol', () => {
+  it('keeps literal editable readings with ranges and distinguishes BMR from recommendations', () => {
+    const result = {
+      text: 'BMR: 1650 kcal; daily protein recommendation: 100–130 g',
+      recordedOn: null,
+      targets: { caloriesKcal: null, proteinGrams: null, carbsGrams: null, fatGrams: null },
+      warnings: [],
+      readings: [
+        { label: 'BMR', value: '1650 kcal', kind: 'measurement' },
+        { label: 'Recommended daily protein', value: '100–130 g', kind: 'recommendation' },
+      ],
+    };
+    expect(parseAiBodyScanReply(result)).toEqual(result);
+    expect(
+      parseAiBodyScanReply({ ...result, readings: [{ ...result.readings[0], kind: 'diagnosis' }] }),
+    ).toBeNull();
+    expect(
+      parseAiBodyScanReply({ ...result, readings: Array(25).fill(result.readings[0]) }),
+    ).toBeNull();
+  });
   it('accepts complete Unicode context above the former 128 KB Worker limit', () => {
     const context = {
       message: 'Help choose dinner',

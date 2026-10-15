@@ -95,6 +95,54 @@ need the updated Worker. Automatic model discovery needs one more replacement wi
 the current bundle; future supported free releases then appear without replacing code
 for each model. A successful health check alone does not verify Gemini generation access.
 
+## Optional recipe discovery inside the conversation
+
+The assistant can search for real publisher recipes, inspect their original ingredients
+and instructions, and show source-linked cards with the publisher's available photograph,
+time and serving information. Inventory helps avoid duplicate purchases; it does not
+force every recommendation to use only what you own. Ordinary cooking questions do not
+require a search or a generated recipe.
+
+This uses a separate [Tavily Free account](https://app.tavily.com/), currently including
+1,000 monthly credits without a payment card. Keep paid usage disabled: do not enable
+pay-as-you-go or attach a paid search account. Free quotas and provider plans can change.
+
+1. Replace the Worker code with the latest `mise-gemini-worker.js` download and deploy,
+   keeping the existing Google key, pairing token and allowed origin.
+2. In Cloudflare's Worker settings, add secret `TAVILY_API_KEY` with the free-account key,
+   and text variable `TAVILY_PLAN` with the exact value `free`.
+3. Deploy the settings, then use **Check connection** in Mise. Recipe discovery is
+   reported as configured separately from Gemini. The check makes no search and does
+   not establish live search quota; a normal meal request verifies the actual service.
+
+The assistant still works without a search key: it can discuss cooking and attached or
+saved recipes, and try a user-provided publisher link. It explains when live discovery
+is unavailable instead of pretending it searched. Google Search grounding is not enabled
+as a paid fallback. Search requests contain a focused model-chosen dish/meal query, not
+an automatically copied inventory or body report. Search snippets and publisher pages
+are untrusted input and cannot change inventory or profile fields.
+
+Each user message allows at most two basic searches (one credit each), four publisher
+page inspections, and four Gemini generation calls. Retrieved page ingredients and
+instructions are parsed independently of Gemini; search snippets alone cannot become
+a recipe card. Gemini can recommend only provided saved-recipe IDs or verified fetched
+IDs. Failed, blocked or unsupported pages stay failures, not fabricated recipes. This
+is an on-demand personal importer, not a bulk recipe redistribution service. It preserves
+original source attribution and does not add recipes to your saved collection until you
+choose to save them.
+
+Tool turns count toward the same Gemini limits as ordinary requests. Page reads are
+bounded and concurrent, and the complete research turn times out after 110 seconds;
+the browser waits at most 125 seconds. Google errors identify the selected model and
+HTTP status, with bounded diagnostics for rejected requests. Mise never silently switches
+models or enables paid billing. Failed requests keep your conversation and saved data.
+
+References: [Tavily search API](https://docs.tavily.com/documentation/api-reference/endpoint/search),
+[Tavily pricing](https://www.tavily.com/pricing),
+[Gemini function calling](https://ai.google.dev/gemini-api/docs/function-calling).
+
+## Model selection
+
 The optional model selector stores a preference in this browser. **Worker default**
 uses the Worker's `GEMINI_MODEL` setting, or Mise's default. A selected model accompanies
 each Gemini request and never changes the Worker globally. The built-in choices are
@@ -178,8 +226,9 @@ it in inventory exports or backups. The browser never receives the Google API ke
   PNG or WebP file up to 4 MB. PDFs are sent to Gemini as native inline document data,
   following Google's [document processing guide](https://ai.google.dev/gemini-api/docs/generate-content/document-processing).
   The result preserves readable labels, measurements, units, ranges and notes for
-  review, plus an unambiguous scan date when present. Recommended ranges remain in
-  the report text; they do not become invented midpoint targets. BMR and energy
+  review, plus an unambiguous scan date when present. Literal measurements and explicit
+  recommendations also populate editable label/value fields, preserving source units
+  and ranges. Recommended ranges do not become invented midpoint targets. BMR and energy
   expenditure are measurements, not daily calorie recommendations. The original
   file stays in this browser's profile storage; reading it sends its contents to
   Gemini once and consumes the same AI allowance as chat. It creates no persistent

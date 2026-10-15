@@ -2,6 +2,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
   extractWebsiteRecipes,
+  fetchVerifiedPublisherRecipe,
   importRecipeWebsite,
   isPublicAddress,
   plainRecipeText,
@@ -54,6 +55,124 @@ describe('recipe website import', () => {
     expect(plainRecipeText('&lt;strong&gt;Eggs&lt;/strong&gt;')).toBe('Eggs');
   });
 
+  it('retains publisher photographs, author, stated times, ratings and nutrition units', () => {
+    const result = extractWebsiteRecipes(
+      html({
+        ...recipe,
+        image: [{ '@type': 'ImageObject', contentUrl: '/photos/eggs.jpg' }],
+        author: [{ '@type': 'Person', name: 'Recipe Author' }],
+        prepTime: 'PT15M',
+        cookTime: 'PT1H5M',
+        totalTime: 'PT1H20M',
+        recipeCuisine: ['American'],
+        recipeCategory: 'Breakfast',
+        aggregateRating: { ratingValue: '4.8', ratingCount: '128', bestRating: '5' },
+        nutrition: {
+          servingSize: '1 plate',
+          calories: '320 kcal',
+          proteinContent: '18 g',
+          carbohydrateContent: '22 g',
+          fatContent: '17 g',
+          sodiumContent: '230 mg',
+        },
+      }),
+      'https://recipes.example.com/eggs',
+    );
+    expect(result.recipes[0]).toMatchObject({
+      imageUrl: 'https://recipes.example.com/photos/eggs.jpg',
+      author: 'Recipe Author',
+      prepMinutes: 15,
+      cookMinutes: 65,
+      totalMinutes: 80,
+      cuisine: 'American',
+      category: 'Breakfast',
+      rating: { value: 4.8, count: 128, best: 5 },
+      publisherNutrition: {
+        servingSize: '1 plate',
+        calories: '320 kcal',
+        protein: '18 g',
+        carbohydrates: '22 g',
+        fat: '17 g',
+        sodium: '230 mg',
+      },
+      source: {
+        type: 'imported',
+        url: 'https://recipes.example.com/eggs',
+        name: 'recipes.example.com',
+        attribution: 'Recipe Author · recipes.example.com',
+      },
+    });
+  });
+
+  it('resolves @graph author and nested instruction references without duplicate recipes', () => {
+    const result = extractWebsiteRecipes(
+      html({
+        '@graph': [
+          {
+            ...recipe,
+            '@id': 'https://recipes.example.com/eggs#recipe',
+            author: { '@id': '#author' },
+            recipeInstructions: [{ '@id': '#cook' }],
+          },
+          { '@id': '#author', '@type': 'Person', name: 'Publisher Author' },
+          {
+            '@id': '#cook',
+            '@type': 'HowToSection',
+            itemListElement: [{ '@id': '#step-one' }, { '@id': '#step-two' }],
+          },
+          { '@id': '#step-one', '@type': 'HowToStep', text: 'Heat the pan.' },
+          { '@id': '#step-two', '@type': 'HowToStep', text: 'Cook the eggs.' },
+        ],
+      }),
+      'https://recipes.example.com/eggs',
+    );
+    expect(result.recipes).toHaveLength(1);
+    expect(result.recipes[0]).toMatchObject({
+      author: 'Publisher Author',
+      steps: ['Heat the pan.', 'Cook the eggs.'],
+    });
+  });
+
+  it('ignores unsafe or malformed optional metadata without inventing replacements', () => {
+    const imported = extractWebsiteRecipes(
+      html({
+        ...recipe,
+        image: ['data:image/png;base64,AA==', 'https://user:password@example.com/image.jpg'],
+        prepTime: 'around 20 minutes',
+        totalTime: 'P',
+        aggregateRating: { ratingValue: '6', bestRating: '5', ratingCount: '-3' },
+        nutrition: { calories: '', proteinContent: { value: 10 } },
+      }),
+      'https://recipes.example.com/eggs',
+    ).recipes[0];
+    expect(imported.imageUrl).toBeUndefined();
+    expect(imported.prepMinutes).toBeUndefined();
+    expect(imported.totalMinutes).toBeUndefined();
+    expect(imported.rating).toBeUndefined();
+    expect(imported.publisherNutrition).toBeUndefined();
+  });
+
+  it('rejects incomplete ingredients or instruction nodes instead of dropping required parts', () => {
+    for (const invalid of [
+      { ...recipe, recipeIngredient: ['2 eggs', { name: 'olive oil' }] },
+      { ...recipe, recipeInstructions: [{ text: 'Heat the pan.' }, { '@type': 'HowToStep' }] },
+      { ...recipe, recipeInstructions: Array.from({ length: 61 }, () => 'Cook.') },
+    ])
+      expect(() => extractWebsiteRecipes(html(invalid))).toThrow('complete readable recipe');
+  });
+
+  it('selects the requested page instead of unrelated recipe cards in a roundup', () => {
+    const result = extractWebsiteRecipes(
+      html([
+        { ...recipe, name: 'Unrelated toast', url: 'https://recipes.example.com/toast' },
+        { ...recipe, '@id': 'http://www.recipes.example.com/eggs/#recipe' },
+      ]),
+      'https://recipes.example.com/eggs?utm_source=search',
+    );
+    expect(result.recipes).toHaveLength(1);
+    expect(result.recipes[0].title).toBe('Eggs & toast');
+  });
+
   it('preserves unknown amounts and ambiguous yields for review', () => {
     const result = extractWebsiteRecipes(
       html({
@@ -77,6 +196,28 @@ describe('recipe website import', () => {
     expect(
       extractWebsiteRecipes(html({ ...recipe, recipeYield: '4' })).recipes[0].servings,
     ).toBeNull();
+  });
+
+  it('uses a bare yield only when the single recipe page explicitly labels its matching count as servings', () => {
+    const explicitCount =
+      '<span class="wprm-recipe-servings other" aria-label="Adjust recipe servings">4</span>';
+    expect(
+      extractWebsiteRecipes(html({ ...recipe, recipeYield: ['4'] }) + explicitCount).recipes[0]
+        .servings,
+    ).toBe(4);
+    for (const yieldValue of [['4', '4 - 5 people as a side'], ['12 cookies'], ['2']])
+      expect(
+        extractWebsiteRecipes(html({ ...recipe, recipeYield: yieldValue }) + explicitCount)
+          .recipes[0].servings,
+      ).toBeNull();
+    expect(
+      extractWebsiteRecipes(
+        html([
+          { ...recipe, recipeYield: '4' },
+          { ...recipe, name: 'Other', recipeYield: '4' },
+        ]) + explicitCount,
+      ).recipes.every((draft) => draft.servings === null),
+    ).toBe(true);
   });
 
   it('ignores unrelated/malformed scripts and requires actual ingredients plus steps', () => {
@@ -212,6 +353,39 @@ describe('recipe website import', () => {
       (await importRecipeWebsite('https://recipes.example.com/r', fetcher)).recipes,
     ).toHaveLength(1);
     expect(fetcher.mock.calls[5][0]).toBe('https://recipes.example.com/final');
+  });
+
+  it('returns a stable verified Recipe with final URL attribution after redirects', async () => {
+    const run = () => {
+      let pages = 0;
+      return vi.fn<typeof fetch>().mockImplementation(async (url) => {
+        if (String(url).startsWith('https://cloudflare-dns.com/')) return dns();
+        return ++pages === 1
+          ? new Response(null, { status: 301, headers: { Location: '/eggs' } })
+          : new Response(html({ ...recipe, image: '/eggs.jpg', author: { name: 'Author' } }), {
+              headers: { 'Content-Type': 'text/html' },
+            });
+      });
+    };
+    const first = await fetchVerifiedPublisherRecipe('https://recipes.example.com/old', run());
+    const second = await fetchVerifiedPublisherRecipe('https://recipes.example.com/old', run());
+    expect(first.id).toBe(second.id);
+    expect(first.source.url).toBe('https://recipes.example.com/eggs');
+    expect(first.imageUrl).toBe('https://recipes.example.com/eggs.jpg');
+    expect(first.ingredients[0].original).toBe('2 eggs');
+  });
+
+  it('does not choose an arbitrary recipe from a page containing multiple complete recipes', async () => {
+    const fetcher = vi.fn<typeof fetch>().mockImplementation(async (url) =>
+      String(url).startsWith('https://cloudflare-dns.com/')
+        ? dns()
+        : new Response(html([recipe, { ...recipe, name: 'Another meal' }]), {
+            headers: { 'Content-Type': 'text/html' },
+          }),
+    );
+    await expect(
+      fetchVerifiedPublisherRecipe('https://recipes.example.com/roundup', fetcher),
+    ).rejects.toMatchObject({ code: 'import_ambiguous' });
   });
 
   it('limits downloaded page size and rejects blocked/non-HTML responses', async () => {

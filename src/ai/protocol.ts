@@ -1,3 +1,6 @@
+import { isRecipe } from '../recipes/types';
+import type { Recipe } from '../recipes/types';
+
 export interface GeminiConnection {
   url: string;
   token: string;
@@ -21,6 +24,27 @@ export interface AiRecipeDraft {
     optional?: boolean;
   }[];
   steps: string[];
+  source?: Recipe['source'];
+  imageUrl?: string;
+  category?: string;
+  cuisine?: string;
+  author?: string;
+  prepMinutes?: number;
+  cookMinutes?: number;
+  totalMinutes?: number;
+  rating?: { value: number; count?: number; best?: number };
+  publisherNutrition?: {
+    servingSize?: string;
+    calories?: string;
+    protein?: string;
+    carbohydrates?: string;
+    fat?: string;
+    saturatedFat?: string;
+    fiber?: string;
+    sugar?: string;
+    sodium?: string;
+    cholesterol?: string;
+  };
 }
 
 export interface AiReply {
@@ -28,6 +52,8 @@ export interface AiReply {
   recipes: AiRecipeDraft[];
   warnings: string[];
   recommendedRecipeIds?: string[];
+  /** Complete publisher recipes retrieved and parsed by the Worker, never invented by Gemini. */
+  sourceRecipes?: Recipe[];
 }
 
 /** A small, locally retrieved set of real recipes, never the whole cookbook. */
@@ -53,6 +79,7 @@ export interface AiBodyScanReply {
   recordedOn: string | null;
   targets: NutritionTargets;
   warnings: string[];
+  readings?: { label: string; value: string; kind: 'measurement' | 'recommendation' }[];
 }
 
 export interface AiChatRequest {
@@ -66,6 +93,8 @@ export interface AiChatRequest {
   profile?: string;
   model?: GeminiModel;
   modelReviewed?: true;
+  /** Give the assistant bounded publisher search/fetch tools instead of forcing recipe generation. */
+  discover?: true;
 }
 
 export interface AiMedia {
@@ -162,6 +191,7 @@ export function parseChatRequest(value: unknown): AiChatRequest | null {
       'profile',
       'model',
       'modelReviewed',
+      'discover',
     ])
   )
     return null;
@@ -170,6 +200,7 @@ export function parseChatRequest(value: unknown): AiChatRequest | null {
   if (value.recipe !== undefined && !text(value.recipe, 12000, true)) return null;
   if (value.profile !== undefined && !text(value.profile, 24000, true)) return null;
   if (!isSupportedModelSelection(value.model, value.modelReviewed)) return null;
+  if (value.discover !== undefined && value.discover !== true) return null;
   if (value.nutritionTargets !== undefined && !isNutritionTargets(value.nutritionTargets))
     return null;
   let candidates: AiRecipeCandidate[] | undefined;
@@ -245,6 +276,7 @@ export function parseChatRequest(value: unknown): AiChatRequest | null {
     ...(value.profile !== undefined ? { profile: value.profile as string } : {}),
     ...(value.model !== undefined ? { model: value.model as GeminiModel } : {}),
     ...(value.modelReviewed === true ? { modelReviewed: true as const } : {}),
+    ...(value.discover === true ? { discover: true as const } : {}),
     ...(history ? { history } : {}),
     ...(candidates ? { candidates } : {}),
     ...(value.nutritionTargets !== undefined
@@ -291,12 +323,26 @@ export function parseBodyScanExtractRequest(value: unknown): AiBodyScanExtractRe
 export function parseAiBodyScanReply(value: unknown): AiBodyScanReply | null {
   if (
     !isRecord(value) ||
-    !hasOnlyKeys(value, ['text', 'recordedOn', 'targets', 'warnings']) ||
+    !hasOnlyKeys(value, ['text', 'recordedOn', 'targets', 'warnings', 'readings']) ||
     !text(value.text, 24000) ||
     !isNutritionTargets(value.targets) ||
     !Array.isArray(value.warnings) ||
     value.warnings.length > 12 ||
     !value.warnings.every((warning) => text(warning, 1000))
+  )
+    return null;
+  if (
+    value.readings !== undefined &&
+    (!Array.isArray(value.readings) ||
+      value.readings.length > 24 ||
+      !value.readings.every(
+        (reading) =>
+          isRecord(reading) &&
+          hasOnlyKeys(reading, ['label', 'value', 'kind']) &&
+          text(reading.label, 100) &&
+          text(reading.value, 160) &&
+          ['measurement', 'recommendation'].includes(String(reading.kind)),
+      ))
   )
     return null;
   if (value.recordedOn !== null) {
@@ -311,6 +357,9 @@ export function parseAiBodyScanReply(value: unknown): AiBodyScanReply | null {
     recordedOn: value.recordedOn,
     targets: value.targets,
     warnings: value.warnings as string[],
+    ...(value.readings !== undefined
+      ? { readings: value.readings as NonNullable<AiBodyScanReply['readings']> }
+      : {}),
   };
 }
 
@@ -379,6 +428,25 @@ export function parseAiReply(
     value.recipes.length > 4
   )
     return null;
+  let sourceRecipes: Recipe[] | undefined;
+  if (value.sourceRecipes !== undefined) {
+    if (
+      !Array.isArray(value.sourceRecipes) ||
+      value.sourceRecipes.length > 4 ||
+      JSON.stringify(value.sourceRecipes).length > 160000 ||
+      !value.sourceRecipes.every(
+        (recipe) =>
+          isRecipe(recipe) &&
+          recipe.id.length <= 200 &&
+          recipe.source.type === 'imported' &&
+          recipe.source.url?.startsWith('https://'),
+      ) ||
+      new Set(value.sourceRecipes.map((recipe: Recipe) => recipe.id)).size !==
+        value.sourceRecipes.length
+    )
+      return null;
+    sourceRecipes = value.sourceRecipes as Recipe[];
+  }
   let recommendedRecipeIds: string[] | undefined;
   if (value.recommendedRecipeIds !== undefined) {
     if (
@@ -386,7 +454,11 @@ export function parseAiReply(
       value.recommendedRecipeIds.length > 3 ||
       !value.recommendedRecipeIds.every((id) => text(id, 200)) ||
       new Set(value.recommendedRecipeIds).size !== value.recommendedRecipeIds.length ||
-      value.recommendedRecipeIds.some((id) => !candidates?.some((candidate) => candidate.id === id))
+      value.recommendedRecipeIds.some(
+        (id) =>
+          !candidates?.some((candidate) => candidate.id === id) &&
+          !sourceRecipes?.some((recipe) => recipe.id === id),
+      )
     )
       return null;
     recommendedRecipeIds = value.recommendedRecipeIds as string[];
@@ -436,18 +508,49 @@ export function parseAiReply(
         ...(ingredient.optional !== undefined ? { optional: ingredient.optional as boolean } : {}),
       });
     }
-    recipes.push({
+    const draft: AiRecipeDraft = {
       title: recipe.title.trim(),
       servings: recipe.servings,
       ingredients,
       steps: recipe.steps as string[],
-    });
+    };
+    const metadataKeys = [
+      'source',
+      'imageUrl',
+      'category',
+      'cuisine',
+      'author',
+      'prepMinutes',
+      'cookMinutes',
+      'totalMinutes',
+      'rating',
+      'publisherNutrition',
+    ] as const;
+    for (const key of metadataKeys) {
+      if (recipe[key] !== undefined) Object.assign(draft, { [key]: recipe[key] });
+    }
+    // Gemini's required original field may be empty when no source line exists.
+    // Validate metadata against the normalized inventory shape without changing the draft.
+    const validatedIngredients = draft.ingredients.map(({ original, ...ingredient }) =>
+      original?.trim() ? { ...ingredient, original } : ingredient,
+    );
+    if (
+      !isRecipe({
+        ...draft,
+        ingredients: validatedIngredients,
+        id: 'review-draft',
+        source: draft.source ?? { type: 'imported' },
+      })
+    )
+      return null;
+    recipes.push(draft);
   }
   return {
     message: value.message,
     recipes,
     warnings: value.warnings as string[],
     ...(recommendedRecipeIds ? { recommendedRecipeIds } : {}),
+    ...(sourceRecipes ? { sourceRecipes } : {}),
   };
 }
 
@@ -501,8 +604,21 @@ export const AI_BODY_SCAN_SCHEMA = {
     recordedOn: { type: 'STRING', nullable: true },
     targets: AI_NUTRITION_SCHEMA.properties.targets,
     warnings: { type: 'ARRAY', items: { type: 'STRING' } },
+    readings: {
+      type: 'ARRAY',
+      maxItems: 24,
+      items: {
+        type: 'OBJECT',
+        properties: {
+          label: { type: 'STRING' },
+          value: { type: 'STRING' },
+          kind: { type: 'STRING', enum: ['measurement', 'recommendation'] },
+        },
+        required: ['label', 'value', 'kind'],
+      },
+    },
   },
-  required: ['text', 'recordedOn', 'targets', 'warnings'],
+  required: ['text', 'recordedOn', 'targets', 'warnings', 'readings'],
 } as const;
 
 // The API uses its documented Schema representation; nullable values remain unknown.

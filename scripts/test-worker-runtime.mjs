@@ -22,6 +22,8 @@ const bindings = {
   SPOONACULAR_API_KEY: 'test_only_'.repeat(4),
   SPOONACULAR_PLAN: 'free',
   USDA_API_KEY: 'test_only_usda_not_a_real_key',
+  TAVILY_API_KEY: 'test_only_tavily_not_a_real_key',
+  TAVILY_PLAN: 'free',
 };
 const recipeApi = {
   data: [
@@ -128,6 +130,104 @@ async function run(date, path, payload, upstream, verify) {
 
 let passed = 0;
 for (const date of ['2024-10-01', '2026-10-10']) {
+  await run(
+    date,
+    '/health',
+    undefined,
+    () => assert.fail('Health must not consume recipe search quota.'),
+    async (response, calls) => {
+      assert.equal(response.status, 200);
+      const body = await response.json();
+      assert.equal(body.supportsRecipeDiscovery, true);
+      assert.equal(body.recipeDiscoveryConfigured, true);
+      assert.equal(calls.length, 0);
+    },
+  );
+  passed++;
+  let conversationTurn = 0;
+  await run(
+    date,
+    '/chat',
+    {
+      message: 'Find me a meal-prep recipe. I am happy to shop.',
+      inventory: 'Rice: 1 cup',
+      discover: true,
+    },
+    async (request) => {
+      const url = new URL(request.url);
+      if (url.hostname === 'api.tavily.com') {
+        assert.equal(request.headers.get('Authorization'), `Bearer ${bindings.TAVILY_API_KEY}`);
+        const input = await request.json();
+        assert.equal(input.search_depth, 'basic');
+        assert.equal(input.auto_parameters, false);
+        return json({
+          results: [
+            {
+              title: 'Publisher fixture rice',
+              url: 'https://recipes.example.com/rice',
+              content: 'An original recipe with four servings.',
+            },
+          ],
+        });
+      }
+      if (url.hostname === 'cloudflare-dns.com')
+        return json({
+          Status: 0,
+          Answer: url.searchParams.get('type') === 'A' ? [{ type: 1, data: '93.184.216.34' }] : [],
+        });
+      if (url.hostname === 'recipes.example.com') {
+        return new Response(
+          `<script type="application/ld+json">${JSON.stringify({ '@type': 'Recipe', name: 'Publisher fixture rice', recipeYield: '4 servings', recipeIngredient: ['2 cups rice', '1 cup carrots'], recipeInstructions: ['Cook according to the original fixture instructions.'], image: 'https://recipes.example.com/rice.jpg', totalTime: 'PT30M', nutrition: { servingSize: '1 serving', calories: '400 kcal', proteinContent: '20 g' } })}</script>`,
+          { headers: { 'Content-Type': 'text/html' } },
+        );
+      }
+      assert.equal(url.hostname, 'generativelanguage.googleapis.com');
+      const input = await request.json();
+      assert.ok(input.tools[0].functionDeclarations.some((tool) => tool.name === 'finish_reply'));
+      assert.equal(
+        input.generationConfig.responseMimeType,
+        undefined,
+        'Conversation allows native tool use and normal text.',
+      );
+      conversationTurn++;
+      let call;
+      if (conversationTurn === 1)
+        call = { name: 'search_recipes', args: { query: 'simple meal prep rice recipe' } };
+      else if (conversationTurn === 2)
+        call = { name: 'fetch_recipe', args: { url: 'https://recipes.example.com/rice' } };
+      else {
+        const recipe = input.contents.at(-1).parts[0].functionResponse.response.recipe;
+        assert.equal(recipe.ingredients[0].quantity, 2);
+        assert.equal(recipe.totalMinutes, 30);
+        call = {
+          name: 'finish_reply',
+          args: {
+            message:
+              'This original dish is an option; the shopping list will account for your rice.',
+            warnings: [],
+            recommendedRecipeIds: [recipe.id],
+          },
+        };
+      }
+      return json({
+        candidates: [
+          { finishReason: 'STOP', content: { role: 'model', parts: [{ functionCall: call }] } },
+        ],
+      });
+    },
+    async (response, calls) => {
+      assert.equal(response.status, 200, JSON.stringify(await response.clone().json()));
+      const reply = await response.json();
+      assert.equal(reply.sourceRecipes.length, 1);
+      assert.equal(reply.sourceRecipes[0].source.url, 'https://recipes.example.com/rice');
+      assert.equal(reply.sourceRecipes[0].publisherNutrition.calories, '400 kcal');
+      assert.deepEqual(reply.recommendedRecipeIds, [reply.sourceRecipes[0].id]);
+      assert.equal(conversationTurn, 3);
+      assert.equal(calls.length, 7);
+      assert.ok(!JSON.stringify(reply).includes(bindings.TAVILY_API_KEY));
+    },
+  );
+  passed++;
   await run(
     date,
     '/recipe-providers',
@@ -325,9 +425,9 @@ for (const date of ['2024-10-01', '2026-10-10']) {
       );
       const input = await request.json();
       assert.ok(input.contents.at(-1).parts[0].text.includes('selectedReviewedProfileReports'));
-      assert.ok(
-        input.systemInstruction.parts[0].text.includes('only approvedDailyNutritionTargets'),
-      );
+      assert.ok(input.systemInstruction.parts[0].text.includes('approvedDailyNutritionTargets'));
+      assert.ok(input.systemInstruction.parts[0].text.includes('reviewed and attached a report'));
+      assert.ok(input.systemInstruction.parts[0].text.includes('BMR'));
       return geminiAnswer({
         message: 'Try the original recipe.',
         recipes: [],
@@ -414,6 +514,7 @@ for (const date of ['2024-10-01', '2026-10-10']) {
         'recordedOn',
         'targets',
         'warnings',
+        'readings',
       ]);
       assert.ok(input.systemInstruction.parts[0].text.includes('BMR is a measured report value'));
       return geminiAnswer({
@@ -421,6 +522,10 @@ for (const date of ['2024-10-01', '2026-10-10']) {
         recordedOn: null,
         targets: { caloriesKcal: null, proteinGrams: null, carbsGrams: null, fatGrams: null },
         warnings: ['Recommended calories are a range.'],
+        readings: [
+          { label: 'BMR', value: '1600 kcal', kind: 'measurement' },
+          { label: 'Calories', value: '2000–2200 kcal', kind: 'recommendation' },
+        ],
       });
     },
     async (response, calls) => {
@@ -428,6 +533,7 @@ for (const date of ['2024-10-01', '2026-10-10']) {
       const report = await response.json();
       assert.equal(report.targets.caloriesKcal, null);
       assert.ok(report.text.includes('2000–2200 kcal'));
+      assert.equal(report.readings[1].value, '2000–2200 kcal');
       assert.equal(calls.length, 1);
     },
   );
