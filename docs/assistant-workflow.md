@@ -16,6 +16,20 @@ Shopping list calculations continue to use the complete inventory.
 
 ## Discovery
 
+The visible **Recipe source** control shows the saved selection for each new message:
+
+- **Search the web** enables publisher search without automatic cookbook retrieval.
+- **Choose from the cookbook** ranks the saved recipes and bundled collection locally,
+  then sends at most 12 candidates to Gemini. It makes no live recipe-provider calls.
+  Supported provider recipes become eligible after saving them to the collection.
+- **Create a recipe** requests an original recipe without automatic cookbook candidates.
+
+Explicit recipe attachments can be discussed in every mode. Previous cards can support
+follow-up questions in the same mode; switching sources clears those cards, while the
+conversation and explicit attachments remain. The source survives navigation, reloads,
+backup/restore, and clearing chat. Sending clears the composer immediately; a failed
+request restores retry text without duplicating the user message.
+
 The optional authenticated Worker conversation uses Gemini function calls to search
 publisher pages and inspect their recipe data. Tavily requires `TAVILY_API_KEY` and
 `TAVILY_PLAN=free`. Search uses the basic depth with automatic paid-depth selection
@@ -45,6 +59,13 @@ the original yield is recorded. **Make shopping list** saves the original, adds 
 to the plan, aggregates planned quantities, and subtracts compatible inventory supply.
 It does not modify or consume inventory. Unknown quantities and incompatible units are
 flagged for review rather than inferred.
+
+Recipe details show the source serving yield and ingredient multiplier. A target of
+six servings for an original four-serving recipe multiplies each recorded ingredient
+by 1.5; missing source amounts or yield are never guessed. Original cooking instructions
+stay as published. Invalid targets must be corrected before planning, shopping, or
+reviewing consumption. Recipe browsing can sort by **Fewest ingredients short**, counting
+missing ingredients and known shortages separately from amounts that need review.
 
 Assistant suggestions, attachments, conversation text and the draft are saved with the
 kitchen. They survive tab changes, reloads, and file backup/restore. Credentials remain

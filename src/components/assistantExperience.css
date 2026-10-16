@@ -82,6 +82,49 @@
   letter-spacing: 1.7px;
   font-weight: 650;
 }
+.assistant-source-control {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-height: 64px;
+  padding: 13px 15px;
+  margin-top: 22px;
+  border: 1px solid #40534a;
+  border-radius: 14px;
+  background: #23332c;
+  color: #c6dccd;
+  text-align: left;
+}
+.assistant-source-control:hover,
+.assistant-source-control[aria-expanded='true'] {
+  border-color: #7a9a87;
+  background: #2a3b32;
+}
+.assistant-source-control > svg {
+  flex-shrink: 0;
+}
+.assistant-source-control > span:first-of-type {
+  flex: 1;
+  min-width: 0;
+}
+.assistant-source-control small {
+  display: block;
+  font-size: 10px;
+  color: #a2b7a9;
+  margin-bottom: 4px;
+}
+.assistant-source-control strong {
+  display: block;
+  font-weight: 550;
+  font-size: 13px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+.assistant-source-change {
+  font-size: 11px;
+  color: #c4d6cb;
+}
 .mise-conversation .assistant-intro {
   padding: 26px 0 24px;
 }
@@ -206,8 +249,41 @@
   display: flex;
   align-items: center;
   gap: 12px;
-  padding-block: 10px;
+  padding: 12px;
   min-height: 54px;
+  border: 1px solid transparent;
+  border-radius: 12px;
+  margin-top: 7px;
+  cursor: pointer;
+  touch-action: pan-y;
+}
+.assistant-mode-options label.active {
+  background: #27382e;
+  border-color: #536e5c;
+}
+.assistant-mode-options label > span {
+  min-width: 0;
+  flex: 1;
+}
+.assistant-mode-options label > svg {
+  flex-shrink: 0;
+  color: #bfdac7;
+}
+.assistant-mode-note {
+  color: #a1b2a8;
+  font-size: 11px;
+  line-height: 1.7;
+  margin: 12px 0 0;
+}
+.assistant-feedback {
+  color: #efd1b8;
+  background: #49342555;
+  border: 1px solid #795844;
+  border-radius: 12px;
+  padding: 13px 15px;
+  font-size: 12px;
+  line-height: 1.7;
+  margin: 12px 0;
 }
 .assistant-mode-options input[type='radio'],
 .assistant-selection input[type='checkbox'] {
@@ -303,9 +379,25 @@
   border-radius: 100px;
   background: #b4d2c2;
   opacity: 0.55;
+  animation: assistant-pulse 1.5s ease-in-out infinite;
+}
+.assistant-thinking span:nth-child(2) {
+  animation-delay: 0.18s;
 }
 .assistant-thinking span:nth-child(3) {
   margin-right: 7px;
+  animation-delay: 0.36s;
+}
+@keyframes assistant-pulse {
+  50% {
+    opacity: 1;
+    transform: translateY(-2px);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .assistant-thinking span {
+    animation: none;
+  }
 }
 .assistant-suggestions {
   margin: 28px 0;
@@ -545,6 +637,12 @@
   .assistant-brand span {
     font-size: 9px;
     letter-spacing: 1px;
+  }
+  .assistant-source-change {
+    display: none;
+  }
+  .conversation-options {
+    padding: 14px;
   }
   .mise-conversation .chat-message {
     padding: 15px;

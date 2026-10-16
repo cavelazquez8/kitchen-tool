@@ -1,0 +1,72 @@
+.recipe-servings-control {
+  margin: 20px 0;
+  padding: 17px 18px;
+  border: 1px solid #3a4943;
+  border-radius: 15px;
+  background: #202b26;
+}
+.recipe-servings-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  margin-bottom: 12px;
+}
+.recipe-servings-heading p {
+  color: #b5c4bb;
+  font-size: 12px;
+  line-height: 1.6;
+}
+.recipe-servings-multiplier {
+  padding: 5px 9px;
+  border-radius: 8px;
+  background: #30443a;
+  color: #d3e7d7;
+  font-size: 11px;
+  line-height: 1.5;
+}
+.recipe-servings-input {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  font-size: 14px;
+}
+.recipe-servings-control .recipe-servings-input input {
+  width: 98px;
+  min-height: 46px;
+  padding: 9px 12px;
+  border: 1px solid #566e60;
+  border-radius: 10px;
+  background: #17221b;
+  color: #edf1ec;
+  font-size: 17px;
+  text-align: center;
+}
+.recipe-servings-control input[aria-invalid='true'] {
+  border-color: #c88c80;
+}
+.recipe-servings-control .recipe-servings-hint {
+  margin-top: 11px;
+  color: #a7b6ad;
+  font-size: 12px;
+  line-height: 1.7;
+}
+.recipe-servings-control .recipe-servings-error {
+  margin-top: 9px;
+  color: #e4aaa0;
+  font-size: 12px;
+  line-height: 1.6;
+}
+@media (max-width: 380px) {
+  .recipe-servings-control {
+    padding: 15px;
+  }
+  .recipe-servings-input {
+    gap: 8px;
+  }
+  .recipe-servings-control .recipe-servings-input input {
+    width: 84px;
+  }
+}

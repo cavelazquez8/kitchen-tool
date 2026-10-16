@@ -24,6 +24,8 @@ import {
   SlidersHorizontal,
   PackageCheck,
   ChevronDown,
+  Globe,
+  BookOpen,
 } from 'lucide-react';
 import type { InventoryState, ShoppingItem } from '../domain/types';
 import type { InventoryReducer } from '../lib/repository';
@@ -37,6 +39,11 @@ import { reviewedRecipeEstimate } from '../nutrition/recipeEstimate';
 import { recipeNutritionKey } from '../nutrition/estimate';
 import { parseChatRequest, type AiRecipeCandidate } from '../ai/protocol';
 import { bodyScanContext } from '../profile/context';
+import {
+  ASSISTANT_RECIPE_MODES,
+  assistantRecipePool,
+  assistantRequestRecipeSources,
+} from '../ai/conversationSources';
 import {
   assistantInventory,
   assistantInventoryContextForSession,
@@ -76,6 +83,8 @@ import { NutritionTargetsEditor } from './NutritionTargetsEditor';
 import { RecipeNutrition } from './RecipeNutrition';
 import { ConversationText } from './ConversationText';
 import { InventoryContextPicker } from './InventoryContextPicker';
+import { RecipeServingsControl } from './RecipeServingsControl';
+import { validRecipeServings } from '../recipes/servings';
 import './recipeProviders.css';
 import './kitchenPolish.css';
 import './recipeGuidance.css';
@@ -243,16 +252,21 @@ export function KitchenHub({
   const aiBusy = operationBusy || activity.busy;
   const previousActivity = useRef(activity);
   const [message, setMessage] = useState(inventory.assistantSession?.draft ?? '');
-  const [candidates, setCandidates] = useState<Recipe[]>(inventory.assistantSession?.recipes ?? []);
+  const candidates = useMemo(
+    () => inventory.assistantSession?.recipes ?? [],
+    [inventory.assistantSession?.recipes],
+  );
   const [chatRecipes, setChatRecipes] = useState<Recipe[]>(
     inventory.assistantSession?.attachedRecipes ?? [],
   );
   const [library, setLibrary] = useState<Recipe[]>([]);
   const [libraryLoading, setLibraryLoading] = useState(true);
   const [libraryError, setLibraryError] = useState('');
-  const [conversationMode, setConversationMode] = useState(
-    inventory.assistantSession?.mode ?? 'discover',
-  );
+  const conversationMode = inventory.assistantSession?.mode ?? 'discover';
+  const [modeSaving, setModeSaving] = useState(false);
+  const recipeMode = ASSISTANT_RECIPE_MODES.find((mode) => mode.value === conversationMode)!;
+  const RecipeSourceIcon =
+    conversationMode === 'discover' ? Globe : conversationMode === 'library' ? BookOpen : Sparkles;
   const [conversationOptionsOpen, setConversationOptionsOpen] = useState(false);
   const [inventoryContextOpen, setInventoryContextOpen] = useState(false);
   const grounded = conversationMode === 'library';
@@ -305,15 +319,15 @@ export function KitchenHub({
   useEffect(() => {
     const previous = previousActivity.current;
     if (previous.busy && !activity.busy) {
-      if (message.trim() === previous.prompt) setMessage(inventory.assistantSession?.draft ?? '');
-      setCandidates(inventory.assistantSession?.recipes ?? []);
+      if (!message || message.trim() === previous.prompt)
+        setMessage(inventory.assistantSession?.draft ?? '');
       setChatRecipes(inventory.assistantSession?.attachedRecipes ?? []);
       if (activity.error) setError(activity.error);
     }
     previousActivity.current = activity;
   }, [activity, message, inventory.assistantSession]);
   useEffect(() => {
-    if (message === (inventory.assistantSession?.draft ?? '')) return;
+    if (aiBusy || message === (inventory.assistantSession?.draft ?? '')) return;
     const timer = window.setTimeout(() => {
       void update((state) => updateAssistantSession(state, { draft: message })).catch(() => {
         setError(
@@ -322,7 +336,7 @@ export function KitchenHub({
       });
     }, 300);
     return () => window.clearTimeout(timer);
-  }, [message, inventory.assistantSession?.draft, update]);
+  }, [message, inventory.assistantSession?.draft, update, aiBusy]);
   useEffect(() => {
     let active = true;
     void loadLocalRecipes()
@@ -388,8 +402,14 @@ export function KitchenHub({
     }
   }
   function setMode(mode: 'discover' | 'create' | 'library') {
-    setConversationMode(mode);
-    void mutate((state) => updateAssistantSession(state, { mode })).catch(() => {});
+    if (mode === conversationMode || aiBusy || modeSaving) return;
+    setModeSaving(true);
+    void mutate((state) => updateAssistantSession(state, { mode, recipes: [], recipesMode: mode }))
+      .then(() => {
+        setConversationOptionsOpen(false);
+      })
+      .catch(() => {})
+      .finally(() => setModeSaving(false));
   }
   function setAttachedRecipes(recipes: Recipe[]) {
     const next = conversationRecipes(recipes);
@@ -454,7 +474,6 @@ export function KitchenHub({
       setDetail((current) => (current?.id === recipe.id ? null : current));
       setSavedReveal((current) => (current?.id === recipe.id ? null : current));
       setChatRecipes((current) => current.filter((item) => item.id !== recipe.id));
-      setCandidates((current) => current.filter((item) => item.id !== recipe.id));
       setAwake(false);
       setTimers((current) =>
         Object.fromEntries(
@@ -506,7 +525,7 @@ export function KitchenHub({
     return recipes;
   }
   async function ask(prompt = message) {
-    if (!prompt.trim() || aiBusy) return;
+    if (!prompt.trim() || aiBusy || modeSaving) return;
     const connection = readGeminiConnection();
     if (!connection) {
       onConfigure();
@@ -517,7 +536,7 @@ export function KitchenHub({
     let requestError: string | undefined;
     setAiBusy(true);
     setError('');
-    setMessage(prompt.trim());
+    setMessage('');
     const previousTurn = history.at(-1);
     const user = {
       id:
@@ -528,26 +547,47 @@ export function KitchenHub({
       text: prompt.trim(),
     };
     try {
+      await mutate((state) => ({
+        ...updateAssistantSession(state, { draft: '' }),
+        chatHistory: (state.chatHistory?.at(-1)?.role === 'user' &&
+        state.chatHistory.at(-1)?.text === user.text
+          ? state.chatHistory
+          : [...(state.chatHistory ?? []), user]
+        ).slice(-80),
+      }));
       const availableLibrary =
-        grounded && !chatRecipes.length && libraryLoading ? await loadLocalRecipes() : library;
-      const retrieved =
-        conversationMode !== 'create'
-          ? recommendRecipes(
-              [...saved, ...(grounded ? availableLibrary : [])].filter(canPersistProviderRecipe),
-              chatInventory,
-              {
-                query: `${history
-                  .filter((item) => item.role === 'user')
-                  .slice(-2)
-                  .map((item) => item.text)
-                  .join(' ')} ${prompt}`,
-                limit: 12,
-                fallbackToStarters: grounded,
-              },
-            )
-          : [];
-      const sourceRecipes =
-        conversationMode === 'create' ? [] : conversationRecipes([...candidates, ...retrieved]);
+        grounded && libraryLoading
+          ? await loadLocalRecipes().catch((reason) => {
+              if (!saved.length && !chatRecipes.length && !candidates.length) throw reason;
+              setError(
+                'The built-in cookbook could not load. Using your saved and attached recipes.',
+              );
+              return library;
+            })
+          : library;
+      const retrieved = grounded
+        ? recommendRecipes(
+            assistantRecipePool(conversationMode, saved, availableLibrary),
+            chatInventory,
+            {
+              query: `${history
+                .filter((item) => item.role === 'user')
+                .slice(-2)
+                .map((item) => item.text)
+                .join(' ')} ${prompt}`,
+              limit: 12,
+              fallbackToStarters: grounded,
+              includeAiRecipes: true,
+            },
+          )
+        : [];
+      const sources = assistantRequestRecipeSources(conversationMode, {
+        retrievedRecipes: retrieved,
+        previousRecipes:
+          inventory.assistantSession?.recipesMode === conversationMode ? candidates : [],
+        attachedRecipes: chatRecipes,
+      });
+      const sourceRecipes = sources.candidateRecipes;
       const recipeCandidates: AiRecipeCandidate[] = [];
       for (const recipe of sourceRecipes) {
         if (recipe.ingredients.length > 60) continue;
@@ -591,16 +631,16 @@ export function KitchenHub({
         )
           recipeCandidates.push(candidate);
       }
-      if (grounded && !chatRecipes.length && !recipeCandidates.length) {
+      if (grounded && !recipeCandidates.length) {
         throw new Error(
           libraryLoading
             ? 'The cookbook is still opening. Try again in a moment.'
-            : 'No cookbook recipes are available for this request. Try a simpler description, browse recipes, or choose Create with my inventory.',
+            : 'No cookbook recipes are available for this request. Try a simpler description, browse recipes, or choose Search the web.',
         );
       }
       let attachedContext = chatRecipes.map(recipeContext).join('\n\n');
-      if (!chatRecipes.length && candidates.length) {
-        for (const recipe of candidates.slice(0, 3)) {
+      if (!chatRecipes.length && sources.contextRecipes.length) {
+        for (const recipe of sources.contextRecipes.slice(0, 3)) {
           const context = recipeContext(recipe);
           if (attachedContext.length + context.length + 2 <= 12000)
             attachedContext += (attachedContext ? '\n\n' : '') + context;
@@ -624,7 +664,7 @@ export function KitchenHub({
         inventory: boundedInventoryContext(assistantInventoryMarkdown(inventory, inventoryContext)),
         ...(attachedContext ? { recipe: attachedContext } : {}),
         ...(recipeCandidates.length ? { candidates: recipeCandidates } : {}),
-        ...(conversationMode === 'discover' ? { discover: true } : {}),
+        ...(sources.discover ? { discover: true } : {}),
         ...(inventory.nutritionTargets ? { nutritionTargets: inventory.nutritionTargets } : {}),
         ...(profile ? { profile } : {}),
         ...(connection.model ? { model: connection.model } : {}),
@@ -639,14 +679,6 @@ export function KitchenHub({
         throw new Error(
           'This conversation has too much context. Remove a recipe or body scan, or shorten your message.',
         );
-      await mutate((state) => ({
-        ...updateAssistantSession(state, { draft: prompt.trim() }),
-        chatHistory: (state.chatHistory?.at(-1)?.role === 'user' &&
-        state.chatHistory.at(-1)?.text === user.text
-          ? state.chatHistory
-          : [...(state.chatHistory ?? []), user]
-        ).slice(-80),
-      }));
       const reply = await sendGeminiChat(connection, request);
       const assistant = {
         id: crypto.randomUUID(),
@@ -669,14 +701,13 @@ export function KitchenHub({
           );
         return {
           ...updateAssistantSession(state, {
-            ...(state.assistantSession?.draft === prompt.trim() ? { draft: '' } : {}),
-            ...(proposed.length ? { recipes: proposed } : {}),
+            ...(proposed.length && (state.assistantSession?.mode ?? 'discover') === conversationMode
+              ? { recipes: proposed, recipesMode: conversationMode }
+              : {}),
           }),
           chatHistory: [...(state.chatHistory ?? []), assistant].slice(-80),
         };
       });
-      if (proposed.length) setCandidates(proposed);
-      setMessage((current) => (current.trim() === prompt.trim() ? '' : current));
       if (reply.warnings.length) setError(reply.warnings.join(' '));
     } catch (e) {
       requestError =
@@ -684,6 +715,12 @@ export function KitchenHub({
           ? e.message
           : 'Gemini is unavailable. Copy your inventory to continue externally.';
       setError(requestError);
+      setMessage((current) => current || prompt.trim());
+      await update((state) =>
+        state.assistantSession?.draft
+          ? state
+          : updateAssistantSession(state, { draft: prompt.trim() }),
+      ).catch(() => {});
     } finally {
       setAiBusy(false);
       finishRequest(requestError);
@@ -842,9 +879,10 @@ export function KitchenHub({
   }
   const detailMatch = detail
     ? matchRecipe(detail, relevant, {
-        ...(detail.servings && detailServings ? { servings: Number(detailServings) } : {}),
+        ...(detail.servings ? { servings: Number(detailServings) } : {}),
       })
     : null;
+  const invalidDetailServings = !!detail?.servings && !validRecipeServings(detailServings);
   return (
     <div className="kitchen-hub">
       {page === 'recipes' && (
@@ -858,7 +896,6 @@ export function KitchenHub({
             <button
               className="button primary"
               onClick={() => {
-                setMode('discover');
                 onNavigate('assistant');
               }}
             >
@@ -878,7 +915,6 @@ export function KitchenHub({
                 setDetailServings(recipe.servings ? String(recipe.servings) : '');
               }}
               onChoose={() => {
-                setMode('discover');
                 onNavigate('assistant');
               }}
             />
@@ -980,7 +1016,6 @@ export function KitchenHub({
                 <button
                   className="button secondary"
                   onClick={() => {
-                    setMode('discover');
                     onNavigate('assistant');
                   }}
                 >
@@ -1190,11 +1225,97 @@ export function KitchenHub({
               className="icon-button conversation-options-button"
               aria-label="Conversation options"
               aria-expanded={conversationOptionsOpen}
+              aria-controls="assistant-conversation-options"
               onClick={() => setConversationOptionsOpen((current) => !current)}
             >
               <SlidersHorizontal size={19} />
             </button>
           </div>
+          <button
+            className="assistant-source-control"
+            aria-label="Recipe source"
+            aria-expanded={conversationOptionsOpen}
+            aria-controls="assistant-conversation-options"
+            onClick={() => setConversationOptionsOpen((current) => !current)}
+          >
+            <RecipeSourceIcon size={19} aria-hidden="true" />
+            <span>
+              <small>Recipe source</small>
+              <strong>{recipeMode.label}</strong>
+            </span>
+            <span className="assistant-source-change">Change</span>
+            <ChevronDown size={16} aria-hidden="true" />
+          </button>
+          {conversationOptionsOpen && (
+            <section
+              className="conversation-options"
+              aria-label="Assistant preferences"
+              id="assistant-conversation-options"
+            >
+              <h3>Conversation options</h3>
+              <fieldset className="assistant-mode-options" disabled={aiBusy || modeSaving}>
+                <legend>Where should recipe suggestions come from?</legend>
+                {ASSISTANT_RECIPE_MODES.map((mode) => (
+                  <label
+                    key={mode.value}
+                    className={conversationMode === mode.value ? 'active' : ''}
+                  >
+                    <input
+                      type="radio"
+                      name="recipe-guidance-mode"
+                      aria-label={mode.label}
+                      checked={conversationMode === mode.value}
+                      onChange={() => setMode(mode.value)}
+                    />
+                    <span>
+                      <strong>{mode.label}</strong>
+                      <small>{mode.note}</small>
+                    </span>
+                    {conversationMode === mode.value && <Check size={17} aria-hidden="true" />}
+                  </label>
+                ))}
+              </fieldset>
+              <p className="assistant-mode-note">
+                You can discuss attached recipes in any mode. This choice applies to new messages;
+                switching sources clears the previous suggestion cards.
+              </p>
+              {conversationMode === 'library' && (
+                <p className="assistant-mode-note">
+                  Other recipe services are available in Recipes. Saved imports from supported
+                  sources are included here.
+                </p>
+              )}
+              {modeSaving && (
+                <p className="assistant-mode-note" role="status">
+                  Saving your choice…
+                </p>
+              )}
+              <div className="hub-actions">
+                <button className="text-button" onClick={onConfigure}>
+                  Connection settings
+                </button>
+                {!!chatRecipes.length && (
+                  <button className="text-button" onClick={() => setAttachedRecipes([])}>
+                    Clear recipes
+                  </button>
+                )}
+                {!!attachedBodyScanIds.length && (
+                  <button className="text-button" onClick={() => onBodyScanAttachmentsChange?.([])}>
+                    Clear body scans
+                  </button>
+                )}
+                {history.length > 0 && (
+                  <button
+                    className="text-button"
+                    disabled={aiBusy}
+                    onClick={() => setClearChatOpen(true)}
+                  >
+                    Clear conversation
+                  </button>
+                )}
+              </div>
+            </section>
+          )}
           {!history.length && (
             <div className="assistant-intro">
               <h2>Let’s make dinner easier.</h2>
@@ -1209,6 +1330,8 @@ export function KitchenHub({
                     icon: ChefHat,
                     prompt:
                       'Help me choose dinner using real recipes. I am happy to shop for ingredients. Ask a brief question if it would help narrow down appealing options.',
+                    createPrompt:
+                      'Help me choose dinner and create a recipe for it. I am happy to shop for ingredients. Ask a brief question if it would help narrow down appealing options.',
                   },
                   {
                     label: 'Find meals to prep',
@@ -1216,6 +1339,8 @@ export function KitchenHub({
                     icon: Utensils,
                     prompt:
                       'Help me find real recipes that work well for meal prep. I am happy to buy missing ingredients. Help me decide what to make and ask about portions or effort when needed.',
+                    createPrompt:
+                      'Help me create a recipe that works well for meal prep. I am happy to buy missing ingredients. Ask about portions or effort when needed.',
                   },
                   {
                     label: 'Use what I have',
@@ -1223,13 +1348,15 @@ export function KitchenHub({
                     icon: PackageCheck,
                     prompt:
                       'Help me find real recipes using what I have, prioritizing items expiring soon. Explain what is missing and keep the original recipe intact unless I ask for substitutions.',
+                    createPrompt:
+                      'Help me create a recipe using the inventory I have shared, prioritizing items expiring soon. Ask if you need to know quantities or preferences.',
                   },
-                ].map(({ label, description, icon: Icon, prompt }) => (
+                ].map(({ label, description, icon: Icon, prompt, createPrompt }) => (
                   <button
                     className="assistant-starter"
                     aria-label={label}
                     key={label}
-                    disabled={aiBusy}
+                    disabled={aiBusy || modeSaving}
                     onClick={() => {
                       if (
                         label === 'Use what I have' &&
@@ -1238,7 +1365,7 @@ export function KitchenHub({
                         setInventoryContextOpen(true);
                         return;
                       }
-                      void ask(prompt);
+                      void ask(conversationMode === 'create' ? createPrompt : prompt);
                     }}
                   >
                     <Icon size={21} />
@@ -1343,69 +1470,6 @@ export function KitchenHub({
                 .join(' · ') || 'No values entered'}
             </p>
           )}
-          {conversationOptionsOpen && (
-            <section className="conversation-options" aria-label="Assistant preferences">
-              <h3>Conversation options</h3>
-              <fieldset className="assistant-mode-options">
-                <legend>Recipe suggestions</legend>
-                {[
-                  {
-                    value: 'discover' as const,
-                    label: 'Find recipes and discuss them',
-                    note: 'Search publisher recipes when web discovery is connected.',
-                  },
-                  {
-                    value: 'library' as const,
-                    label: 'Choose from the cookbook',
-                    note: 'Search your saved recipes and the built-in collection.',
-                  },
-                  {
-                    value: 'create' as const,
-                    label: 'Create with my inventory',
-                    note: 'Ask Gemini for an original recipe.',
-                  },
-                ].map((mode) => (
-                  <label key={mode.value}>
-                    <input
-                      type="radio"
-                      name="recipe-guidance-mode"
-                      aria-label={mode.label}
-                      checked={conversationMode === mode.value}
-                      onChange={() => setMode(mode.value)}
-                    />
-                    <span>
-                      <strong>{mode.label}</strong>
-                      <small>{mode.note}</small>
-                    </span>
-                  </label>
-                ))}
-              </fieldset>
-              <div className="hub-actions">
-                <button className="text-button" onClick={onConfigure}>
-                  Connection settings
-                </button>
-                {!!chatRecipes.length && (
-                  <button className="text-button" onClick={() => setAttachedRecipes([])}>
-                    Clear recipes
-                  </button>
-                )}
-                {!!attachedBodyScanIds.length && (
-                  <button className="text-button" onClick={() => onBodyScanAttachmentsChange?.([])}>
-                    Clear body scans
-                  </button>
-                )}
-                {history.length > 0 && (
-                  <button
-                    className="text-button"
-                    disabled={aiBusy}
-                    onClick={() => setClearChatOpen(true)}
-                  >
-                    Clear conversation
-                  </button>
-                )}
-              </div>
-            </section>
-          )}
           <div className="chat-history" aria-label="Gemini conversation">
             {history.map((item) => (
               <div key={item.id} className={'chat-message ' + item.role}>
@@ -1423,6 +1487,11 @@ export function KitchenHub({
             )}
             <div ref={endRef} />
           </div>
+          {error && (
+            <p role="alert" className="assistant-feedback">
+              {error}
+            </p>
+          )}
           <form
             className="chat-composer"
             onSubmit={(e) => {
@@ -1443,13 +1512,19 @@ export function KitchenHub({
                   );
               }}
               rows={2}
-              placeholder="What sounds good? Ask Gemini…"
+              placeholder={
+                conversationMode === 'discover'
+                  ? 'What sounds good? Find a recipe or ask anything…'
+                  : conversationMode === 'library'
+                    ? 'What would you like to find in your cookbook?'
+                    : 'What would you like to make?'
+              }
               maxLength={6000}
             />
             <button
               className="button primary"
               aria-label={aiBusy ? 'Gemini is thinking' : 'Ask Gemini'}
-              disabled={aiBusy || !message.trim()}
+              disabled={aiBusy || modeSaving || !message.trim()}
             >
               <ArrowUp size={20} />
               <span>{aiBusy ? 'Thinking…' : 'Send'}</span>
@@ -1530,7 +1605,7 @@ export function KitchenHub({
           </button>
         </section>
       )}
-      {error && (
+      {error && page !== 'assistant' && (
         <p className="form-error hub-error" role="alert">
           {error}
         </p>
@@ -1569,23 +1644,11 @@ export function KitchenHub({
                 {detail.totalMinutes !== undefined ? detail.totalMinutes + ' minutes' : ''}
               </p>
             )}
-            {detail.servings ? (
-              <label className="recipe-servings">
-                Cooking for
-                <input
-                  type="number"
-                  min="0.1"
-                  step="any"
-                  value={detailServings}
-                  onChange={(e) => setDetailServings(e.target.value)}
-                />
-                servings
-              </label>
-            ) : (
-              <p className="field-note">
-                Original recipe quantities shown. Record the original yield before scaling portions.
-              </p>
-            )}
+            <RecipeServingsControl
+              originalServings={detail.servings}
+              value={detailServings}
+              onChange={setDetailServings}
+            />
             <div className="hub-actions">
               <span className={`match-badge ${detailMatch.status}`}>
                 {labels[detailMatch.status]}
@@ -1601,6 +1664,7 @@ export function KitchenHub({
               </button>
               <button
                 className="button secondary"
+                disabled={invalidDetailServings}
                 onClick={() => {
                   void addToPlan(detail).catch(() => {});
                 }}
@@ -1611,6 +1675,7 @@ export function KitchenHub({
               </button>
               <button
                 className="button primary"
+                disabled={invalidDetailServings}
                 onClick={() => {
                   void chooseAndShop(detail).catch(() => {});
                 }}
@@ -1798,6 +1863,7 @@ export function KitchenHub({
             )}
             <button
               className="button primary full-width"
+              disabled={invalidDetailServings}
               onClick={() => {
                 const servings =
                   detail.servings && detailServings ? Number(detailServings) : undefined;
@@ -1992,15 +2058,14 @@ export function KitchenHub({
                 chatHistory: [],
                 assistantSession: {
                   ...emptyAssistantSession(),
+                  mode: state.assistantSession?.mode ?? 'discover',
                   inventoryContext: assistantInventoryContextForSession(state.assistantSession),
                 },
               }))
                 .then(() => {
                   setClearChatOpen(false);
-                  setCandidates([]);
                   setChatRecipes([]);
                   setMessage('');
-                  setConversationMode('discover');
                 })
                 .catch(() => {});
             }}

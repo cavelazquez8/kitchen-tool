@@ -68,6 +68,8 @@ export interface AssistantSession {
   attachedRecipes: Recipe[];
   draft: string;
   mode: 'discover' | 'create' | 'library';
+  /** Source that produced these cards; absent on legacy cards with unproven provenance. */
+  recipesMode?: 'discover' | 'create' | 'library';
   bodyScanIds?: string[];
   inventoryContext?: AssistantInventoryContext;
 }
@@ -135,6 +137,8 @@ export function isAssistantSession(value: unknown): value is AssistantSession {
     recipes(value.attachedRecipes) &&
     typeof value.draft === 'string' &&
     value.draft.length <= 6000 &&
+    (value.recipesMode === undefined ||
+      ['discover', 'create', 'library'].includes(value.recipesMode as string)) &&
     (value.inventoryContext === undefined || isAssistantInventoryContext(value.inventoryContext)) &&
     (value.bodyScanIds === undefined ||
       (Array.isArray(value.bodyScanIds) &&

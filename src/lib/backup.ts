@@ -113,6 +113,9 @@ export function buildInventoryBackup(state: InventoryState): InventoryBackup {
             attachedRecipes: state.assistantSession.attachedRecipes.map(copyRecipe),
             draft: state.assistantSession.draft,
             mode: state.assistantSession.mode,
+            ...(state.assistantSession.recipesMode === undefined
+              ? {}
+              : { recipesMode: state.assistantSession.recipesMode }),
             ...(state.assistantSession.bodyScanIds
               ? { bodyScanIds: [...state.assistantSession.bodyScanIds] }
               : {}),

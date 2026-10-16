@@ -26,6 +26,43 @@ const session = {
 };
 
 describe('persistent assistant recipe context', () => {
+  it('preserves optional card provenance through storage and backups without reclassifying legacy cards', async () => {
+    for (const recipesMode of ['discover', 'library', 'create'] as const) {
+      localStorage.clear();
+      const repository = createLocalRepository();
+      const marked = { ...session, recipesMode };
+      await repository.update((state) => ({ ...state, assistantSession: marked }));
+      expect(createLocalRepository().getSnapshot().state.assistantSession).toEqual(marked);
+      const backup = buildInventoryBackup(repository.getSnapshot().state);
+      expect(backup.inventory.assistantSession?.recipesMode).toBe(recipesMode);
+      await repository.replace(backup.inventory);
+      expect(createLocalRepository().getSnapshot().state.assistantSession).toEqual(marked);
+    }
+    const legacy = buildInventoryBackup({
+      products: [],
+      batches: [],
+      tools: [],
+      assistantSession: session,
+    });
+    expect(legacy.inventory.assistantSession).toEqual(session);
+    expect(legacy.inventory.assistantSession).not.toHaveProperty('recipesMode');
+  });
+
+  it('rejects malformed card provenance but allows visible cards from a previously selected source', () => {
+    expect(isAssistantSession({ ...session, mode: 'library', recipesMode: 'discover' })).toBe(true);
+    for (const recipesMode of ['web', 'unknown', null, 42, false, {}, ['discover']]) {
+      expect(isAssistantSession({ ...session, recipesMode })).toBe(false);
+      expect(
+        isInventoryState({
+          products: [],
+          batches: [],
+          tools: [],
+          assistantSession: { ...session, recipesMode },
+        }),
+      ).toBe(false);
+    }
+  });
+
   it('keeps recommendations, attachments, and the draft in local storage and transferable backups', async () => {
     localStorage.clear();
     const repository = createLocalRepository();

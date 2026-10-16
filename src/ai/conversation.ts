@@ -66,6 +66,7 @@ export function updateAssistantSession(
       attachedRecipes: conversationRecipes(session.attachedRecipes),
       draft: session.draft.slice(0, 6000),
       mode: session.mode,
+      ...(session.recipesMode === undefined ? {} : { recipesMode: session.recipesMode }),
       ...(session.bodyScanIds ? { bodyScanIds: [...session.bodyScanIds] } : {}),
       ...(session.inventoryContext === undefined
         ? {}

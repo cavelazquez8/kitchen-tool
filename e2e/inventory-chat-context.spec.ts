@@ -78,6 +78,7 @@ const inventory: InventoryState = {
   ],
   tools: [{ id: 'secret-skillet', name: 'Secret titanium skillet' }],
   recipes: [recipe],
+  assistantSession: { mode: 'library', recipes: [], attachedRecipes: [], draft: '' },
 };
 
 async function navigate(page: Page, name: 'Gemini' | 'Inventory') {

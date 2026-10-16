@@ -35,10 +35,22 @@ export const STARTER_RECIPES: readonly { id: string; tags: readonly string[] }[]
 const starterMetadata = new Map(STARTER_RECIPES.map((entry) => [entry.id, entry]));
 const starterOrder = new Map(STARTER_RECIPES.map((entry, index) => [entry.id, index]));
 
-export function discoveryRecipePool(recipes: readonly Recipe[]): Recipe[] {
+interface RecipePoolOptions {
+  /** Saved generated recipes may participate in an explicitly chosen personal library. */
+  includeAiRecipes?: boolean;
+}
+
+export function discoveryRecipePool(
+  recipes: readonly Recipe[],
+  options: RecipePoolOptions = {},
+): Recipe[] {
   const seen = new Set<string>();
   return recipes.filter((recipe) => {
-    if (seen.has(recipe.id) || recipe.source.type === 'ai' || !canPersistProviderRecipe(recipe))
+    if (
+      seen.has(recipe.id) ||
+      (!options.includeAiRecipes && recipe.source.type === 'ai') ||
+      !canPersistProviderRecipe(recipe)
+    )
       return false;
     seen.add(recipe.id);
     return true;
@@ -46,8 +58,11 @@ export function discoveryRecipePool(recipes: readonly Recipe[]): Recipe[] {
 }
 
 /** Keep the original source records, including attribution and unknown measures. */
-export function getStarterRecipes(recipes: readonly Recipe[]): Recipe[] {
-  const eligible = discoveryRecipePool(recipes);
+export function getStarterRecipes(
+  recipes: readonly Recipe[],
+  options: RecipePoolOptions = {},
+): Recipe[] {
+  const eligible = discoveryRecipePool(recipes, options);
   const byId = new Map(eligible.map((recipe) => [recipe.id, recipe]));
   const starters = STARTER_RECIPES.flatMap(({ id }) => {
     const recipe = byId.get(id);
@@ -219,7 +234,7 @@ function requestScore(recipe: Recipe, terms: readonly string[], phrase: string):
   return score;
 }
 
-export interface RecommendationOptions {
+export interface RecommendationOptions extends RecipePoolOptions {
   /** Discovery text; dietary safety and nutrition require separate confirmation. */
   query?: string;
   limit?: number;
@@ -229,7 +244,7 @@ export interface RecommendationOptions {
   fallbackToStarters?: boolean;
 }
 
-/** Retrieve a small source-backed shortlist; inventory is a preference, never a requirement. */
+/** Retrieve a small shortlist; saved generated recipes require an explicit opt-in. */
 export function recommendRecipes(
   recipes: readonly Recipe[],
   inventory: InventoryState,
@@ -245,14 +260,14 @@ export function recommendRecipes(
   const terms = [...new Set(words(phrase).filter((word) => !requestWords.has(word)))];
   const broadRequest =
     terms.length === 0 || terms.every((term) => ['dinner', 'lunch', 'breakfast'].includes(term));
-  const eligible = discoveryRecipePool(recipes).filter(
+  const eligible = discoveryRecipePool(recipes, options).filter(
     (recipe) => !excludesRecipe(recipe, request.exclusions),
   );
   let candidates = eligible
     .map((recipe) => ({ recipe, relevance: requestScore(recipe, terms, phrase) }))
     .filter(({ relevance }) => terms.length === 0 || relevance > 0);
   if (!candidates.length && options.fallbackToStarters)
-    candidates = getStarterRecipes(eligible).map((recipe) => ({ recipe, relevance: 0 }));
+    candidates = getStarterRecipes(eligible, options).map((recipe) => ({ recipe, relevance: 0 }));
   const prioritizeExpiration =
     options.prioritizeExpiration ?? /\b(?:expir\w*|use soon)\b/i.test(options.query ?? '');
   const relevanceById = new Map(candidates.map(({ recipe, relevance }) => [recipe.id, relevance]));

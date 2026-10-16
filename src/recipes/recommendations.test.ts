@@ -122,6 +122,39 @@ describe('recipe-first local discovery', () => {
     expect(recommendRecipes([spoon, ai, source, source], empty)).toEqual([source]);
   });
 
+  it('includes saved generated recipes only when personal-library retrieval explicitly opts in', () => {
+    const generated = {
+      ...dish('saved-ai', 'Chicken rice bowls'),
+      source: { type: 'ai' as const, name: 'Gemini' },
+    };
+    const original = dish('original', 'Chicken stew');
+    const transient = {
+      ...dish('spoonacular:1', 'Chicken pasta'),
+      source: { type: 'imported' as const, name: 'Spoonacular' },
+    };
+    const recipes = [generated, generated, original, transient];
+    expect(recommendRecipes(recipes, empty, { query: 'chicken' })).toEqual([original]);
+    expect(recommendRecipes(recipes, empty, { query: 'chicken', includeAiRecipes: true })).toEqual([
+      generated,
+      original,
+    ]);
+    expect(generated.source).toEqual({ type: 'ai', name: 'Gemini' });
+    expect(recipes).toEqual([generated, generated, original, transient]);
+  });
+
+  it('retains opt-in generated personal recipes when a broad request needs the starter fallback', () => {
+    const generated = {
+      ...dish('saved-ai', 'Chicken rice bowls'),
+      source: { type: 'ai' as const },
+    };
+    const request = { query: 'unmatchedkeyword dinner', fallbackToStarters: true };
+    expect(recommendRecipes([generated], empty, request)).toEqual([]);
+    expect(recommendRecipes([generated], empty, { ...request, includeAiRecipes: true })).toEqual([
+      generated,
+    ]);
+    expect(getStarterRecipes([generated])).toEqual([]);
+  });
+
   it('keeps explicit ingredient exclusions when an unfamiliar request falls back to starter dishes', () => {
     const peanut = dish('peanut', 'Peanut noodles', 'Peanut butter');
     const chicken = dish('chicken', 'Chicken dinner');

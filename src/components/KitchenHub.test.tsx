@@ -139,6 +139,7 @@ describe('inventory attached to Gemini messages', () => {
             attachedRecipes: [],
             draft: '',
             mode: 'discover',
+            recipesMode: 'discover',
             inventoryContext: { mode, productIds: ['carrots'] },
           },
         },
@@ -229,6 +230,125 @@ describe('inventory attached to Gemini messages', () => {
     expect(screen.getByRole('button', { name: 'Inventory context' })).toHaveTextContent(
       'No inventory',
     );
+  });
+});
+
+describe('the recipe source used in a conversation', () => {
+  beforeEach(() => {
+    vi.mocked(readGeminiConnection).mockReturnValue({
+      url: 'https://mise.example.workers.dev',
+      token: 'a'.repeat(32),
+    });
+    vi.mocked(sendGeminiChat).mockResolvedValue({
+      message: 'Let’s discuss your options.',
+      recipes: [],
+      warnings: [],
+    });
+    vi.mocked(loadLocalRecipes).mockResolvedValue([builtIn]);
+  });
+
+  for (const mode of ['discover', 'library', 'create'] as const) {
+    it(`uses the persisted ${mode} source for the actual request`, async () => {
+      setup(
+        {
+          ...createEmptyInventory(),
+          recipes: [imported],
+          // Older sessions can contain cards without source provenance. Keep them visible,
+          // but do not silently reuse them as candidates for a different recipe source.
+          assistantSession: { recipes: [other], attachedRecipes: [], draft: '', mode },
+        },
+        'assistant',
+      );
+      const user = userEvent.setup();
+      await user.type(screen.getByRole('textbox', { name: 'Message Gemini' }), 'Carrot soup');
+      await user.click(screen.getByRole('button', { name: 'Ask Gemini' }));
+      await screen.findByText('Let’s discuss your options.');
+      const request = vi.mocked(sendGeminiChat).mock.calls[0][1];
+      expect(request.discover).toBe(mode === 'discover' ? true : undefined);
+      if (mode === 'library') {
+        expect(request.candidates?.map((recipe) => recipe.id)).toContain(imported.id);
+        expect(request.candidates?.map((recipe) => recipe.id)).toContain(builtIn.id);
+      } else {
+        expect(request.candidates).toBeUndefined();
+        expect(request.recipe).toBeUndefined();
+        expect(JSON.stringify(request)).not.toContain(imported.source.url);
+      }
+    });
+  }
+
+  it('changes sources without carrying old cards, and keeps explicit attachments on reload', async () => {
+    const { repository, unmount } = setup(
+      {
+        ...createEmptyInventory(),
+        chatHistory: [{ id: 'old-chat', role: 'assistant', text: 'Your earlier conversation.' }],
+        assistantSession: {
+          recipes: [builtIn],
+          attachedRecipes: [imported],
+          draft: 'An unfinished question',
+          mode: 'library',
+        },
+      },
+      'assistant',
+    );
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: 'Recipe source' }));
+    await user.click(screen.getByRole('radio', { name: 'Search the web' }));
+    await waitFor(() =>
+      expect(repository.getSnapshot().state.assistantSession?.mode).toBe('discover'),
+    );
+    expect(repository.getSnapshot().state.assistantSession?.recipes).toEqual([]);
+    expect(repository.getSnapshot().state.assistantSession?.attachedRecipes).toEqual([imported]);
+    expect(screen.queryByRole('heading', { name: builtIn.title })).not.toBeInTheDocument();
+    expect(screen.getByText('Your earlier conversation.')).toBeVisible();
+    expect(screen.getByRole('textbox', { name: 'Message Gemini' })).toHaveValue(
+      'An unfinished question',
+    );
+    unmount();
+    renderKitchen(repository, vi.fn(repository.update), 'assistant');
+    expect(screen.getByRole('button', { name: 'Recipe source' })).toHaveTextContent(
+      'Search the web',
+    );
+  });
+
+  it('keeps the old source selected when saving a new choice fails', async () => {
+    const state = createEmptyInventory();
+    localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify({ schemaVersion: 1, state }));
+    const repository = createLocalRepository(localStorage);
+    renderKitchen(
+      repository,
+      vi.fn().mockRejectedValue(new Error('Storage unavailable')),
+      'assistant',
+    );
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: 'Recipe source' }));
+    await user.click(screen.getByRole('radio', { name: 'Choose from the cookbook' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('Storage unavailable');
+    expect(screen.getByRole('radio', { name: 'Search the web' })).toBeChecked();
+    expect(screen.getByRole('radio', { name: 'Choose from the cookbook' })).not.toBeChecked();
+    expect(screen.getByRole('button', { name: 'Recipe source' })).toHaveTextContent(
+      'Search the web',
+    );
+  });
+
+  it('does not fall back to generated recipes when the selected cookbook is empty', async () => {
+    vi.mocked(loadLocalRecipes).mockResolvedValue([]);
+    setup(
+      {
+        ...createEmptyInventory(),
+        assistantSession: {
+          recipes: [],
+          attachedRecipes: [],
+          draft: 'Find dinner',
+          mode: 'library',
+        },
+      },
+      'assistant',
+    );
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: 'Ask Gemini' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent(/cookbook/i);
+    expect(sendGeminiChat).not.toHaveBeenCalled();
+    expect(screen.getByRole('textbox', { name: 'Message Gemini' })).toHaveValue('Find dinner');
   });
 });
 
@@ -362,9 +482,12 @@ describe('a conversation that leads to groceries', () => {
     );
     await user.click(screen.getByRole('button', { name: 'Ask Gemini' }));
     await waitFor(() => expect(sendGeminiChat).toHaveBeenCalledTimes(1));
+    expect(screen.getByRole('textbox', { name: 'Message Gemini' })).toHaveValue('');
+    expect(repository.getSnapshot().state.assistantSession?.draft).toBe('');
     unmount();
     renderKitchen(repository, vi.fn(repository.update), 'assistant');
     expect(screen.getByRole('textbox', { name: 'Message Gemini' })).toBeDisabled();
+    expect(screen.getByRole('textbox', { name: 'Message Gemini' })).toHaveValue('');
     expect(screen.getByRole('button', { name: 'Gemini is thinking' })).toBeDisabled();
     await act(async () => {
       await repository.update((state) => ({
@@ -387,6 +510,46 @@ describe('a conversation that leads to groceries', () => {
     );
     expect(repository.getSnapshot().state.assistantSession?.draft).toBe('What about next week?');
     expect(sendGeminiChat).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps a late reply from putting cards into a different selected source', async () => {
+    connect();
+    let finish!: (reply: AiReply) => void;
+    vi.mocked(sendGeminiChat).mockImplementationOnce(
+      () =>
+        new Promise<AiReply>((resolve) => {
+          finish = resolve;
+        }),
+    );
+    const { repository } = setup(createEmptyInventory(), 'assistant');
+    const user = userEvent.setup();
+    await user.type(screen.getByRole('textbox', { name: 'Message Gemini' }), 'Find dinner');
+    await user.click(screen.getByRole('button', { name: 'Ask Gemini' }));
+    await waitFor(() => expect(sendGeminiChat).toHaveBeenCalledOnce());
+    await act(async () => {
+      await repository.update((state) => ({
+        ...state,
+        assistantSession: {
+          ...state.assistantSession!,
+          mode: 'create',
+          recipes: [],
+          recipesMode: 'create',
+        },
+      }));
+      finish({
+        message: 'This reply was started using the previous source.',
+        recipes: [],
+        warnings: [],
+        sourceRecipes: [publisherRecipe],
+        recommendedRecipeIds: [publisherRecipe.id],
+      });
+    });
+    await screen.findByText('This reply was started using the previous source.');
+    expect(repository.getSnapshot().state.assistantSession?.recipes).toEqual([]);
+    expect(screen.queryByRole('heading', { name: publisherRecipe.title })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Recipe source' })).toHaveTextContent(
+      'Create a recipe',
+    );
   });
 
   it('chooses portions and creates the shopping list directly without buying the recorded stock twice', async () => {
