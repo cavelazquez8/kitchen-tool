@@ -181,6 +181,141 @@ describe('shared recipe browsing', () => {
     expect(recipes).toEqual([vegetables, chicken]);
   });
 
+  it('sorts by missing or insufficient ingredients while keeping unknown amounts separate', () => {
+    const inventory = kitchen();
+    inventory.batches[1] = { ...inventory.batches[1], quantity: null };
+    const recipes = [
+      recipe('two-short', {
+        ingredients: [
+          { name: 'Chicken breast', quantity: 600, unit: 'g' },
+          { name: 'Rice', quantity: 100, unit: 'g' },
+        ],
+      }),
+      recipe('one-short', {
+        ingredients: [{ name: 'Rice', quantity: 100, unit: 'g' }],
+      }),
+      recipe('unknown', {
+        ingredients: [{ name: 'Courgette', quantity: 200, unit: 'g' }],
+      }),
+      recipe('ready'),
+    ];
+    const original = [...recipes];
+    const matches = browseRecipes(recipes, inventory, { order: 'fewest-short' });
+    expect(matches.map((match) => match.recipe.id)).toEqual([
+      'ready',
+      'unknown',
+      'one-short',
+      'two-short',
+    ]);
+    expect(
+      matches.map(({ missingCount, uncertainCount }) => [missingCount, uncertainCount]),
+    ).toEqual([
+      [0, 0],
+      [0, 1],
+      [1, 0],
+      [2, 0],
+    ]);
+    expect(matches[3].ingredients.map((ingredient) => ingredient.status)).toEqual([
+      'short',
+      'missing',
+    ]);
+    expect(recipes).toEqual(original);
+  });
+
+  it('counts canonical ingredient demands once, omits optional ingredients, and flags incompatible stock', () => {
+    const inventory = kitchen();
+    inventory.batches[0] = { ...inventory.batches[0], unit: 'package', quantity: 1 };
+    const recipes = [
+      recipe('duplicate-rice', {
+        ingredients: [
+          { name: 'Rice', quantity: 100, unit: 'g' },
+          { name: 'Rice', quantity: 200, unit: 'g' },
+          { name: 'Garlic', quantity: 1, unit: 'each', optional: true },
+        ],
+      }),
+      recipe('unknown-package'),
+    ];
+    const matches = browseRecipes(recipes, inventory, { order: 'fewest-short' });
+    expect(matches[0]).toMatchObject({
+      recipe: { id: 'unknown-package' },
+      missingCount: 0,
+      uncertainCount: 1,
+    });
+    expect(matches[1]).toMatchObject({
+      recipe: { id: 'duplicate-rice' },
+      missingCount: 1,
+      uncertainCount: 0,
+    });
+    expect(matches[1].ingredients).toHaveLength(1);
+    expect(matches[1].ingredients[0].required).toBe(300);
+  });
+
+  it('uses expiration within equal shortages and deterministic title/ID ties without overriding missing counts', () => {
+    const chicken = recipe('chicken', {
+      title: 'Alpha dinner',
+      ingredients: [
+        { name: 'Chicken breast', quantity: 400, unit: 'g' },
+        { name: 'Rice', quantity: 100, unit: 'g' },
+      ],
+    });
+    const vegetables = recipe('vegetables', {
+      title: 'Zucchini supper',
+      ingredients: [
+        { name: 'Courgette', quantity: 200, unit: 'g' },
+        { name: 'Rice', quantity: 100, unit: 'g' },
+      ],
+    });
+    const moreShort = recipe('more-short', {
+      title: 'A first alphabetically',
+      ingredients: [...vegetables.ingredients, { name: 'Cheese', quantity: 20, unit: 'g' }],
+    });
+    const tied = { ...chicken, id: 'chicken-tied' };
+    const recipes = [moreShort, tied, vegetables, chicken];
+    expect(
+      browseRecipes(recipes, kitchen(), { order: 'fewest-short' }).map((match) => match.recipe.id),
+    ).toEqual(['chicken', 'chicken-tied', 'vegetables', 'more-short']);
+    const options = { order: 'fewest-short' as const, prioritizeExpiration: true };
+    const expected = ['vegetables', 'chicken', 'chicken-tied', 'more-short'];
+    expect(browseRecipes(recipes, kitchen(), options).map((match) => match.recipe.id)).toEqual(
+      expected,
+    );
+    expect(
+      browseRecipes([...recipes].reverse(), kitchen(), options).map((match) => match.recipe.id),
+    ).toEqual(expected);
+  });
+
+  it('keeps shortage order inside the same imported, text, cuisine and availability filters', () => {
+    const imported = (id: string, missing: string[]): Recipe =>
+      recipe(id, {
+        title: `Chicken ${id}`,
+        source: { type: 'imported', name: 'Publisher' },
+        ingredients: [
+          { name: 'Chicken breast', quantity: 400, unit: 'g' },
+          ...missing.map((name) => ({ name, quantity: 100, unit: 'g' })),
+        ],
+      });
+    const ready = imported('ready', []);
+    const close = imported('close', ['Rice']);
+    const far = imported('far', ['Rice', 'Cheese', 'Tomato']);
+    const otherCuisine = { ...ready, id: 'other-cuisine', cuisine: 'Italian' };
+    const provider = {
+      ...ready,
+      id: 'recipeapi:provider',
+      source: { type: 'imported' as const, name: 'RecipeAPI.io' },
+    };
+    const recipes = [far, close, ready, otherCuisine, provider];
+    const inventory = { ...kitchen(), recipes };
+    expect(
+      browseRecipes(recipes, inventory, {
+        order: 'fewest-short',
+        collection: 'imported',
+        filter: 'close',
+        query: 'Chicken',
+        cuisine: 'American',
+      }).map((match) => match.recipe.id),
+    ).toEqual(['ready', 'close']);
+  });
+
   it('keeps saved edits and attribution when combining sourced recipes', () => {
     const original = recipe('wikibooks:1', {
       source: { type: 'wikibooks', attribution: 'Wikibooks contributors', license: 'CC BY-SA 4.0' },

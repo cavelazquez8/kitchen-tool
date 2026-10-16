@@ -64,6 +64,15 @@ function safeLink(value?: string) {
     return undefined;
   }
 }
+function availabilitySummary(match: RecipeMatch, showShortageCount: boolean): string {
+  const count = match.missingCount || showShortageCount ? match.missingCount : match.matchedCount;
+  const summary = `${count} ingredient${count === 1 ? '' : 's'} ${
+    match.missingCount || showShortageCount ? 'short' : 'on hand'
+  }`;
+  return match.uncertainCount
+    ? `${summary} · ${match.uncertainCount} amount${match.uncertainCount === 1 ? '' : 's'} to check`
+    : summary;
+}
 function RecipeCard({
   match,
   saved,
@@ -72,6 +81,7 @@ function RecipeCard({
   onAddToGemini,
   inGeminiContext,
   onRemoveSaved,
+  showShortageCount,
 }: {
   match: RecipeMatch;
   saved: boolean;
@@ -80,6 +90,7 @@ function RecipeCard({
   onAddToGemini: () => void;
   inGeminiContext: boolean;
   onRemoveSaved?: () => void;
+  showShortageCount: boolean;
 }) {
   const recipe = match.recipe;
   return (
@@ -97,12 +108,7 @@ function RecipeCard({
         <button className="recipe-title" onClick={onOpen}>
           <h3>{recipe.title}</h3>
         </button>
-        <p>
-          {match.missingCount
-            ? `${match.missingCount} ingredient${match.missingCount === 1 ? '' : 's'} short`
-            : `${match.matchedCount} ingredients on hand`}
-          {match.uncertainCount > 0 ? ' · Check amounts' : ''}
-        </p>
+        <p>{availabilitySummary(match, showShortageCount)}</p>
         <small>
           {recipe.source.name ?? sourceLabels[recipe.source.type]}
           {recipe.servings ? ` · ${recipe.servings} servings` : ' · Yield not recorded'}
@@ -614,7 +620,7 @@ export function RecipeBrowser({
       </div>
       <div className="library-browse-controls">
         <div className="library-view" role="group" aria-label="Recipe order">
-          {(['kitchen', 'browse'] as const).map((value) => (
+          {(['kitchen', 'browse', 'fewest-short'] as const).map((value) => (
             <button
               key={value}
               className={order === value ? 'active' : ''}
@@ -624,7 +630,13 @@ export function RecipeBrowser({
                 setVisibleCount(PAGE_SIZE);
               }}
             >
-              {value === 'kitchen' ? 'For your kitchen' : 'Browse all'}
+              {
+                {
+                  kitchen: 'For your kitchen',
+                  browse: 'Browse all',
+                  'fewest-short': 'Fewest ingredients short',
+                }[value]
+              }
             </button>
           ))}
         </div>
@@ -792,6 +804,12 @@ export function RecipeBrowser({
             </button>
           )}
         </div>
+        {order === 'fewest-short' && (
+          <p className="recipe-order-note">
+            Missing ingredients and insufficient amounts count as short. Unknown amounts need a
+            check. Counts use the original recipe quantities.
+          </p>
+        )}
         {source !== 'library' && results && (
           <p className="recipe-loaded-note">
             {results.recipes.length} recipes loaded · {matches.length} match your filters.
@@ -808,12 +826,7 @@ export function RecipeBrowser({
               <article className="recipe-discovery-card" key={match.recipe.id}>
                 <span className={`match-badge ${match.status}`}>{labels[match.status]}</span>
                 <h3>{match.recipe.title}</h3>
-                <p>
-                  {match.missingCount
-                    ? `${match.missingCount} ingredients short`
-                    : `${match.matchedCount} ingredients on hand`}
-                  {match.uncertainCount ? ' · Check amounts' : ''}
-                </p>
+                <p>{availabilitySummary(match, order === 'fewest-short')}</p>
                 {match.recipe.source.attribution && (
                   <small>{match.recipe.source.attribution}</small>
                 )}
@@ -832,6 +845,7 @@ export function RecipeBrowser({
               <RecipeCard
                 key={match.recipe.id}
                 match={match}
+                showShortageCount={order === 'fewest-short'}
                 saved={saved.some((recipe) => recipe.id === match.recipe.id)}
                 onOpen={() => onOpen(match.recipe)}
                 onSave={() => onSave(match.recipe)}

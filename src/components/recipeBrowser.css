@@ -189,10 +189,14 @@
 }
 
 .recipe-browser .library-view {
+  flex-wrap: wrap;
+  gap: 2px;
+  max-width: 100%;
   border-color: #344239;
 }
 
 .recipe-browser .library-view button {
+  flex: 1 1 auto;
   min-height: 46px;
   padding: 10px 17px;
 }
@@ -312,7 +316,8 @@
   flex-shrink: 0;
 }
 
-.recipe-loaded-note {
+.recipe-loaded-note,
+.recipe-order-note {
   display: block;
   margin: -4px 0 18px;
   color: #9daf9f;
@@ -496,9 +501,13 @@
   }
 
   .recipe-browser .library-view button {
-    flex: 1;
+    flex: 1 1 auto;
     padding: 10px;
     font-size: 12px;
+  }
+
+  .recipe-browser .library-view button:last-child {
+    flex-basis: 100%;
   }
 
   .recipe-browser .hub-filters {
