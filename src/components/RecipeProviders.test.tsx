@@ -39,6 +39,22 @@ afterEach(() => {
   localStorage.clear();
 });
 
+async function openFilters(user: ReturnType<typeof userEvent.setup>) {
+  await user.click(screen.getByRole('button', { name: /^Filters/ }));
+  return screen.getByRole('dialog', { name: 'Filter recipes' });
+}
+
+async function chooseFilter(
+  user: ReturnType<typeof userEvent.setup>,
+  label: string,
+  option: string,
+) {
+  const drawer = await openFilters(user);
+  await user.click(within(drawer).getByRole('combobox', { name: label }));
+  await user.click(screen.getByRole('option', { name: option }));
+  await user.click(within(drawer).getByRole('button', { name: 'Show recipes' }));
+}
+
 describe('optional recipe source UI', () => {
   it('falls back to all inventory when a selected batch disappears without remounting the browser', async () => {
     const recipe = recipeApiToRecipe({
@@ -81,17 +97,21 @@ describe('optional recipe source UI', () => {
         page="recipes"
       />,
     );
-    await user.click(screen.getByRole('button', { name: 'All recipes' }));
+    await chooseFilter(user, 'Recipe collection', 'All recipes');
     await screen.findByRole('heading', { name: 'Carrot soup' });
-    await user.click(screen.getByText('Refine recipes', { exact: true }));
-    await user.click(screen.getByRole('checkbox', { name: 'Use only selected inventory' }));
-    await user.click(screen.getByRole('button', { name: 'Ready to cook' }));
+    const drawer = await openFilters(user);
+    await user.click(within(drawer).getByRole('checkbox', { name: 'Use only selected inventory' }));
+    await user.click(within(drawer).getByRole('combobox', { name: 'Availability' }));
+    await user.click(screen.getByRole('option', { name: 'Ready to cook' }));
+    await user.click(within(drawer).getByRole('button', { name: 'Show recipes' }));
     expect(screen.queryByRole('heading', { name: 'Milk pudding' })).not.toBeInTheDocument();
     rerender(<KitchenHub {...common} inventory={inventory} selectedBatchIds={[]} page="recipes" />);
     expect(await screen.findByRole('heading', { name: 'Milk pudding' })).toBeVisible();
+    const updatedDrawer = await openFilters(user);
     expect(
-      screen.queryByRole('checkbox', { name: 'Use only selected inventory' }),
+      within(updatedDrawer).queryByRole('checkbox', { name: 'Use only selected inventory' }),
     ).not.toBeInTheDocument();
+    await user.click(within(updatedDrawer).getByRole('button', { name: 'Show recipes' }));
     expect(screen.getByText(/Showing 2 of 2 recipes/)).toBeVisible();
   });
   it('checks provider settings only when requested and explains older Workers', async () => {
@@ -331,8 +351,7 @@ describe('optional recipe source UI', () => {
       expect(screen.queryByText('Opening your cookbook…')).not.toBeInTheDocument(),
     );
     expect(fetcher).not.toHaveBeenCalled();
-    await user.click(screen.getByRole('combobox', { name: 'Recipe source' }));
-    await user.click(screen.getByRole('option', { name: 'Spoonacular' }));
+    await chooseFilter(user, 'Recipe source', 'Spoonacular');
     await user.type(screen.getByRole('textbox', { name: 'Find recipes' }), 'soup');
     await user.click(screen.getByRole('button', { name: 'Search Spoonacular' }));
     const results = await screen.findByRole('region', { name: 'Spoonacular search results' });
@@ -379,8 +398,7 @@ describe('optional recipe source UI', () => {
     await waitFor(() =>
       expect(screen.queryByText('Opening your cookbook…')).not.toBeInTheDocument(),
     );
-    await user.click(screen.getByRole('combobox', { name: 'Recipe source' }));
-    await user.click(screen.getByRole('option', { name: 'RecipeAPI.io' }));
+    await chooseFilter(user, 'Recipe source', 'RecipeAPI.io');
     await user.type(screen.getByRole('textbox', { name: 'Find recipes' }), 'soup');
     await user.click(screen.getByRole('button', { name: 'Search RecipeAPI.io' }));
     const results = await screen.findByRole('region', { name: 'RecipeAPI.io search results' });

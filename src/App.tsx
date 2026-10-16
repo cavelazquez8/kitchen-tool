@@ -691,53 +691,51 @@ export default function App() {
               <button onClick={() => setSettingsOpen(true)}>Settings</button>
             </div>
           )}
-          <div className="page-heading">
-            <div>
-              <div className="eyebrow">
-                <span />
-                YOUR EVERYDAY, ORGANIZED
-              </div>
-              <h1>
-                {page === 'inventory'
-                  ? 'Your kitchen inventory'
-                  : page === 'tools'
-                    ? 'Your kitchen tools'
-                    : page === 'recipes'
-                      ? 'Your recipes'
+          {page !== 'recipes' && (
+            <div className="page-heading">
+              <div>
+                <div className="eyebrow">
+                  <span />
+                  YOUR EVERYDAY, ORGANIZED
+                </div>
+                <h1>
+                  {page === 'inventory'
+                    ? 'Your kitchen inventory'
+                    : page === 'tools'
+                      ? 'Your kitchen tools'
                       : page === 'shopping'
                         ? 'Your shopping list'
                         : 'Cook with Gemini'}
-              </h1>
-              <p>
-                {page === 'inventory'
-                  ? 'Know what’s here. Make something good.'
-                  : page === 'tools'
-                    ? 'The right tools make all the difference.'
-                    : page === 'recipes'
-                      ? 'Keep favorites. Bring good recipes into your kitchen.'
+                </h1>
+                <p>
+                  {page === 'inventory'
+                    ? 'Know what’s here. Make something good.'
+                    : page === 'tools'
+                      ? 'The right tools make all the difference.'
                       : page === 'shopping'
                         ? 'Plan meals. Buy just what’s missing.'
                         : 'Your ingredients, your recipes, your conversation.'}
-              </p>
-            </div>
-            {page === 'inventory' && (
-              <div className="heading-actions">
-                <button
-                  className="button secondary"
-                  onClick={() => {
-                    openScanner();
-                  }}
-                >
-                  <ScanLine size={19} />
-                  <span>Scan groceries</span>
-                </button>
-                <button className="button primary" onClick={openAdd}>
-                  <Plus size={19} />
-                  <span>Add item</span>
-                </button>
+                </p>
               </div>
-            )}
-          </div>
+              {page === 'inventory' && (
+                <div className="heading-actions">
+                  <button
+                    className="button secondary"
+                    onClick={() => {
+                      openScanner();
+                    }}
+                  >
+                    <ScanLine size={19} />
+                    <span>Scan groceries</span>
+                  </button>
+                  <button className="button primary" onClick={openAdd}>
+                    <Plus size={19} />
+                    <span>Add item</span>
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
           {page === 'recipes' || page === 'shopping' || page === 'assistant' ? (
             <KitchenHub
               key={`${snapshot.user?.uid ?? 'local'}:${hubSessionRevision}`}

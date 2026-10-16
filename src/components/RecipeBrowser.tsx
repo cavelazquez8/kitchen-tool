@@ -5,6 +5,7 @@ import {
   ExternalLink,
   Plus,
   Search,
+  SlidersHorizontal,
   Sparkles,
   Trash2,
   Upload,
@@ -33,6 +34,7 @@ import { searchRecipeProviders } from '../recipes/providerClient';
 import { RECIPE_PROVIDER_INFO, type RecipeProviderSearch } from '../recipes/providers';
 import { readGeminiConnection } from '../ai/client';
 import { Choice } from './Choice';
+import { Modal } from './Modal';
 import './recipeProviders.css';
 import './recipeBrowser.css';
 
@@ -194,6 +196,7 @@ export function RecipeBrowser({
   const [onlineBusy, setOnlineBusy] = useState(false);
   const [onlineError, setOnlineError] = useState('');
   const [startIngredient, setStartIngredient] = useState('');
+  const [filtersOpen, setFiltersOpen] = useState(false);
   const localRequest = useRef(0);
   const operation = useRef<{ scope: string; controller: AbortController } | null>(null);
   const saved = useMemo(() => inventory.recipes ?? [], [inventory.recipes]);
@@ -367,7 +370,6 @@ export function RecipeBrowser({
     setPrioritize(false);
     onUseSelectionChange(false);
     setVisibleCount(PAGE_SIZE);
-    if (source === 'library') changeQuery('');
   }
   function showLoadedRecipes() {
     setCategory('');
@@ -458,14 +460,35 @@ export function RecipeBrowser({
       }
     }
   }
-  const hasFilters =
-    !!category ||
-    !!cuisine ||
-    filter !== 'all' ||
-    collection !== 'all' ||
-    prioritize ||
-    (useSelection && selectedBatchIds.length > 0) ||
-    (source === 'library' && !!query.trim());
+  const activeFilters: { id: string; label: string; clear: () => void }[] = [
+    ...(collection !== 'all'
+      ? [
+          {
+            id: 'collection',
+            label: recipeCollectionLabel(collection),
+            clear: () => setCollection('all'),
+          },
+        ]
+      : []),
+    ...(filter !== 'all'
+      ? [
+          {
+            id: 'availability',
+            label: filter === 'ready' ? 'Ready to cook' : 'Missing up to 2',
+            clear: () => setFilter('all'),
+          },
+        ]
+      : []),
+    ...(category ? [{ id: 'category', label: category, clear: () => setCategory('') }] : []),
+    ...(cuisine ? [{ id: 'cuisine', label: cuisine, clear: () => setCuisine('') }] : []),
+    ...(prioritize
+      ? [{ id: 'expiry', label: 'Use expiring first', clear: () => setPrioritize(false) }]
+      : []),
+    ...(useSelection && selectedBatchIds.length > 0
+      ? [{ id: 'selection', label: 'Selected inventory', clear: () => onUseSelectionChange(false) }]
+      : []),
+  ];
+  const hasFilters = activeFilters.length > 0;
   const showing = Math.min(visibleCount, matches.length);
   let emptyHeading = 'No recipes match these filters.';
   let emptyDescription =
@@ -492,53 +515,37 @@ export function RecipeBrowser({
       emptyDescription =
         'Try a broader dish or a different ingredient. No recipes were returned for this search.';
     }
-  } else if (filter === 'saved') {
+  } else if (collection === 'saved' && saved.length === 0) {
     emptyHeading = 'Your favorites start here.';
     emptyDescription = 'Save something you like, import a recipe, or add your own.';
   }
   return (
     <section className="recipe-browser" aria-label="Recipe browser">
-      <section className="library-intro">
+      <header className="recipe-browser-heading">
         <div>
-          <span className="library-eyebrow">KEEP THE RECIPES YOU LOVE</span>
-          <h2>Your recipe collection.</h2>
-          <p>
-            {source !== 'library'
-              ? `${sourceName} recipes, compared with your kitchen.`
-              : collection !== 'all'
-                ? `${recipeCollectionLabel(collection)} from your personal library.`
-                : local.length
-                  ? 'Your saved recipes and the optional community cookbook.'
-                  : 'Your cookbook and saved favorites.'}
-          </p>
+          <h1>Recipes</h1>
+          <p>Your collection, ready for your next meal.</p>
         </div>
-        <BookOpen size={36} strokeWidth={1.3} aria-hidden="true" />
-      </section>
+        <div className="recipe-browser-actions">
+          <button className="button secondary" onClick={onImport}>
+            <Upload size={17} /> Import recipe
+          </button>
+          <button className="button primary" onClick={onNew}>
+            <Plus size={17} /> Add recipe
+          </button>
+        </div>
+      </header>
       <div className="recipe-search-panel">
-        <details className="library-refine recipe-other-sources" open={source !== 'library'}>
-          <summary>Other recipe sources{source !== 'library' ? ` · ${sourceName}` : ''}</summary>
-          <div className="recipe-source-picker">
-            <span className="recipe-source-label">Recipe source</span>
-            <Choice
-              label="Recipe source"
-              value={source}
-              options={[
-                { value: 'library', label: 'Your collection & community cookbook' },
-                { value: 'themealdb', label: 'TheMealDB' },
-                { value: 'recipeapi', label: 'RecipeAPI.io' },
-                { value: 'spoonacular', label: 'Spoonacular' },
-              ]}
-              onChange={(value) => changeSource(value as BrowseSource)}
-            />
-            <p>
-              {source === 'library'
-                ? 'Your saved recipes, with community recipes available under All recipes.'
-                : source === 'spoonacular'
-                  ? 'Temporary discovery. Open recipes on their original website.'
-                  : 'Find more recipes, then save the ones you like.'}
-            </p>
+        {source !== 'library' && (
+          <div className="recipe-search-scope">
+            <span>
+              Searching <strong>{sourceName}</strong>
+            </span>
+            <button className="text-button" onClick={() => changeSource('library')}>
+              Use your cookbook <X size={14} aria-hidden="true" />
+            </button>
           </div>
-        </details>
+        )}
         <form
           className="hub-search recipe-search-form"
           onSubmit={(event) => {
@@ -550,13 +557,12 @@ export function RecipeBrowser({
           }}
         >
           <div className="recipe-search-input">
-            <Search size={18} aria-hidden="true" />
             <input
               aria-label="Find recipes"
               value={query}
               onChange={(event) => changeQuery(event.target.value)}
               placeholder={
-                source === 'library' ? 'Search dishes or ingredients…' : `Search ${sourceName}…`
+                source === 'library' ? 'Search recipes or ingredients' : `Search ${sourceName}`
               }
               maxLength={120}
             />
@@ -573,199 +579,242 @@ export function RecipeBrowser({
           </div>
           <button
             className="button primary"
+            aria-label={
+              source === 'library'
+                ? 'Search library'
+                : onlineBusy
+                  ? `Searching ${sourceName}…`
+                  : `Search ${sourceName}`
+            }
             disabled={source === 'library' ? localBusy : onlineBusy}
           >
-            {source === 'library'
-              ? 'Search library'
-              : onlineBusy
-                ? `Searching ${sourceName}…`
-                : `Search ${sourceName}`}
+            <Search size={20} aria-hidden="true" />
           </button>
         </form>
-        <div className="recipe-search-note">
-          <span>
-            {source === 'library'
-              ? 'Results update as you type. Filters apply immediately.'
-              : source === 'spoonacular' && !query.trim() && spoonacularIngredient
-                ? `Search starts with ${spoonacularIngredient}, then compares each recipe with your kitchen.`
-                : 'Search when ready. Changing filters uses the recipes already loaded.'}
-          </span>
-          {provider && (
-            <button className="text-button" onClick={onConfigure}>
-              Recipe source settings
-            </button>
-          )}
-        </div>
-        {source === 'spoonacular' && !query.trim() && ingredients.length > 1 && (
-          <div className="recipe-start-ingredient">
-            <Choice
-              label="Start with ingredient"
-              value={spoonacularIngredient}
-              options={ingredients.map((name) => ({ value: name, label: name }))}
-              onChange={(value) => {
-                resetOnline();
-                setStartIngredient(value);
-              }}
-            />
-          </div>
+        {source !== 'library' && (
+          <p className="recipe-search-hint">
+            {source === 'spoonacular' && !query.trim() && spoonacularIngredient
+              ? `Starts with ${spoonacularIngredient}. Choose Search Spoonacular to load recipes.`
+              : 'Choose Search to load recipes. Filters and sorting use the results already loaded.'}
+          </p>
         )}
-        <div className="recipe-browser-actions">
-          <button className="button secondary" onClick={onImport}>
-            <Upload size={17} /> Import recipe
-          </button>
-          <button className="button secondary" onClick={onNew}>
-            <Plus size={17} /> Your own recipe
-          </button>
+      </div>
+      <div className="recipe-browse-toolbar">
+        <button
+          className={
+            hasFilters
+              ? 'button secondary recipe-filter-button active'
+              : 'button secondary recipe-filter-button'
+          }
+          aria-label={hasFilters ? `Filters (${activeFilters.length})` : 'Filters'}
+          aria-haspopup="dialog"
+          aria-expanded={filtersOpen}
+          onClick={() => setFiltersOpen(true)}
+        >
+          <SlidersHorizontal size={17} aria-hidden="true" /> Filters
+          {hasFilters && (
+            <span className="recipe-filter-count" aria-hidden="true">
+              {activeFilters.length}
+            </span>
+          )}
+        </button>
+        <div className="recipe-sort-picker">
+          <span>Sort by</span>
+          <Choice
+            label="Sort by"
+            value={order}
+            options={[
+              { value: 'kitchen', label: 'Recommended' },
+              { value: 'browse', label: 'Name A–Z' },
+              { value: 'fewest-short', label: 'Fewest ingredients short' },
+            ]}
+            onChange={(value) => {
+              setOrder(value as BrowseOrder);
+              setVisibleCount(PAGE_SIZE);
+            }}
+          />
         </div>
       </div>
-      <div className="library-browse-controls">
-        <div className="library-view" role="group" aria-label="Recipe order">
-          {(['kitchen', 'browse', 'fewest-short'] as const).map((value) => (
+      {hasFilters && (
+        <div className="recipe-active-filters" role="group" aria-label="Active recipe filters">
+          {activeFilters.map((item) => (
             <button
-              key={value}
-              className={order === value ? 'active' : ''}
-              aria-pressed={order === value}
+              key={item.id}
+              className="recipe-filter-chip"
+              aria-label={`Remove ${item.label} filter`}
               onClick={() => {
-                setOrder(value);
+                item.clear();
                 setVisibleCount(PAGE_SIZE);
               }}
             >
-              {
-                {
-                  kitchen: 'For your kitchen',
-                  browse: 'Browse all',
-                  'fewest-short': 'Fewest ingredients short',
-                }[value]
-              }
+              {item.label} <X size={13} aria-hidden="true" />
             </button>
           ))}
-        </div>
-        <div className="recipe-collection-picker">
-          <span className="recipe-source-label">Recipe collection</span>
-          <Choice
-            label="Recipe collection"
-            value={collection}
-            options={(['all', 'saved', 'imported', 'manual', 'ai'] as const).map((value) => ({
-              value,
-              label: recipeCollectionLabel(value),
-            }))}
-            onChange={(value) => changeCollection(value as RecipeCollection)}
-          />
-        </div>
-      </div>
-      <div className="hub-filters">
-        {(['all', 'ready', 'close', 'saved', 'imported'] as const).map((value) => (
-          <button
-            key={value}
-            className={
-              (
-                value === 'saved' || value === 'imported'
-                  ? collection === value
-                  : filter === value && (value !== 'all' || collection === 'all')
-              )
-                ? 'active'
-                : ''
-            }
-            aria-pressed={
-              value === 'saved' || value === 'imported'
-                ? collection === value
-                : filter === value && (value !== 'all' || collection === 'all')
-            }
-            onClick={() => {
-              if (value === 'saved' || value === 'imported') changeCollection(value);
-              else {
-                setFilter(value);
-                if (value === 'all') setCollection('all');
-              }
-              setVisibleCount(PAGE_SIZE);
-            }}
-          >
-            {
-              {
-                all: 'All recipes',
-                ready: 'Ready to cook',
-                close: 'Missing up to 2',
-                saved: 'Saved recipes',
-                imported: 'Imported recipes',
-              }[value]
-            }
+          <button className="text-button" onClick={clearFilters}>
+            Clear all
           </button>
-        ))}
-      </div>
-      <details className="library-refine">
-        <summary>
-          Refine recipes
-          {category || cuisine ? ` · ${[category, cuisine].filter(Boolean).join(' / ')}` : ''}
-        </summary>
-        <div className="library-browse-controls">
-          <Choice
-            label="Recipe category"
-            value={category}
-            options={[
-              { value: '', label: 'Every category' },
-              ...[...new Set([...facets.categories, ...(category ? [category] : [])])].map(
-                (name) => ({ value: name, label: name }),
-              ),
-            ]}
-            onChange={(value) => {
-              setCategory(value);
-              setVisibleCount(PAGE_SIZE);
-            }}
-          />
-          <Choice
-            label="Recipe cuisine"
-            value={cuisine}
-            options={[
-              { value: '', label: 'Every cuisine' },
-              ...[...new Set([...facets.cuisines, ...(cuisine ? [cuisine] : [])])].map((name) => ({
-                value: name,
-                label: name,
-              })),
-            ]}
-            onChange={(value) => {
-              setCuisine(value);
-              setVisibleCount(PAGE_SIZE);
-            }}
-          />
         </div>
-        <div className="hub-preferences">
-          <label>
-            <input
-              type="checkbox"
-              checked={prioritize}
-              onChange={(event) => {
-                setPrioritize(event.target.checked);
+      )}
+      <Modal
+        open={filtersOpen}
+        onClose={() => setFiltersOpen(false)}
+        title="Filter recipes"
+        description="Choose what you want to see. Changes apply as you go."
+        className="recipe-filter-drawer"
+      >
+        <div className="recipe-filter-fields">
+          <section className="recipe-filter-group" aria-label="Collection filter">
+            <h3>Collection</h3>
+            <Choice
+              label="Recipe collection"
+              value={collection}
+              options={(['saved', 'all', 'imported', 'manual', 'ai'] as const).map((value) => ({
+                value,
+                label: recipeCollectionLabel(value),
+              }))}
+              onChange={(value) => changeCollection(value as RecipeCollection)}
+            />
+            <p>All recipes includes the community cookbook.</p>
+          </section>
+          <section className="recipe-filter-group" aria-label="Availability filter">
+            <h3>Availability</h3>
+            <Choice
+              label="Availability"
+              value={filter}
+              options={[
+                { value: 'all', label: 'Any recipe' },
+                { value: 'ready', label: 'Ready to cook' },
+                { value: 'close', label: 'Missing up to 2' },
+              ]}
+              onChange={(value) => {
+                setFilter(value as BrowseFilter);
                 setVisibleCount(PAGE_SIZE);
               }}
-            />{' '}
-            Prioritize expiring ingredients
-          </label>
-          {selectedBatchIds.length > 0 && (
+            />
+          </section>
+          <section className="recipe-filter-group" aria-label="Recipe details filters">
+            <h3>Recipe details</h3>
+            <label className="recipe-filter-field">
+              <span>Category</span>
+              <Choice
+                label="Recipe category"
+                value={category}
+                options={[
+                  { value: '', label: 'Every category' },
+                  ...[...new Set([...facets.categories, ...(category ? [category] : [])])].map(
+                    (name) => ({ value: name, label: name }),
+                  ),
+                ]}
+                onChange={(value) => {
+                  setCategory(value);
+                  setVisibleCount(PAGE_SIZE);
+                }}
+              />
+            </label>
+            <label className="recipe-filter-field">
+              <span>Cuisine</span>
+              <Choice
+                label="Recipe cuisine"
+                value={cuisine}
+                options={[
+                  { value: '', label: 'Every cuisine' },
+                  ...[...new Set([...facets.cuisines, ...(cuisine ? [cuisine] : [])])].map(
+                    (name) => ({ value: name, label: name }),
+                  ),
+                ]}
+                onChange={(value) => {
+                  setCuisine(value);
+                  setVisibleCount(PAGE_SIZE);
+                }}
+              />
+            </label>
+          </section>
+          <section
+            className="recipe-filter-group recipe-kitchen-filters"
+            aria-label="Kitchen preferences"
+          >
+            <h3>Your kitchen</h3>
             <label>
               <input
                 type="checkbox"
-                checked={useSelection}
+                checked={prioritize}
                 onChange={(event) => {
-                  onUseSelectionChange(event.target.checked);
+                  setPrioritize(event.target.checked);
                   setVisibleCount(PAGE_SIZE);
                 }}
-              />{' '}
-              Use only selected inventory
+              />
+              <span>Prioritize expiring ingredients</span>
             </label>
-          )}
-          <button
-            className="text-button"
-            onClick={() => {
-              setOrder('kitchen');
-              setVisibleCount(PAGE_SIZE);
-              if (source !== 'library') void searchOnline();
-              else if (localError) void openCookbook();
-            }}
-          >
-            Refresh suggestions
+            {selectedBatchIds.length > 0 && (
+              <label>
+                <input
+                  type="checkbox"
+                  checked={useSelection}
+                  onChange={(event) => {
+                    onUseSelectionChange(event.target.checked);
+                    setVisibleCount(PAGE_SIZE);
+                  }}
+                />
+                <span>Use only selected inventory</span>
+              </label>
+            )}
+          </section>
+          <section className="recipe-filter-group" aria-label="Recipe source filter">
+            <h3>Recipe source</h3>
+            <Choice
+              label="Recipe source"
+              value={source}
+              options={[
+                { value: 'library', label: 'Your collection & community cookbook' },
+                { value: 'themealdb', label: 'TheMealDB' },
+                { value: 'recipeapi', label: 'RecipeAPI.io' },
+                { value: 'spoonacular', label: 'Spoonacular' },
+              ]}
+              onChange={(value) => changeSource(value as BrowseSource)}
+            />
+            <p>
+              {source === 'library'
+                ? 'Browse your collection or choose All recipes for the built-in cookbook.'
+                : source === 'spoonacular'
+                  ? 'Temporary discovery. Open recipes on their original website.'
+                  : 'Search this source, then save recipes to your collection.'}
+            </p>
+            {source === 'spoonacular' && !query.trim() && ingredients.length > 1 && (
+              <label className="recipe-filter-field">
+                <span>Start with ingredient</span>
+                <Choice
+                  label="Start with ingredient"
+                  value={spoonacularIngredient}
+                  options={ingredients.map((name) => ({ value: name, label: name }))}
+                  onChange={(value) => {
+                    resetOnline();
+                    setStartIngredient(value);
+                  }}
+                />
+              </label>
+            )}
+            {provider && (
+              <button
+                className="text-button"
+                onClick={() => {
+                  setFiltersOpen(false);
+                  onConfigure();
+                }}
+              >
+                Recipe source settings
+              </button>
+            )}
+          </section>
+        </div>
+        <div className="recipe-filter-footer">
+          <button className="text-button" disabled={!hasFilters} onClick={clearFilters}>
+            Clear all
+          </button>
+          <button className="button primary" onClick={() => setFiltersOpen(false)}>
+            Show recipes
           </button>
         </div>
-      </details>
+      </Modal>
       <section className="recipe-result-section" aria-label={`${sourceName} search results`}>
         {source === 'library' && localBusy && (
           <p className="settings-note" role="status">
@@ -798,11 +847,6 @@ export function RecipeBrowser({
             {collection !== 'all' ? ` · ${recipeCollectionLabel(collection)}` : ''}
             {query.trim() && (source === 'library' || results) ? ` for “${query.trim()}”` : ''}
           </span>
-          {hasFilters && (
-            <button className="text-button" onClick={clearFilters}>
-              Clear filters
-            </button>
-          )}
         </div>
         {order === 'fewest-short' && (
           <p className="recipe-order-note">
@@ -898,7 +942,11 @@ export function RecipeBrowser({
             <BookOpen size={36} />
             <h2>{emptyHeading}</h2>
             <p>{emptyDescription}</p>
-            {source !== 'library' && results && results.recipes.length > 0 ? (
+            {source === 'library' && collection === 'saved' && saved.length === 0 ? (
+              <button className="button secondary" onClick={showLoadedRecipes}>
+                Browse all recipes
+              </button>
+            ) : source !== 'library' && results && results.recipes.length > 0 ? (
               <button className="button secondary" onClick={showLoadedRecipes}>
                 Show all loaded recipes
               </button>
@@ -906,9 +954,35 @@ export function RecipeBrowser({
               <button className="button secondary" onClick={clearFilters}>
                 Clear recipe filters
               </button>
+            ) : source === 'library' && query.trim() ? (
+              <button className="button secondary" onClick={() => changeQuery('')}>
+                Clear recipe search
+              </button>
             ) : null}
           </div>
         )}
+        {source === 'library' &&
+          matches.some((match) => match.recipe.source.type === 'wikibooks') && (
+            <p className="recipe-attribution">
+              Community recipes by{' '}
+              <a
+                href="https://en.wikibooks.org/wiki/Cookbook:Table_of_Contents"
+                target="_blank"
+                rel="noreferrer"
+              >
+                Wikibooks contributors
+              </a>{' '}
+              ·{' '}
+              <a
+                href="https://creativecommons.org/licenses/by-sa/4.0/"
+                target="_blank"
+                rel="noreferrer"
+              >
+                CC BY-SA 4.0
+              </a>
+              . Original sources and ingredient measures stay with each recipe.
+            </p>
+          )}
       </section>
     </section>
   );

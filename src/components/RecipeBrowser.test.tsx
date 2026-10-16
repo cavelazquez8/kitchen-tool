@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { saveGeminiConnection } from '../ai/client';
 import type { InventoryState } from '../domain/types';
+import { loadLocalRecipes } from '../recipes/localLibrary';
 import { searchRecipeProviders } from '../recipes/providerClient';
 import type { Recipe } from '../recipes/types';
 import { RecipeBrowser } from './RecipeBrowser';
@@ -89,9 +90,25 @@ function cardTitles(container: HTMLElement): (string | null)[] {
   return [...container.querySelectorAll('.recipe-grid h3')].map((heading) => heading.textContent);
 }
 
+async function choose(user: ReturnType<typeof userEvent.setup>, label: string, option: string) {
+  await user.click(screen.getByRole('combobox', { name: label }));
+  await user.click(screen.getByRole('option', { name: option }));
+}
+
+async function chooseFilter(
+  user: ReturnType<typeof userEvent.setup>,
+  label: string,
+  option: string,
+) {
+  await user.click(screen.getByRole('button', { name: /^Filters/ }));
+  await choose(user, label, option);
+  await user.click(screen.getByRole('button', { name: 'Show recipes' }));
+}
+
 beforeEach(() => {
   localStorage.clear();
   vi.mocked(searchRecipeProviders).mockReset();
+  vi.mocked(loadLocalRecipes).mockResolvedValue([]);
 });
 afterEach(() => {
   cleanup();
@@ -111,7 +128,7 @@ describe('recipe shortage sorting', () => {
       'Yankee dinner',
       'Zulu dinner',
     ]);
-    await user.click(screen.getByRole('button', { name: 'Fewest ingredients short' }));
+    await choose(user, 'Sort by', 'Fewest ingredients short');
     expect(cardTitles(container)).toEqual([
       'Zulu dinner',
       'Yankee dinner',
@@ -138,11 +155,10 @@ describe('recipe shortage sorting', () => {
       'Yankee dinner',
       'Alpha dinner',
     ]);
-    expect(screen.getByRole('button', { name: 'Fewest ingredients short' })).toHaveAttribute(
-      'aria-pressed',
-      'true',
+    expect(screen.getByRole('combobox', { name: 'Sort by' })).toHaveTextContent(
+      'Fewest ingredients short',
     );
-    await user.click(screen.getByRole('button', { name: 'Browse all' }));
+    await choose(user, 'Sort by', 'Name A–Z');
     expect(cardTitles(container)).toEqual([
       'Alpha dinner',
       'Bravo dinner',
@@ -170,14 +186,12 @@ describe('recipe shortage sorting', () => {
     const user = userEvent.setup();
     const { container } = render(<RecipeBrowser {...props()} />);
     await screen.findByText(/Showing 4 of 4 recipes/);
-    await user.click(screen.getByText('Other recipe sources'));
-    await user.click(screen.getByRole('combobox', { name: 'Recipe source' }));
-    await user.click(screen.getByRole('option', { name: 'RecipeAPI.io' }));
+    await chooseFilter(user, 'Recipe source', 'RecipeAPI.io');
     await user.type(screen.getByRole('textbox', { name: 'Find recipes' }), 'dinner');
     await user.click(screen.getByRole('button', { name: 'Search RecipeAPI.io' }));
     await screen.findByText('4 recipes loaded · 4 match your filters.');
     expect(searchRecipeProviders).toHaveBeenCalledOnce();
-    await user.click(screen.getByRole('button', { name: 'Fewest ingredients short' }));
+    await choose(user, 'Sort by', 'Fewest ingredients short');
     expect(cardTitles(container)).toEqual([
       'Zulu dinner',
       'Yankee dinner',
@@ -186,5 +200,85 @@ describe('recipe shortage sorting', () => {
     ]);
     expect(screen.getByText(/Showing 4 of 4 recipes · RecipeAPI.io/)).toBeVisible();
     expect(searchRecipeProviders).toHaveBeenCalledOnce();
+  });
+
+  it('applies drawer filters live, removes them individually, and clears filters without losing the search or sort', async () => {
+    const user = userEvent.setup();
+    const { container } = render(<RecipeBrowser {...props()} />);
+    await screen.findByText(/Showing 4 of 4 recipes/);
+    await user.type(screen.getByRole('textbox', { name: 'Find recipes' }), 'dinner');
+    await choose(user, 'Sort by', 'Fewest ingredients short');
+    await user.click(screen.getByRole('button', { name: 'Filters (1)' }));
+    await choose(user, 'Availability', 'Ready to cook');
+    expect(screen.getByRole('dialog', { name: 'Filter recipes' })).toBeVisible();
+    expect(cardTitles(container)).toEqual(['Zulu dinner']);
+    await user.click(screen.getByRole('button', { name: 'Show recipes' }));
+    expect(screen.getByRole('button', { name: 'Filters (2)' })).toBeVisible();
+    await user.click(screen.getByRole('button', { name: 'Remove Ready to cook filter' }));
+    expect(cardTitles(container)).toEqual([
+      'Zulu dinner',
+      'Yankee dinner',
+      'Bravo dinner',
+      'Alpha dinner',
+    ]);
+    expect(screen.getByRole('button', { name: 'Remove Saved recipes filter' })).toBeVisible();
+    await user.click(screen.getByRole('button', { name: 'Clear all' }));
+    expect(screen.getByRole('textbox', { name: 'Find recipes' })).toHaveValue('dinner');
+    expect(screen.getByRole('combobox', { name: 'Sort by' })).toHaveTextContent(
+      'Fewest ingredients short',
+    );
+    expect(screen.getByRole('button', { name: 'Filters' })).toBeVisible();
+    expect(screen.queryByRole('group', { name: 'Active recipe filters' })).not.toBeInTheDocument();
+    expect(searchRecipeProviders).not.toHaveBeenCalled();
+  });
+
+  it('keeps online source and loaded results when Clear all removes availability filters', async () => {
+    vi.mocked(searchRecipeProviders).mockResolvedValue({
+      provider: 'recipeapi',
+      storage: 'personal',
+      recipes,
+      page: 1,
+      hasMore: false,
+      warnings: [],
+    });
+    saveGeminiConnection({ url: 'https://mise.example.workers.dev', token: 'a'.repeat(43) });
+    const user = userEvent.setup();
+    render(<RecipeBrowser {...props()} />);
+    await screen.findByText(/Showing 4 of 4 recipes/);
+    await chooseFilter(user, 'Recipe source', 'RecipeAPI.io');
+    await user.type(screen.getByRole('textbox', { name: 'Find recipes' }), 'dinner');
+    await user.click(screen.getByRole('button', { name: 'Search RecipeAPI.io' }));
+    await screen.findByText('4 recipes loaded · 4 match your filters.');
+    await chooseFilter(user, 'Availability', 'Ready to cook');
+    expect(screen.getByText('4 recipes loaded · 1 match your filters.')).toBeVisible();
+    await user.click(screen.getByRole('button', { name: 'Clear all' }));
+    expect(screen.getByRole('textbox', { name: 'Find recipes' })).toHaveValue('dinner');
+    expect(screen.getByRole('button', { name: 'Search RecipeAPI.io' })).toBeVisible();
+    expect(screen.getByText('4 recipes loaded · 4 match your filters.')).toBeVisible();
+    expect(searchRecipeProviders).toHaveBeenCalledOnce();
+  });
+
+  it('offers the community cookbook when Saved recipes is empty and retains attribution', async () => {
+    vi.mocked(loadLocalRecipes).mockResolvedValueOnce([
+      { ...recipes[0], source: { type: 'wikibooks' } },
+    ]);
+    const kitchen = { ...inventory(), recipes: [] };
+    const user = userEvent.setup();
+    render(<RecipeBrowser {...props(kitchen)} />);
+    expect(
+      await screen.findByRole('heading', { name: 'Your favorites start here.' }),
+    ).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Remove Saved recipes filter' })).toBeVisible();
+    await user.click(screen.getByRole('button', { name: 'Browse all recipes' }));
+    expect(screen.getByRole('heading', { name: 'Alpha dinner' })).toBeVisible();
+    expect(screen.getByRole('link', { name: 'Wikibooks contributors' })).toHaveAttribute(
+      'href',
+      'https://en.wikibooks.org/wiki/Cookbook:Table_of_Contents',
+    );
+    expect(screen.getByRole('link', { name: 'CC BY-SA 4.0' })).toHaveAttribute(
+      'href',
+      'https://creativecommons.org/licenses/by-sa/4.0/',
+    );
+    expect(searchRecipeProviders).not.toHaveBeenCalled();
   });
 });

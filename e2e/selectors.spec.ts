@@ -1,3 +1,4 @@
+import { openRecipeFilters, closeRecipeFilters, chooseRecipeFilter } from './helpers/recipeFilters';
 import { expect, test, type Page } from '@playwright/test';
 
 async function mockCatalogs(page: Page) {
@@ -51,7 +52,8 @@ test('scrolls a long selection picker without committing, then searches and sele
     .filter({ visible: true })
     .first()
     .click();
-  await page.getByText('Refine recipes', { exact: true }).click();
+  await chooseRecipeFilter(page, 'Recipe collection', 'All recipes');
+  await openRecipeFilters(page);
   const trigger = page.getByRole('combobox', {
     name: 'Recipe category',
     exact: true,
@@ -95,6 +97,7 @@ test('scrolls a long selection picker without committing, then searches and sele
   await picker.getByRole('option', { name: 'Category 38', exact: true }).click();
   await expect(picker).not.toBeVisible();
   await expect(trigger).toHaveText('Category 38');
+  await closeRecipeFilters(page);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 });
 

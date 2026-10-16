@@ -1,6 +1,7 @@
 import { expect, test, type Page } from '@playwright/test';
 import type { InventoryState } from '../src/domain/types';
 import type { Recipe } from '../src/recipes/types';
+import { chooseRecipeFilter } from './helpers/recipeFilters';
 
 const key = 'kitchen-wrapper.inventory.v1';
 const soup: Recipe = {
@@ -109,7 +110,7 @@ test('removes a saved cookbook recipe while retaining its source in the cookbook
   page,
 }) => {
   await navigate(page, 'Recipes');
-  await page.getByRole('button', { name: 'Saved recipes', exact: true }).click();
+  await chooseRecipeFilter(page, 'Recipe collection', 'Saved recipes');
   await page.getByRole('button', { name: `Remove ${rice.title} from saved recipes` }).click();
   const review = page.getByRole('dialog', { name: `Remove “${rice.title}” from saved recipes?` });
   await review.getByRole('button', { name: 'Remove recipe', exact: true }).click();
@@ -121,7 +122,7 @@ test('removes a saved cookbook recipe while retaining its source in the cookbook
   );
   expect(state.recipes).toEqual([soup]);
   expect(state.mealPlan).toEqual([]);
-  await page.getByRole('button', { name: 'All recipes', exact: true }).click();
+  await chooseRecipeFilter(page, 'Recipe collection', 'All recipes');
   await expect(page.getByRole('heading', { name: rice.title, exact: true })).toBeVisible();
 });
 
@@ -144,7 +145,7 @@ test('attaches several recipes to Gemini, sends both, then removes one from late
     await expect(card.getByRole('button', { name: 'Added to Gemini', exact: true })).toBeDisabled();
   }
   await navigate(page, 'Gemini');
-  const context = page.getByRole('region', { name: 'Gemini recipe context' });
+  const context = page.getByLabel('Gemini context', { exact: true });
   await expect(context).toContainText(soup.title);
   await expect(context).toContainText(rice.title);
   const message = page.getByRole('textbox', { name: 'Message Gemini' });

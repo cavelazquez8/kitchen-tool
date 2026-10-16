@@ -3,6 +3,7 @@ import { expect, test, type Page } from '@playwright/test';
 import type { AiChatRequest, AiExtractRequest } from '../src/ai/protocol';
 import type { InventoryState } from '../src/domain/types';
 import type { Recipe } from '../src/recipes/types';
+import { chooseRecipeFilter } from './helpers/recipeFilters';
 
 const inventoryKey = 'kitchen-wrapper.inventory.v1';
 const recipeId = 'wikibooks:202116';
@@ -66,16 +67,17 @@ test.beforeEach(async ({ page }) => {
   await page.goto('/');
 });
 
-test('opens a sourced starter offline, preserving its amounts and shopping shortages', async ({
+test('opens a sourced cookbook recipe offline, preserving its amounts and shopping shortages', async ({
   page,
 }) => {
   await navigate(page, 'Recipes');
-  await page.getByText('Explore the community cookbook', { exact: true }).click();
-  const starters = page.getByRole('region', { name: 'Recipe starting points' });
-  await expect(starters).toContainText('A good place to start');
+  await chooseRecipeFilter(page, 'Recipe collection', 'All recipes');
+  await page.getByRole('textbox', { name: 'Find recipes', exact: true }).fill(recipeTitle);
+  const cards = page.locator('.recipe-grid .recipe-card');
+  await expect(cards).toHaveCount(1);
   if (['cover', 'unfolded'].includes(test.info().project.name))
     await page.screenshot({ path: `/tmp/mise-guidance-recipes-${test.info().project.name}.png` });
-  await starters.getByRole('button', { name: new RegExp(recipeTitle) }).click();
+  await cards.getByRole('button', { name: 'View recipe', exact: true }).click();
   const detail = page.getByRole('dialog', { name: recipeTitle, exact: true });
   await expect(detail).toContainText('Original: 2 cups cooked rice');
   await expect(detail).toContainText('Original: 15 ounce can black beans, drained');
@@ -125,14 +127,9 @@ test('Gemini chooses candidate IDs and opens the original recipe without rewriti
       },
     });
   });
-  await navigate(page, 'Recipes');
-  await page.getByText('Explore the community cookbook', { exact: true }).click();
-  await page
-    .getByRole('region', { name: 'Recipe starting points' })
-    .getByRole('button', { name: 'Help me choose', exact: true })
-    .click();
+  await navigate(page, 'Gemini');
   await page.getByRole('button', { name: 'Conversation options', exact: true }).click();
-  await page.getByRole('radio', { name: 'Choose from the cookbook', exact: true }).check();
+  await page.getByRole('radio', { name: 'Choose from the cookbook', exact: true }).click();
   await page
     .getByRole('button', {
       name: 'Help me choose dinner',
@@ -203,12 +200,10 @@ test('one recommendation request waits for the cookbook to open before contactin
   try {
     await navigate(page, 'Gemini');
     await page.getByRole('button', { name: 'Conversation options', exact: true }).click();
-    await page.getByRole('radio', { name: 'Choose from the cookbook', exact: true }).check();
+    await page.getByRole('radio', { name: 'Choose from the cookbook', exact: true }).click();
     await expect.poll(() => collectionRequests).toBe(1);
     await page.getByRole('button', { name: 'Help me choose dinner', exact: true }).click();
-    await expect(
-      page.getByRole('status').filter({ hasText: 'Gemini is thinking…' }),
-    ).toBeVisible();
+    await expect(page.getByRole('status').filter({ hasText: 'Gemini is thinking…' })).toBeVisible();
     expect(requests).toHaveLength(0);
     releaseCollection();
     await expect(page.locator('.chat-history')).toContainText('The cookbook is ready.');

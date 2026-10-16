@@ -78,7 +78,6 @@ import { Autocomplete } from './Autocomplete';
 import { RecipeEditor } from './RecipeEditor';
 import { FinishCooking } from './FinishCooking';
 import { RecipeBrowser } from './RecipeBrowser';
-import { RecipeDiscovery } from './RecipeDiscovery';
 import { NutritionTargetsEditor } from './NutritionTargetsEditor';
 import { RecipeNutrition } from './RecipeNutrition';
 import { ConversationText } from './ConversationText';
@@ -635,7 +634,8 @@ export function KitchenHub({
         throw new Error(
           libraryLoading
             ? 'The cookbook is still opening. Try again in a moment.'
-            : 'No cookbook recipes are available for this request. Try a simpler description, browse recipes, or choose Search the web.',
+            : libraryError ||
+                'No cookbook recipes are available for this request. Try a simpler description, browse recipes, or choose Search the web.',
         );
       }
       let attachedContext = chatRecipes.map(recipeContext).join('\n\n');
@@ -886,88 +886,34 @@ export function KitchenHub({
   return (
     <div className="kitchen-hub">
       {page === 'recipes' && (
-        <>
-          <section className="recipe-assistant-entry">
-            <div>
-              <span className="eyebrow">FIND YOUR NEXT MEAL</span>
-              <h2>Cook something you’ll enjoy.</h2>
-              <p>Ask Gemini for real recipes, discuss your options, and make a shopping list.</p>
-            </div>
-            <button
-              className="button primary"
-              onClick={() => {
-                onNavigate('assistant');
-              }}
-            >
-              <Sparkles size={18} />
-              Help me choose
-            </button>
-          </section>
-          <details className="community-cookbook">
-            <summary>Explore the community cookbook</summary>
-            <RecipeDiscovery
-              recipes={library}
-              inventory={relevant}
-              loading={libraryLoading}
-              error={libraryError}
-              onOpen={(recipe) => {
-                setDetail(recipe);
-                setDetailServings(recipe.servings ? String(recipe.servings) : '');
-              }}
-              onChoose={() => {
-                onNavigate('assistant');
-              }}
-            />
-            <p className="footnote">
-              Built-in recipes adapted from{' '}
-              <a
-                href="https://en.wikibooks.org/wiki/Cookbook:Table_of_Contents"
-                target="_blank"
-                rel="noreferrer"
-              >
-                Wikibooks contributors
-              </a>{' '}
-              under{' '}
-              <a
-                href="https://creativecommons.org/licenses/by-sa/4.0/"
-                target="_blank"
-                rel="noreferrer"
-              >
-                CC BY-SA 4.0
-              </a>
-              . Source links and attribution stay with saved recipes. Unknown amounts and yields
-              stay flagged.
-            </p>
-          </details>
-          <RecipeBrowser
-            inventory={inventory}
-            relevant={relevant}
-            selectedBatchIds={selectedBatchIds}
-            useSelection={useSelection}
-            onUseSelectionChange={setUseSelection}
-            onOpen={(recipe) => {
-              setDetail(recipe);
-              setDetailServings(recipe.servings ? String(recipe.servings) : '');
-            }}
-            onSave={(recipe) => openEditor(recipe)}
-            onRemoveSaved={(recipe) => {
-              setRecipeDeleteError('');
-              setRecipeToDelete(recipe);
-            }}
-            onAddToGemini={addToGemini}
-            geminiRecipeIds={chatRecipes.map((recipe) => recipe.id)}
-            onImport={() => {
-              setImportText('');
-              setImportUrl('');
-              setMedia(null);
-              setImportOpen(true);
-            }}
-            onNew={() => openEditor(blankRecipe())}
-            onConfigure={onConfigure}
-            savedReveal={savedReveal}
-            onSavedRevealHandled={savedRevealHandled}
-          />
-        </>
+        <RecipeBrowser
+          inventory={inventory}
+          relevant={relevant}
+          selectedBatchIds={selectedBatchIds}
+          useSelection={useSelection}
+          onUseSelectionChange={setUseSelection}
+          onOpen={(recipe) => {
+            setDetail(recipe);
+            setDetailServings(recipe.servings ? String(recipe.servings) : '');
+          }}
+          onSave={(recipe) => openEditor(recipe)}
+          onRemoveSaved={(recipe) => {
+            setRecipeDeleteError('');
+            setRecipeToDelete(recipe);
+          }}
+          onAddToGemini={addToGemini}
+          geminiRecipeIds={chatRecipes.map((recipe) => recipe.id)}
+          onImport={() => {
+            setImportText('');
+            setImportUrl('');
+            setMedia(null);
+            setImportOpen(true);
+          }}
+          onNew={() => openEditor(blankRecipe())}
+          onConfigure={onConfigure}
+          savedReveal={savedReveal}
+          onSavedRevealHandled={savedRevealHandled}
+        />
       )}
       {page === 'shopping' && (
         <>

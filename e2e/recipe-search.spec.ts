@@ -1,3 +1,10 @@
+import {
+  openRecipeFilters,
+  closeRecipeFilters,
+  chooseRecipeFilter,
+  clearRecipeFilters,
+  chooseRecipeSort,
+} from './helpers/recipeFilters';
 import { expect, test, type Page } from '@playwright/test';
 import type { InventoryState } from '../src/domain/types';
 import type { Recipe } from '../src/recipes/types';
@@ -42,18 +49,23 @@ async function navigateRecipes(page: Page) {
     .filter({ visible: true })
     .first()
     .click();
-  await page.getByRole('button', { name: 'All recipes', exact: true }).click();
-  await page.getByRole('button', { name: 'For your kitchen', exact: true }).click();
+  await allRecipes(page);
+  await chooseRecipeSort(page, 'Recommended');
 }
 
 async function choose(page: Page, name: string, option: string) {
-  if (
-    name === 'Recipe source' &&
-    !(await page.getByRole('combobox', { name, exact: true }).isVisible())
-  )
-    await page.getByText('Other recipe sources', { exact: true }).click();
-  await page.getByRole('combobox', { name, exact: true }).click();
-  await page.getByRole('option', { name: option, exact: true }).click();
+  await chooseRecipeFilter(page, name, option);
+}
+
+async function allRecipes(page: Page) {
+  await chooseRecipeFilter(page, 'Recipe collection', 'All recipes');
+  await chooseRecipeFilter(page, 'Availability', 'Any recipe');
+}
+
+async function setPreference(page: Page, label: string, checked: boolean) {
+  const drawer = await openRecipeFilters(page);
+  await drawer.getByRole('checkbox', { name: label, exact: true }).setChecked(checked);
+  await closeRecipeFilters(page);
 }
 
 function cards(page: Page) {
@@ -134,32 +146,29 @@ test('updates local results and counts while typing, changing facets, and choosi
   await query.fill('');
   await expectCount(page, 6);
 
-  await page.getByText('Refine recipes', { exact: true }).click();
   await choose(page, 'Recipe category', 'Dinner');
   await expectCount(page, 3);
   await choose(page, 'Recipe cuisine', 'Japanese');
   await expectCount(page, 1);
   await expect(cards(page)).toContainText('Rice and eggs');
-  await page.getByRole('button', { name: 'Clear filters', exact: true }).click();
-  await page.getByRole('button', { name: 'Missing up to 2', exact: true }).click();
+  await clearRecipeFilters(page);
+  await choose(page, 'Availability', 'Missing up to 2');
   await expectCount(page, 5);
   await expect(cards(page).filter({ hasText: 'Pasta bake' })).toHaveCount(0);
-  await page.getByRole('button', { name: 'Ready to cook', exact: true }).click();
+  await choose(page, 'Availability', 'Ready to cook');
   await expectCount(page, 3);
-  await page.getByRole('checkbox', { name: 'Use only selected inventory', exact: true }).check();
+  await setPreference(page, 'Use only selected inventory', true);
   await expectCount(page, 1);
   await expect(cards(page)).toContainText('A rice bowl');
-  await page.getByRole('checkbox', { name: 'Use only selected inventory', exact: true }).uncheck();
+  await setPreference(page, 'Use only selected inventory', false);
   await expectCount(page, 3);
-  await page.getByRole('button', { name: 'All recipes', exact: true }).click();
-  await page.getByRole('button', { name: 'Browse all', exact: true }).click();
+  await allRecipes(page);
+  await chooseRecipeSort(page, 'Name A–Z');
   await expect(cards(page).first()).toContainText('A rice bowl');
-  await page
-    .getByRole('checkbox', { name: 'Prioritize expiring ingredients', exact: true })
-    .check();
+  await setPreference(page, 'Prioritize expiring ingredients', true);
   await expect(cards(page).first()).toContainText('Z carrot soup');
-  await page.getByRole('button', { name: 'Ready to cook', exact: true }).click();
-  await page.getByRole('checkbox', { name: 'Use only selected inventory', exact: true }).check();
+  await choose(page, 'Availability', 'Ready to cook');
+  await setPreference(page, 'Use only selected inventory', true);
   await expectCount(page, 1);
   await page
     .getByRole('button', { name: 'Inventory', exact: true })
@@ -169,11 +178,13 @@ test('updates local results and counts while typing, changing facets, and choosi
   await page.getByRole('button', { name: 'Clear selection', exact: true }).click();
   await navigateRecipes(page);
   await expectCount(page, 6);
-  await page.getByRole('button', { name: 'Ready to cook', exact: true }).click();
+  await choose(page, 'Availability', 'Ready to cook');
   await expectCount(page, 3);
+  await openRecipeFilters(page);
   await expect(
     page.getByRole('checkbox', { name: 'Use only selected inventory', exact: true }),
   ).toHaveCount(0);
+  await closeRecipeFilters(page);
 });
 
 test('searches a chosen provider explicitly and applies filters to its grid and counts', async ({
@@ -222,10 +233,9 @@ test('searches a chosen provider explicitly and applies filters to its grid and 
   await expect(page.locator('.kitchen-hub .recipe-grid')).toHaveCount(1);
   await expect(cards(page).filter({ hasText: 'Wikibooks' })).toHaveCount(0);
   await expect(page.locator('.library-results')).toContainText('RecipeAPI.io');
-  await page.getByRole('button', { name: 'Ready to cook', exact: true }).click();
+  await choose(page, 'Availability', 'Ready to cook');
   await expectCount(page, 2);
-  await page.getByRole('button', { name: 'All recipes', exact: true }).click();
-  await page.getByText('Refine recipes', { exact: true }).click();
+  await allRecipes(page);
   await choose(page, 'Recipe category', 'Soup');
   await expectCount(page, 2);
   await choose(page, 'Recipe cuisine', 'Japanese');
@@ -237,12 +247,14 @@ test('searches a chosen provider explicitly and applies filters to its grid and 
   await choose(page, 'Recipe source', 'Your collection & community cookbook');
   await page.getByRole('textbox', { name: 'Find recipes', exact: true }).fill('');
   await expectCount(page, 6);
+  await openRecipeFilters(page);
   await expect(page.getByRole('combobox', { name: 'Recipe category', exact: true })).toHaveText(
     'Every category',
   );
   await expect(page.getByRole('combobox', { name: 'Recipe cuisine', exact: true })).toHaveText(
     'Every cuisine',
   );
+  await closeRecipeFilters(page);
 });
 
 test('filters personal imports separately from saved provider, own, and AI recipes while preserving readiness', async ({
@@ -273,13 +285,13 @@ test('filters personal imports separately from saved provider, own, and AI recip
   }, saved);
   await navigateRecipes(page);
   await expectCount(page, 11);
-  await page.getByRole('button', { name: 'Imported recipes', exact: true }).click();
+  await choose(page, 'Recipe collection', 'Imported recipes');
   await expectCount(page, 2);
   await expect(cards(page).locator('h3')).toHaveText(['Personal rice bowl', 'Personal pasta dish']);
   await expect(page.getByRole('heading', { name: 'Saved provider rice', exact: true })).toHaveCount(
     0,
   );
-  await page.getByRole('button', { name: 'Ready to cook', exact: true }).click();
+  await choose(page, 'Availability', 'Ready to cook');
   await expectCount(page, 1);
   const query = page.getByRole('textbox', { name: 'Find recipes', exact: true });
   await query.fill('rice');
@@ -295,14 +307,16 @@ test('filters personal imports separately from saved provider, own, and AI recip
   await expect(cards(page)).toContainText('AI eggs');
   await choose(page, 'Recipe collection', 'Saved recipes');
   await expectCount(page, 4);
-  await page.getByRole('button', { name: 'All recipes', exact: true }).click();
+  await allRecipes(page);
   await expectCount(page, 11);
   await choose(page, 'Recipe source', 'RecipeAPI.io');
   await expect(cards(page)).toHaveCount(0);
   await choose(page, 'Recipe collection', 'Imported recipes');
+  await openRecipeFilters(page);
   await expect(
     page.getByRole('combobox', { name: 'Recipe source', exact: true, includeHidden: true }),
   ).toHaveText('Your collection & community cookbook');
+  await closeRecipeFilters(page);
   await expectCount(page, 2);
 });
 
@@ -338,11 +352,11 @@ test('keeps a pending search valid when changing a presentation filter and appli
   await page.getByRole('textbox', { name: 'Find recipes', exact: true }).fill('soup');
   await page.getByRole('button', { name: 'Search RecipeAPI.io', exact: true }).click();
   await expect.poll(() => requests).toBe(1);
-  await page.getByRole('button', { name: 'Ready to cook', exact: true }).click();
+  await choose(page, 'Availability', 'Ready to cook');
   release();
   await expectCount(page, 1);
   await expect(cards(page)).toContainText('Remote rice soup');
-  await page.getByRole('button', { name: 'All recipes', exact: true }).click();
+  await allRecipes(page);
   await expectCount(page, 2);
   expect(requests).toBe(1);
 });
@@ -553,9 +567,8 @@ test('reveals recipes hidden by readiness without changing selected inventory or
   });
   await page.getByRole('checkbox', { name: 'Select Rice in Pantry', exact: true }).check();
   await navigateRecipes(page);
-  await page.getByText('Refine recipes', { exact: true }).click();
-  await page.getByRole('checkbox', { name: 'Use only selected inventory', exact: true }).check();
-  await page.getByRole('button', { name: 'Ready to cook', exact: true }).click();
+  await setPreference(page, 'Use only selected inventory', true);
+  await choose(page, 'Availability', 'Ready to cook');
   await choose(page, 'Recipe source', 'RecipeAPI.io');
   await page.getByRole('button', { name: 'Search RecipeAPI.io', exact: true }).click();
   await expect(
@@ -569,9 +582,11 @@ test('reveals recipes hidden by readiness without changing selected inventory or
   await expectCount(page, 1);
   await expect(cards(page)).toContainText('Remote egg dish');
   await expect(cards(page)).toContainText('Almost ready');
+  await openRecipeFilters(page);
   await expect(
     page.getByRole('checkbox', { name: 'Use only selected inventory', exact: true }),
   ).toBeChecked();
+  await closeRecipeFilters(page);
   await expect(page.locator('.recipe-loaded-note').first()).toHaveText(
     '1 recipes loaded · 1 match your filters.',
   );
@@ -656,8 +671,7 @@ test('searches Spoonacular with one chosen ingredient while matching the whole i
   );
   await navigateRecipes(page);
   await choose(page, 'Recipe source', 'Spoonacular');
-  await page.getByRole('combobox', { name: 'Start with ingredient', exact: true }).click();
-  await page.getByRole('option', { name: /^rice$/i }).click();
+  await chooseRecipeFilter(page, 'Start with ingredient', 'rice');
   await page.getByRole('button', { name: 'Search Spoonacular', exact: true }).click();
   const discoveryCards = page.locator('.recipe-discovery-card');
   await expect(discoveryCards).toHaveCount(2);
@@ -671,12 +685,12 @@ test('searches Spoonacular with one chosen ingredient while matching the whole i
     'Almost ready',
   );
   await expect(discoveryCards.filter({ hasText: 'Remote large rice dish' })).toContainText(
-    '1 ingredients short',
+    '1 ingredient short',
   );
   expect(requests).toEqual([
     expect.objectContaining({ provider: 'spoonacular', query: '', ingredients: ['rice'] }),
   ]);
-  await page.getByRole('button', { name: 'Ready to cook', exact: true }).click();
+  await choose(page, 'Availability', 'Ready to cook');
   await expect(discoveryCards).toHaveCount(1);
   await expect(discoveryCards).toContainText('Remote rice carrot eggs');
   expect(requests).toHaveLength(1);

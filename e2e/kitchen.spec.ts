@@ -1,3 +1,4 @@
+import { chooseRecipeFilter, clearRecipeFilters, chooseRecipeSort } from './helpers/recipeFilters';
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import { readFile } from 'node:fs/promises';
 import type { InventoryState } from '../src/domain/types';
@@ -282,13 +283,11 @@ async function navigate(page: Page, name: 'Inventory' | 'Recipes' | 'Shopping li
     .click();
 }
 async function selectRecipeSource(page: Page, label: string) {
-  if (!(await page.getByRole('combobox', { name: 'Recipe source', exact: true }).isVisible()))
-    await page.getByText('Other recipe sources', { exact: true }).click();
-  await page.getByRole('combobox', { name: 'Recipe source', exact: true }).click();
-  await page.getByRole('option', { name: label, exact: true }).click();
+  await chooseRecipeFilter(page, 'Recipe source', label);
 }
+
 async function saveOwnRecipe(page: Page, title: string, quantity: number) {
-  await page.getByRole('button', { name: 'Your own recipe', exact: true }).click();
+  await page.getByRole('button', { name: 'Add recipe', exact: true }).click();
   const editor = page.getByRole('dialog', { name: 'Review your recipe' });
   await editor.getByLabel('Recipe name', { exact: true }).fill(title);
   await editor.getByLabel('Original recipe servings', { exact: false }).fill('2');
@@ -394,7 +393,9 @@ test('searches online recipes, compares quantities, and shows cooking steps', as
   await expect(detail.getByText('400 g', { exact: true })).toBeVisible();
   await expect(detail.getByText('On hand', { exact: true })).toBeVisible();
   await expect(detail.getByText('Cook thoroughly.', { exact: true })).toBeVisible();
-  await expect(detail.getByText(/Record the original yield before scaling/)).toBeVisible();
+  await expect(detail.getByRole('region', { name: 'Recipe portions' })).toContainText(
+    'Original serving count not recorded',
+  );
   await detail.getByLabel('Minutes for step 1', { exact: true }).fill('1');
   await detail.getByRole('button', { name: 'Start', exact: true }).first().click();
   await expect(detail.getByRole('timer')).toBeVisible();
@@ -469,7 +470,7 @@ test('imports pasted recipes through ingredient review without Gemini', async ({
   await expect(page.getByRole('heading', { name: 'Egg toast', exact: true })).toBeVisible();
   await page.reload();
   await navigate(page, 'Recipes');
-  await page.getByRole('button', { name: 'Saved recipes', exact: true }).click();
+  await chooseRecipeFilter(page, 'Recipe collection', 'Saved recipes');
   await expect(page.getByRole('heading', { name: 'Egg toast', exact: true })).toBeVisible();
 });
 
@@ -478,7 +479,7 @@ test('browses the real bundled cookbook, loads more, and finds a familiar recipe
 }) => {
   test.setTimeout(60_000);
   await navigate(page, 'Recipes');
-  await page.getByRole('button', { name: 'All recipes', exact: true }).click();
+  await chooseRecipeFilter(page, 'Recipe collection', 'All recipes');
   await expect(page.locator('.library-results')).toContainText(/Showing 24 of \d[\d,]* recipes/);
   const recipes = page.locator('.kitchen-hub .recipe-grid .recipe-card');
   await expect(recipes).toHaveCount(24);
@@ -517,8 +518,8 @@ test('keeps local browsing during provider failure and saves licensed recipes in
   await page.route('https://www.themealdb.com/api/**', (route) => route.abort());
   await addItem(page, 'Rice', '50', '', '2026-01-01', 'g');
   await navigate(page, 'Recipes');
-  await page.getByRole('button', { name: 'All recipes', exact: true }).click();
-  await page.getByRole('button', { name: 'For your kitchen', exact: true }).click();
+  await chooseRecipeFilter(page, 'Recipe collection', 'All recipes');
+  await chooseRecipeSort(page, 'Recommended');
   const recipes = page.locator('.kitchen-hub .recipe-grid .recipe-card');
   await expect(recipes).toHaveCount(24);
   await selectRecipeSource(page, 'TheMealDB');
@@ -532,13 +533,10 @@ test('keeps local browsing during provider failure and saves licensed recipes in
   await page.getByRole('button', { name: 'Load more recipes', exact: true }).click();
   await expect(recipes).toHaveCount(60);
   await expect(page.getByRole('button', { name: 'Load more recipes', exact: true })).toHaveCount(0);
-  const category = page.getByRole('combobox', { name: 'Recipe category', exact: true });
-  await page.getByText('Refine recipes', { exact: true }).click();
-  await category.click();
-  await page.getByRole('option', { name: 'Breakfast', exact: true }).click();
+  await chooseRecipeFilter(page, 'Recipe category', 'Breakfast');
   await expect(recipes).toHaveCount(20);
   await expect(recipes.first()).toContainText('Egg breakfast');
-  await page.getByRole('button', { name: 'Clear filters', exact: true }).click();
+  await clearRecipeFilters(page);
   await expect(recipes).toHaveCount(24);
   await page.getByRole('textbox', { name: 'Find recipes', exact: true }).fill('Rice dinner 01');
   await expect(recipes).toHaveCount(1);
@@ -612,7 +610,7 @@ test('ignores an old online recipe search after returning to the local cookbook'
     fulfilled();
   });
   await navigate(page, 'Recipes');
-  await page.getByRole('button', { name: 'All recipes', exact: true }).click();
+  await chooseRecipeFilter(page, 'Recipe collection', 'All recipes');
   await expect(page.locator('.recipe-card')).toHaveCount(24);
   const query = page.getByRole('textbox', { name: 'Find recipes', exact: true });
   await selectRecipeSource(page, 'TheMealDB');
@@ -624,7 +622,10 @@ test('ignores an old online recipe search after returning to the local cookbook'
   await expect(page.locator('.recipe-card')).toHaveCount(20);
   release();
   await finished;
-  await page.getByRole('button', { name: 'Clear filters', exact: true }).click();
+  await clearRecipeFilters(page);
+  await expect(query).toHaveValue('egg');
+  await expect(page.locator('.recipe-card')).toHaveCount(20);
+  await page.getByRole('button', { name: 'Clear recipe search', exact: true }).click();
   await expect(page.locator('.library-results')).toContainText(/24.*60/);
   await expect(page.getByRole('heading', { name: 'Old rice search', exact: true })).toHaveCount(0);
 });

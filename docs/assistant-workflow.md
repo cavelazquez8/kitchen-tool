@@ -67,6 +67,11 @@ stay as published. Invalid targets must be corrected before planning, shopping, 
 reviewing consumption. Recipe browsing can sort by **Fewest ingredients short**, counting
 missing ingredients and known shortages separately from amounts that need review.
 
+The Recipes page starts with the collection and a compact search toolbar. **Sort by**
+contains ordering choices; **Filters** opens the collection, availability, source,
+cuisine, category, and inventory controls. Active filters can be removed individually.
+The separate Everyday picks/discovery panel has been removed.
+
 Assistant suggestions, attachments, conversation text and the draft are saved with the
 kitchen. They survive tab changes, reloads, and file backup/restore. Credentials remain
 outside kitchen backups. Saved recipes are the default recipe collection; community

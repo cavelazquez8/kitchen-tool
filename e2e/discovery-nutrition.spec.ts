@@ -2,6 +2,7 @@ import { readFile } from 'node:fs/promises';
 import { expect, test, type Page } from '@playwright/test';
 import type { Recipe } from '../src/recipes/types';
 import { recipeNutritionKey } from '../src/nutrition/estimate';
+import { chooseRecipeFilter, chooseRecipeSort } from './helpers/recipeFilters';
 
 const key = 'kitchen-wrapper.inventory.v1';
 const backend = 'https://mise.example.workers.dev';
@@ -85,7 +86,7 @@ test('shows reviewed whole-recipe nutrition when the source yield is missing', a
   );
   await page.reload();
   await recipesPage(page);
-  await page.getByRole('button', { name: 'Imported recipes', exact: true }).click();
+  await chooseRecipeFilter(page, 'Recipe collection', 'Imported recipes');
   await page
     .locator('.recipe-card')
     .filter({ hasText: recipe.title })
@@ -104,30 +105,28 @@ test('shows reviewed whole-recipe nutrition when the source yield is missing', a
     await panel.screenshot({ path: `/tmp/mise-nutrition-totals-${test.info().project.name}.png` });
 });
 
-test('shuffles everyday dishes and the whole cookbook without changing kitchen data', async ({
+test('browses one searchable cookbook grid with sorting and source attribution', async ({
   page,
 }) => {
   await recipesPage(page);
-  await page.getByText('Explore the community cookbook', { exact: true }).click();
-  const panel = page.getByRole('region', { name: 'Recipe starting points' });
-  const cards = panel.locator('.starter-recipe strong');
-  await expect(cards).toHaveCount(3);
-  const initial = await cards.allTextContents();
-  await panel.getByRole('button', { name: 'Shuffle suggestions' }).click();
-  await expect(panel.getByRole('status')).toContainText('Random picks from 3 everyday recipes');
-  expect(await cards.allTextContents()).not.toEqual(initial);
-  await panel.getByRole('button', { name: 'Use inventory order' }).click();
-  expect(await cards.allTextContents()).toEqual(initial);
-  await panel.getByRole('button', { name: 'Whole cookbook' }).click();
-  await expect(panel.getByRole('status')).toContainText('Random picks from 4 cookbook recipes');
-  await panel.getByRole('button', { name: 'Show more suggestions' }).click();
+  await chooseRecipeFilter(page, 'Recipe collection', 'All recipes');
+  const cards = page.locator('.recipe-grid .recipe-card');
   await expect(cards).toHaveCount(4);
-  await panel.getByRole('button', { name: /Spaghetti alla Carbonara/ }).click();
+  await expect(page.getByRole('region', { name: 'Recipe starting points' })).toHaveCount(0);
+  await chooseRecipeSort(page, 'Name A–Z');
+  expect(await cards.locator('h3').allTextContents()).toEqual(
+    fixtures.map((recipe) => recipe.title).sort((a, b) => a.localeCompare(b)),
+  );
+  const query = page.getByRole('textbox', { name: 'Find recipes', exact: true });
+  await query.fill('Spaghetti alla Carbonara');
+  await expect(cards).toHaveCount(1);
+  await cards.getByRole('button', { name: 'View recipe', exact: true }).click();
   const detail = page.getByRole('dialog', { name: 'Spaghetti alla Carbonara', exact: true });
   await expect(detail).toContainText('Wikibooks contributors');
   await detail.getByRole('button', { name: 'Close', exact: true }).click();
-  await panel.getByRole('button', { name: 'Everyday picks' }).click();
-  await expect(cards).toHaveCount(3);
+  await query.fill('');
+  await chooseRecipeFilter(page, 'Recipe collection', 'Saved recipes');
+  await expect(cards).toHaveCount(0);
   expect(await page.evaluate((key) => JSON.parse(localStorage.getItem(key)!).state, key)).toEqual({
     products: [],
     batches: [],
@@ -136,8 +135,6 @@ test('shuffles everyday dishes and the whole cookbook without changing kitchen d
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(
     true,
   );
-  if (test.info().project.name === 'cover')
-    await page.screenshot({ path: '/tmp/mise-shuffle-cover.png', fullPage: true });
 });
 
 test('reviews real ingredients through USDA without diagnostic tests or auto-confirming foods', async ({
@@ -168,10 +165,13 @@ test('reviews real ingredients through USDA without diagnostic tests or auto-con
     });
   });
   await recipesPage(page);
-  await page.getByText('Explore the community cookbook', { exact: true }).click();
+  await chooseRecipeFilter(page, 'Recipe collection', 'All recipes');
   await page
-    .getByRole('region', { name: 'Recipe starting points' })
-    .getByRole('button', { name: /Southwestern Black Beans and Rice/ })
+    .getByRole('textbox', { name: 'Find recipes', exact: true })
+    .fill('Southwestern Black Beans and Rice');
+  await page
+    .locator('.recipe-grid .recipe-card')
+    .getByRole('button', { name: 'View recipe', exact: true })
     .click();
   const detail = page.getByRole('dialog', {
     name: 'Southwestern Black Beans and Rice',

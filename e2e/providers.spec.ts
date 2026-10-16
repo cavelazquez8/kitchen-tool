@@ -1,3 +1,4 @@
+import { openRecipeFilters, closeRecipeFilters, chooseRecipeFilter } from './helpers/recipeFilters';
 import { expect, test, type Page } from '@playwright/test';
 import { readFile } from 'node:fs/promises';
 import { RECIPE_PROVIDER_INFO } from '../src/recipes/providers';
@@ -23,10 +24,7 @@ async function navigate(page: Page, name: 'Recipes' | 'Inventory') {
   await page.getByRole('button', { name, exact: true }).filter({ visible: true }).first().click();
 }
 async function selectSource(page: Page, label: string) {
-  if (!(await page.getByRole('combobox', { name: 'Recipe source', exact: true }).isVisible()))
-    await page.getByText('Other recipe sources', { exact: true }).click();
-  await page.getByRole('combobox', { name: 'Recipe source', exact: true }).click();
-  await page.getByRole('option', { name: label, exact: true }).click();
+  await chooseRecipeFilter(page, 'Recipe source', label);
 }
 
 test.beforeEach(async ({ page }) => {
@@ -105,9 +103,11 @@ test('saves a selected RecipeAPI recipe with attribution and loads another page'
   const editor = page.getByRole('dialog', { name: 'Review your recipe' });
   await editor.getByRole('button', { name: 'Save recipe', exact: true }).click();
   await expect(editor).not.toBeVisible();
+  await openRecipeFilters(page);
   await expect(page.getByRole('combobox', { name: 'Recipe source', exact: true })).toHaveText(
     'RecipeAPI.io',
   );
+  await closeRecipeFilters(page);
   await expect(results.getByRole('heading', { name: 'Test-only carrot soup 1' })).toBeVisible();
   const stored = await page.evaluate(() =>
     JSON.parse(localStorage.getItem('kitchen-wrapper.inventory.v1') ?? 'null'),
@@ -133,10 +133,12 @@ test('saves a selected RecipeAPI recipe with attribution and loads another page'
     expect.objectContaining({ query: 'soup', page: 1 }),
     expect.objectContaining({ query: 'soup', page: 2 }),
   ]);
-  await page.getByRole('button', { name: 'Saved recipes', exact: true }).click();
+  await chooseRecipeFilter(page, 'Recipe collection', 'Saved recipes');
+  await openRecipeFilters(page);
   await expect(
     page.getByRole('combobox', { name: 'Recipe source', exact: true, includeHidden: true }),
   ).toHaveText('Your collection & community cookbook');
+  await closeRecipeFilters(page);
   await expect(page.locator('.kitchen-hub .recipe-grid .recipe-card')).toHaveCount(1);
   await expect(page.getByRole('heading', { name: 'Test-only carrot soup 1' })).toBeVisible();
 });
@@ -323,7 +325,7 @@ test('tests configured recipe sources independently without saving their connect
   ).not.toContain(recipe.id);
   await settings.getByRole('button', { name: 'Close', exact: true }).click();
   await navigate(page, 'Recipes');
-  await page.getByRole('button', { name: 'Saved recipes', exact: true }).click();
+  await chooseRecipeFilter(page, 'Recipe collection', 'Saved recipes');
   await expect(page.getByRole('heading', { name: recipe.title, exact: true })).toHaveCount(0);
   await expect(page.locator('.kitchen-hub .recipe-grid .recipe-card')).toHaveCount(0);
 });

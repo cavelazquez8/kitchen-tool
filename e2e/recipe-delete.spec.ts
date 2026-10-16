@@ -1,6 +1,7 @@
 import { expect, test, type Page } from '@playwright/test';
 import type { InventoryState } from '../src/domain/types';
 import type { Recipe } from '../src/recipes/types';
+import { chooseRecipeFilter } from './helpers/recipeFilters';
 
 const inventoryKey = 'kitchen-wrapper.inventory.v1';
 const importedRecipe: Recipe = {
@@ -99,7 +100,7 @@ test('cancels or confirms deleting an imported recipe, preserving unrelated kitc
   );
   await page.goto('/');
   await navigateRecipes(page);
-  await page.getByRole('button', { name: 'Imported recipes', exact: true }).click();
+  await chooseRecipeFilter(page, 'Recipe collection', 'Imported recipes');
   const importedCard = page.locator('.recipe-card').filter({ hasText: importedRecipe.title });
   await expect(importedCard).toBeVisible();
   await importedCard.getByRole('button', { name: 'View recipe', exact: true }).click();
@@ -127,9 +128,9 @@ test('cancels or confirms deleting an imported recipe, preserving unrelated kitc
 
   await page.reload();
   await navigateRecipes(page);
-  await page.getByRole('button', { name: 'Imported recipes', exact: true }).click();
+  await chooseRecipeFilter(page, 'Recipe collection', 'Imported recipes');
   await expect(page.locator('.recipe-card')).toHaveCount(0);
-  await page.getByRole('button', { name: 'Saved recipes', exact: true }).click();
+  await chooseRecipeFilter(page, 'Recipe collection', 'Saved recipes');
   await expect(page.getByRole('heading', { name: keptRecipe.title, exact: true })).toBeVisible();
   await expect(page.getByRole('heading', { name: importedRecipe.title, exact: true })).toHaveCount(
     0,

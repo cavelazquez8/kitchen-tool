@@ -73,6 +73,14 @@ function setup(inventory: InventoryState, page: HubPage = 'recipes') {
   return { repository, ...renderKitchen(repository, vi.fn(repository.update), page) };
 }
 
+async function chooseRecipeCollection(user: ReturnType<typeof userEvent.setup>, name: string) {
+  await user.click(screen.getByRole('button', { name: /^Filters/ }));
+  const filters = screen.getByRole('dialog', { name: 'Filter recipes' });
+  await user.click(within(filters).getByRole('combobox', { name: 'Recipe collection' }));
+  await user.click(screen.getByRole('option', { name }));
+  await user.click(within(filters).getByRole('button', { name: 'Show recipes' }));
+}
+
 beforeEach(() => {
   localStorage.clear();
   vi.mocked(loadLocalRecipes).mockReset().mockResolvedValue([]);
@@ -661,7 +669,7 @@ describe('imported recipe deletion', () => {
     expect(update).toHaveBeenCalledTimes(1);
     expect(toast).toHaveBeenCalledWith('Recipe deleted.');
     expect(screen.queryByRole('heading', { name: imported.title })).not.toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: 'All recipes' }));
+    await chooseRecipeCollection(user, 'All recipes');
     expect(screen.getByRole('heading', { name: builtIn.title })).toBeVisible();
 
     unmount();
@@ -703,7 +711,7 @@ describe('imported recipe deletion', () => {
     vi.mocked(loadLocalRecipes).mockResolvedValue([builtIn, discovered]);
     const { repository, update } = setup({ ...createEmptyInventory(), recipes: [builtIn] });
     const user = userEvent.setup();
-    await user.click(screen.getByRole('button', { name: 'All recipes' }));
+    await chooseRecipeCollection(user, 'All recipes');
     for (const recipe of [builtIn, discovered]) {
       await user.click(await screen.findByRole('button', { name: recipe.title }));
       const detail = screen.getByRole('dialog', { name: recipe.title });
@@ -724,7 +732,6 @@ describe('imported recipe deletion', () => {
       mealPlan: [{ recipeId: builtIn.id, servings: 2 }],
     });
     const user = userEvent.setup();
-    await user.click(await screen.findByRole('button', { name: 'Saved recipes' }));
     await user.click(
       screen.getByRole('button', { name: `Remove ${builtIn.title} from saved recipes` }),
     );
@@ -735,7 +742,7 @@ describe('imported recipe deletion', () => {
     await waitFor(() => expect(repository.getSnapshot().state.recipes).toEqual([imported]));
     expect(repository.getSnapshot().state.mealPlan).toEqual([]);
     expect(screen.queryByRole('heading', { name: builtIn.title })).not.toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: 'All recipes' }));
+    await chooseRecipeCollection(user, 'All recipes');
     expect(await screen.findByRole('heading', { name: builtIn.title })).toBeVisible();
   });
 
