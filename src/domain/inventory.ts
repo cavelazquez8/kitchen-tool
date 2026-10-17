@@ -45,6 +45,28 @@ export function todayDate(now = new Date()): string {
   ].join('-');
 }
 
+/** Products recorded as in stock with dates that have not passed; not a food-safety guarantee. */
+export function currentStockProductIds(
+  inventory: InventoryState,
+  today = todayDate(),
+): Set<string> {
+  const products = new Map(inventory.products.map((product) => [product.id, product]));
+  return new Set(
+    inventory.batches
+      .filter((batch) => {
+        const product = products.get(batch.productId);
+        return (
+          product &&
+          batch.stapleStatus !== 'empty' &&
+          (!batch.expiresOn || batch.expiresOn >= today) &&
+          (batch.quantity !== 0 ||
+            (product.isStaple && (batch.stapleStatus ?? 'stocked') === 'stocked'))
+        );
+      })
+      .map((batch) => batch.productId),
+  );
+}
+
 function dateValue(value: string): number {
   assertDate(value, 'Date');
   const [year, month, day] = value.split('-').map(Number);

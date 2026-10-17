@@ -164,3 +164,114 @@ describe('assistant inventory sharing boundary', () => {
     ).toHaveLength(MAX_ASSISTANT_INVENTORY_PRODUCTS);
   });
 });
+
+describe('assistant ingredient priorities', () => {
+  it('adds a soft preference only for shared ingredients and preserves the original inventory', () => {
+    const state = kitchen();
+    const context = {
+      mode: 'selected' as const,
+      productIds: ['carrots'],
+      preferredProductIds: ['carrots', 'private', 'removed'],
+    };
+    const markdown = assistantInventoryMarkdown(state, context);
+    const preferences = markdown.split('\n\n')[0];
+    expect(preferences).toContain(
+      'Ingredient preferences (soft, not required): Selected rainbow carrots',
+    );
+    expect(preferences).toContain('Do not exclude other recipes');
+    expect(preferences).toContain("The user's current request takes precedence");
+    expect(markdown).not.toContain('UNSHARED_UNIQUE_FOOD');
+    expect(markdown).not.toContain('removed');
+    expect(assistantInventory(state, context).batches).toEqual(state.batches.slice(0, 2));
+    expect(context.preferredProductIds).toEqual(['carrots', 'private', 'removed']);
+  });
+
+  it('never shares priorities in None or widens an empty or deleted selection', () => {
+    for (const context of [
+      {
+        mode: 'none' as const,
+        productIds: ['carrots'],
+        preferredProductIds: ['carrots', 'private'],
+      },
+      { mode: 'selected' as const, productIds: [], preferredProductIds: ['carrots', 'private'] },
+      {
+        mode: 'selected' as const,
+        productIds: ['removed'],
+        preferredProductIds: ['removed', 'private'],
+      },
+    ]) {
+      const markdown = assistantInventoryMarkdown(kitchen(), context);
+      expect(markdown).not.toContain('Ingredient preferences');
+      expect(markdown).not.toContain('Selected rainbow carrots');
+      expect(markdown).not.toContain('UNSHARED_UNIQUE_FOOD');
+      expect(assistantInventory(kitchen(), context).products).toEqual([]);
+    }
+  });
+
+  it('omits priorities for removed, empty, and past-date stock while allowing unknown usable amounts', () => {
+    const state = kitchen();
+    const context = {
+      mode: 'all' as const,
+      productIds: [],
+      preferredProductIds: ['carrots', 'private', 'removed'],
+    };
+    state.batches[2].quantity = 0;
+    let preferences = assistantInventoryMarkdown(state, context).split('\n\n')[0];
+    expect(preferences).toContain('Selected rainbow carrots');
+    expect(preferences).not.toContain('UNSHARED_UNIQUE_FOOD');
+    state.batches[0].expiresOn = '1900-01-01';
+    state.batches[1].expiresOn = '1900-01-01';
+    expect(assistantInventoryMarkdown(state, context)).not.toContain('Ingredient preferences');
+    state.batches[0].expiresOn = null;
+    state.batches[0].stapleStatus = 'empty';
+    expect(assistantInventoryMarkdown(state, context)).not.toContain('Ingredient preferences');
+    state.batches[0].stapleStatus = undefined;
+    preferences = assistantInventoryMarkdown(state, context).split('\n\n')[0];
+    expect(preferences).toContain('Selected rainbow carrots');
+  });
+
+  it('sanitizes, bounds, and clones priorities without broadening selected inventory', () => {
+    const value = {
+      mode: 'selected' as const,
+      productIds: ['carrots'],
+      preferredProductIds: [
+        'private',
+        'carrots',
+        'carrots',
+        '',
+        ' ',
+        42,
+        null,
+        'x'.repeat(MAX_ASSISTANT_PRODUCT_ID_LENGTH + 1),
+      ],
+    };
+    const normalized = normalizeAssistantInventoryContext(value);
+    expect(normalized).toEqual({
+      mode: 'selected',
+      productIds: ['carrots'],
+      preferredProductIds: ['carrots'],
+    });
+    expect(normalized.preferredProductIds).not.toBe(value.preferredProductIds);
+    for (const preferredProductIds of [null, 'carrots', {}, [42, ' ']])
+      expect(
+        normalizeAssistantInventoryContext({ mode: 'all', productIds: [], preferredProductIds }),
+      ).toEqual({ mode: 'all', productIds: [] });
+    expect(
+      normalizeAssistantInventoryContext({
+        mode: 'selected',
+        productIds: [],
+        preferredProductIds: ['carrots'],
+      }),
+    ).toEqual({ mode: 'selected', productIds: [] });
+    expect(
+      normalizeAssistantInventoryContext({
+        mode: 'all',
+        productIds: [],
+        preferredProductIds: Array.from(
+          { length: MAX_ASSISTANT_INVENTORY_PRODUCTS + 1 },
+          (_, i) => `id-${i}`,
+        ),
+      }).preferredProductIds,
+    ).toHaveLength(MAX_ASSISTANT_INVENTORY_PRODUCTS);
+  });
+});

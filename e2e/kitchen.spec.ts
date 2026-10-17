@@ -519,7 +519,7 @@ test('keeps local browsing during provider failure and saves licensed recipes in
   await addItem(page, 'Rice', '50', '', '2026-01-01', 'g');
   await navigate(page, 'Recipes');
   await chooseRecipeFilter(page, 'Recipe collection', 'All recipes');
-  await chooseRecipeSort(page, 'Recommended');
+  await chooseRecipeSort(page, 'Most matches');
   const recipes = page.locator('.kitchen-hub .recipe-grid .recipe-card');
   await expect(recipes).toHaveCount(24);
   await selectRecipeSource(page, 'TheMealDB');

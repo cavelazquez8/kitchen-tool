@@ -50,7 +50,7 @@ async function navigateRecipes(page: Page) {
     .first()
     .click();
   await allRecipes(page);
-  await chooseRecipeSort(page, 'Recommended');
+  await chooseRecipeSort(page, 'Most matches');
 }
 
 async function choose(page: Page, name: string, option: string) {
@@ -59,7 +59,6 @@ async function choose(page: Page, name: string, option: string) {
 
 async function allRecipes(page: Page) {
   await chooseRecipeFilter(page, 'Recipe collection', 'All recipes');
-  await chooseRecipeFilter(page, 'Availability', 'Any recipe');
 }
 
 async function setPreference(page: Page, label: string, checked: boolean) {
@@ -152,24 +151,25 @@ test('updates local results and counts while typing, changing facets, and choosi
   await expectCount(page, 1);
   await expect(cards(page)).toContainText('Rice and eggs');
   await clearRecipeFilters(page);
-  await choose(page, 'Availability', 'Missing up to 2');
-  await expectCount(page, 5);
-  await expect(cards(page).filter({ hasText: 'Pasta bake' })).toHaveCount(0);
-  await choose(page, 'Availability', 'Ready to cook');
-  await expectCount(page, 3);
+  await expectCount(page, 6);
+  await expect(cards(page).first()).toContainText('Rice and eggs');
+  await expect(cards(page).first()).toContainText('2 matching ingredients');
   await setPreference(page, 'Use only selected inventory', true);
-  await expectCount(page, 1);
-  await expect(cards(page)).toContainText('A rice bowl');
+  await expectCount(page, 6);
+  await expect(cards(page).first()).toContainText('A rice bowl');
+  await expect(cards(page).filter({ hasText: 'Rice and eggs' })).toContainText(
+    '1 matching ingredient · 1 short',
+  );
   await setPreference(page, 'Use only selected inventory', false);
-  await expectCount(page, 3);
-  await allRecipes(page);
-  await chooseRecipeSort(page, 'Name A–Z');
+  await expectCount(page, 6);
+  await expect(cards(page).first()).toContainText('Rice and eggs');
+  await chooseRecipeSort(page, 'Name');
   await expect(cards(page).first()).toContainText('A rice bowl');
   await setPreference(page, 'Prioritize expiring ingredients', true);
   await expect(cards(page).first()).toContainText('Z carrot soup');
-  await choose(page, 'Availability', 'Ready to cook');
   await setPreference(page, 'Use only selected inventory', true);
-  await expectCount(page, 1);
+  await expectCount(page, 6);
+  await expect(cards(page).first()).toContainText('A rice bowl');
   await page
     .getByRole('button', { name: 'Inventory', exact: true })
     .filter({ visible: true })
@@ -178,8 +178,6 @@ test('updates local results and counts while typing, changing facets, and choosi
   await page.getByRole('button', { name: 'Clear selection', exact: true }).click();
   await navigateRecipes(page);
   await expectCount(page, 6);
-  await choose(page, 'Availability', 'Ready to cook');
-  await expectCount(page, 3);
   await openRecipeFilters(page);
   await expect(
     page.getByRole('checkbox', { name: 'Use only selected inventory', exact: true }),
@@ -233,9 +231,9 @@ test('searches a chosen provider explicitly and applies filters to its grid and 
   await expect(page.locator('.kitchen-hub .recipe-grid')).toHaveCount(1);
   await expect(cards(page).filter({ hasText: 'Wikibooks' })).toHaveCount(0);
   await expect(page.locator('.library-results')).toContainText('RecipeAPI.io');
-  await choose(page, 'Availability', 'Ready to cook');
-  await expectCount(page, 2);
-  await allRecipes(page);
+  await choose(page, 'Recipe cuisine', 'American');
+  await expectCount(page, 1);
+  await clearRecipeFilters(page);
   await choose(page, 'Recipe category', 'Soup');
   await expectCount(page, 2);
   await choose(page, 'Recipe cuisine', 'Japanese');
@@ -257,12 +255,12 @@ test('searches a chosen provider explicitly and applies filters to its grid and 
   await closeRecipeFilters(page);
 });
 
-test('filters personal imports separately from saved provider, own, and AI recipes while preserving readiness', async ({
+test('filters personal imports separately from saved provider, own, and AI recipes while preserving cuisine and quantity details', async ({
   page,
 }) => {
   const saved: Recipe[] = [
     {
-      ...makeRecipe('imported:rice', 'Personal rice bowl', ['Rice']),
+      ...makeRecipe('imported:rice', 'Personal rice bowl', ['Rice'], 'Dinner', 'Japanese'),
       source: { type: 'imported' },
     },
     {
@@ -291,7 +289,7 @@ test('filters personal imports separately from saved provider, own, and AI recip
   await expect(page.getByRole('heading', { name: 'Saved provider rice', exact: true })).toHaveCount(
     0,
   );
-  await choose(page, 'Availability', 'Ready to cook');
+  await choose(page, 'Recipe cuisine', 'Japanese');
   await expectCount(page, 1);
   const query = page.getByRole('textbox', { name: 'Find recipes', exact: true });
   await query.fill('rice');
@@ -306,7 +304,8 @@ test('filters personal imports separately from saved provider, own, and AI recip
   await expectCount(page, 1);
   await expect(cards(page)).toContainText('AI eggs');
   await choose(page, 'Recipe collection', 'Saved recipes');
-  await expectCount(page, 4);
+  await expectCount(page, 5);
+  await expect(cards(page).filter({ hasText: 'Personal pasta dish' })).toContainText('3 short');
   await allRecipes(page);
   await expectCount(page, 11);
   await choose(page, 'Recipe source', 'RecipeAPI.io');
@@ -320,7 +319,7 @@ test('filters personal imports separately from saved provider, own, and AI recip
   await expectCount(page, 2);
 });
 
-test('keeps a pending search valid when changing a presentation filter and applies it on arrival', async ({
+test('keeps pending paging valid when changing a presentation filter and applies it on arrival', async ({
   page,
 }) => {
   let release: () => void = () => {};
@@ -329,36 +328,47 @@ test('keeps a pending search valid when changing a presentation filter and appli
   });
   let requests = 0;
   await page.route('https://mise.example.workers.dev/recipes/search', async (route) => {
+    const input = route.request().postDataJSON();
     requests++;
-    await waiting;
+    if (input.page === 2) await waiting;
     await route.fulfill({
-      status: 200,
-      contentType: 'application/json',
-      body: JSON.stringify({
+      json: {
         provider: 'recipeapi',
         storage: 'personal',
         recipes: [
-          makeRecipe('recipeapi:20', 'Remote rice soup', ['Rice']),
-          makeRecipe('recipeapi:21', 'Remote pasta soup', ['Pasta', 'Basil', 'Tomatoes']),
+          makeRecipe(
+            `recipeapi:rice-${input.page}`,
+            `Remote rice soup ${input.page}`,
+            ['Rice'],
+            'Soup',
+          ),
+          makeRecipe(
+            `recipeapi:pasta-${input.page}`,
+            `Remote pasta dish ${input.page}`,
+            ['Pasta', 'Basil', 'Tomatoes'],
+            'Dinner',
+          ),
         ],
-        page: 1,
-        hasMore: false,
+        page: input.page,
+        hasMore: input.page === 1,
         warnings: [],
-      }),
+      },
     });
   });
   await navigateRecipes(page);
   await choose(page, 'Recipe source', 'RecipeAPI.io');
-  await page.getByRole('textbox', { name: 'Find recipes', exact: true }).fill('soup');
+  await page.getByRole('textbox', { name: 'Find recipes', exact: true }).fill('dinner');
   await page.getByRole('button', { name: 'Search RecipeAPI.io', exact: true }).click();
-  await expect.poll(() => requests).toBe(1);
-  await choose(page, 'Availability', 'Ready to cook');
-  release();
-  await expectCount(page, 1);
-  await expect(cards(page)).toContainText('Remote rice soup');
-  await allRecipes(page);
   await expectCount(page, 2);
-  expect(requests).toBe(1);
+  await page.getByRole('button', { name: 'Load more from RecipeAPI.io', exact: true }).click();
+  await expect.poll(() => requests).toBe(2);
+  await choose(page, 'Recipe category', 'Soup');
+  release();
+  await expectCount(page, 2);
+  await expect(cards(page).locator('h3')).toHaveText(['Remote rice soup 1', 'Remote rice soup 2']);
+  await clearRecipeFilters(page);
+  await expectCount(page, 4);
+  expect(requests).toBe(2);
 });
 
 test('loads provider pages with the submitted query and invalidates paging when the query changes', async ({
@@ -546,7 +556,7 @@ for (const provider of [
   });
 }
 
-test('reveals recipes hidden by readiness without changing selected inventory or repeating the search', async ({
+test('reveals recipes hidden by category without changing selected inventory or repeating the search', async ({
   page,
 }) => {
   const requests: { provider: string; query: string; ingredients?: string[] }[] = [];
@@ -558,7 +568,10 @@ test('reveals recipes hidden by readiness without changing selected inventory or
       body: JSON.stringify({
         provider: 'recipeapi',
         storage: 'personal',
-        recipes: [makeRecipe('recipeapi:700', 'Remote egg dish', ['Eggs'])],
+        recipes:
+          requests.length === 1
+            ? [makeRecipe('recipeapi:699', 'Remote rice soup', ['Rice'], 'Soup')]
+            : [makeRecipe('recipeapi:700', 'Remote egg dish', ['Eggs'], 'Dinner')],
         page: 1,
         hasMore: false,
         warnings: [],
@@ -568,8 +581,10 @@ test('reveals recipes hidden by readiness without changing selected inventory or
   await page.getByRole('checkbox', { name: 'Select Rice in Pantry', exact: true }).check();
   await navigateRecipes(page);
   await setPreference(page, 'Use only selected inventory', true);
-  await choose(page, 'Availability', 'Ready to cook');
   await choose(page, 'Recipe source', 'RecipeAPI.io');
+  await page.getByRole('button', { name: 'Search RecipeAPI.io', exact: true }).click();
+  await expectCount(page, 1);
+  await choose(page, 'Recipe category', 'Soup');
   await page.getByRole('button', { name: 'Search RecipeAPI.io', exact: true }).click();
   await expect(
     page.getByRole('heading', { name: 'Your filters hide these recipes.', exact: true }),
@@ -591,6 +606,7 @@ test('reveals recipes hidden by readiness without changing selected inventory or
     '1 recipes loaded · 1 match your filters.',
   );
   expect(requests).toEqual([
+    expect.objectContaining({ provider: 'recipeapi', query: '', ingredients: ['rice'] }),
     expect.objectContaining({ provider: 'recipeapi', query: '', ingredients: ['rice'] }),
   ]);
 });
@@ -639,7 +655,7 @@ test('searches Spoonacular with one chosen ingredient while matching the whole i
     'Eggs',
   ]);
   const shortRecipe = {
-    ...makeRecipe('spoonacular:802', 'Remote large rice dish', ['Rice']),
+    ...makeRecipe('spoonacular:802', 'Remote large rice dish', ['Rice'], 'Breakfast'),
     ingredients: [{ name: 'Rice', quantity: 600, unit: 'g' as const }],
   };
   await page.route('https://mise.example.workers.dev/recipes/search', async (route) => {
@@ -679,18 +695,18 @@ test('searches Spoonacular with one chosen ingredient while matching the whole i
     'Ready to cook',
   );
   await expect(discoveryCards.filter({ hasText: 'Remote rice carrot eggs' })).toContainText(
-    '3 ingredients on hand',
+    '3 matching ingredients · 0 short',
   );
   await expect(discoveryCards.filter({ hasText: 'Remote large rice dish' })).toContainText(
     'Almost ready',
   );
   await expect(discoveryCards.filter({ hasText: 'Remote large rice dish' })).toContainText(
-    '1 ingredient short',
+    '1 matching ingredient · 1 short',
   );
   expect(requests).toEqual([
     expect.objectContaining({ provider: 'spoonacular', query: '', ingredients: ['rice'] }),
   ]);
-  await choose(page, 'Availability', 'Ready to cook');
+  await choose(page, 'Recipe category', 'Dinner');
   await expect(discoveryCards).toHaveCount(1);
   await expect(discoveryCards).toContainText('Remote rice carrot eggs');
   expect(requests).toHaveLength(1);

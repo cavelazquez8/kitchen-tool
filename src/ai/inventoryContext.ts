@@ -1,3 +1,4 @@
+import { currentStockProductIds } from '../domain/inventory';
 import { generateMarkdown } from '../domain/export';
 import {
   MAX_ASSISTANT_INVENTORY_PRODUCTS,
@@ -29,7 +30,22 @@ export function normalizeAssistantInventoryContext(value?: unknown): AssistantIn
       ),
     ),
   ].slice(0, MAX_ASSISTANT_INVENTORY_PRODUCTS);
-  return { mode, productIds };
+  const preferred =
+    'preferredProductIds' in value && Array.isArray(value.preferredProductIds)
+      ? value.preferredProductIds
+      : [];
+  const preferredProductIds = [
+    ...new Set(
+      preferred.filter(
+        (id): id is string =>
+          typeof id === 'string' &&
+          id.trim().length > 0 &&
+          id.length <= MAX_ASSISTANT_PRODUCT_ID_LENGTH &&
+          (mode !== 'selected' || productIds.includes(id)),
+      ),
+    ),
+  ].slice(0, MAX_ASSISTANT_INVENTORY_PRODUCTS);
+  return { mode, productIds, ...(preferredProductIds.length ? { preferredProductIds } : {}) };
 }
 
 export function assistantInventoryContextForSession(
@@ -68,10 +84,19 @@ export function assistantInventoryMarkdown(
   if (preference.mode === 'none')
     return 'Inventory not shared for this message. Availability has not been checked.';
   const inventory = assistantInventory(state, preference);
-  if (preference.mode === 'all') return generateMarkdown(inventory, { includeTools: true });
+  const preferred = new Set(preference.preferredProductIds ?? []);
+  const inStock = currentStockProductIds(inventory);
+  const names = inventory.products
+    .filter((product) => preferred.has(product.id) && inStock.has(product.id))
+    .map((product) => product.name);
+  const priorities = names.length
+    ? `Ingredient preferences (soft, not required): ${names.join('; ')}. Favor recipes using these when they fit the current request. Do not exclude other recipes, force substitutions, or change a publisher recipe just to use them. If no suitable recipe uses them all, suggest a good fit and explain which preferred ingredients it uses and which it leaves out. The user's current request takes precedence.\n\n`
+    : '';
+  if (preference.mode === 'all')
+    return priorities + generateMarkdown(inventory, { includeTools: true });
   const scope =
     'Only selected ingredients are shared below. This is a partial inventory; other food and kitchen tools are not shared. Do not assume unlisted items are missing or unavailable.';
   if (!inventory.products.length)
     return `${scope}\n\nNo ingredients selected for this message. Availability has not been checked.`;
-  return `${scope}\n\n${generateMarkdown(inventory, { includeTools: false })}`;
+  return `${priorities}${scope}\n\n${generateMarkdown(inventory, { includeTools: false })}`;
 }

@@ -113,7 +113,7 @@ test('browses one searchable cookbook grid with sorting and source attribution',
   const cards = page.locator('.recipe-grid .recipe-card');
   await expect(cards).toHaveCount(4);
   await expect(page.getByRole('region', { name: 'Recipe starting points' })).toHaveCount(0);
-  await chooseRecipeSort(page, 'Name A–Z');
+  await chooseRecipeSort(page, 'Name');
   expect(await cards.locator('h3').allTextContents()).toEqual(
     fixtures.map((recipe) => recipe.title).sort((a, b) => a.localeCompare(b)),
   );

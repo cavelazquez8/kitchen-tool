@@ -161,7 +161,7 @@
   display: flex;
   align-items: center;
   gap: 13px;
-  padding: 14px;
+  padding: 0 8px 0 0;
   min-height: 72px;
   cursor: pointer;
   touch-action: pan-y;
@@ -178,7 +178,7 @@
   outline: 2px solid #aecbb8;
   outline-offset: -3px;
 }
-.inventory-context-item > span {
+.inventory-context-item-selection > span {
   min-width: 0;
 }
 .inventory-context-item small.inventory-context-brand {
@@ -262,4 +262,69 @@
   .inventory-context-ingredients {
     margin-top: 12px;
   }
+}
+
+.inventory-context-item-selection {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex: 1;
+  min-width: 0;
+  padding: 14px;
+  cursor: pointer;
+}
+.inventory-context-item-selection > span {
+  flex: 1;
+}
+.inventory-priority-button {
+  display: grid;
+  place-items: center;
+  flex: 0 0 44px;
+  width: 44px;
+  min-height: 44px;
+  border-radius: 10px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: #9cab9f;
+}
+.inventory-priority-button[aria-pressed='true'] {
+  color: #ead2a2;
+  background: #423c2c;
+  border-color: #796744;
+}
+.inventory-priority-button:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+.inventory-priorities-toggle {
+  min-height: 44px;
+  margin-top: 8px;
+  font-size: 12px;
+}
+.inventory-priorities-note {
+  margin-bottom: 12px;
+}
+
+@media (max-height: 760px) {
+  .inventory-context-modes {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 6px;
+  }
+  .inventory-context-mode {
+    flex-direction: column;
+    justify-content: center;
+    gap: 6px;
+    min-height: 78px;
+    padding: 9px 6px;
+    text-align: center;
+  }
+  .inventory-context-mode strong {
+    font-size: 12px;
+  }
+  .inventory-context-mode > svg {
+    display: none;
+  }
+}
+.inventory-context-item-selection:not(:has(input)) {
+  cursor: default;
 }

@@ -1,3 +1,4 @@
+import { currentStockProductIds } from '../domain/inventory';
 import type { InventoryState } from '../domain/types';
 import { canonicalIngredientName } from './identity';
 import { rankRecipes } from './matching';
@@ -239,6 +240,7 @@ export interface RecommendationOptions extends RecipePoolOptions {
   query?: string;
   limit?: number;
   prioritizeExpiration?: boolean;
+  preferredProductIds?: readonly string[];
   today?: string;
   /** If positive keywords find nothing, keep named exclusions and offer starter dishes. */
   fallbackToStarters?: boolean;
@@ -279,6 +281,13 @@ export function recommendRecipes(
       prioritizeExpiration,
     },
   );
+  const priorityIds = new Set(options.preferredProductIds ?? []);
+  const inStock = currentStockProductIds(inventory, options.today);
+  const priorityNames = new Set(
+    inventory.products
+      .filter((product) => priorityIds.has(product.id) && inStock.has(product.id))
+      .map((product) => canonicalIngredientName(product.ingredientName ?? product.name)),
+  );
   const scored = matches.flatMap((match) => {
     const relevance = relevanceById.get(match.recipe.id) ?? 0;
     const count = Math.max(1, match.ingredients.length);
@@ -303,6 +312,18 @@ export function recommendRecipes(
           relevance +
           stockScore * 3 +
           qualityScore +
+          Math.min(
+            3,
+            new Set(
+              match.ingredients
+                .filter(
+                  (item) =>
+                    item.status !== 'missing' &&
+                    priorityNames.has(canonicalIngredientName(item.ingredient.name)),
+                )
+                .map((item) => canonicalIngredientName(item.ingredient.name)),
+            ).size,
+          ) +
           starterScore +
           (prioritizeExpiration ? (match.useSoonCount / count) * 2 : 0),
       },

@@ -59,6 +59,8 @@ export interface ChatMessage {
 export interface AssistantInventoryContext {
   mode: 'all' | 'selected' | 'none';
   productIds: string[];
+  /** A soft preference, scoped to shared inventory; never a required-ingredient filter. */
+  preferredProductIds?: string[];
 }
 export const MAX_ASSISTANT_INVENTORY_PRODUCTS = 1000;
 export const MAX_ASSISTANT_PRODUCT_ID_LENGTH = 100;
@@ -121,7 +123,18 @@ export function isAssistantInventoryContext(value: unknown): value is AssistantI
         id.trim().length > 0 &&
         id.length <= MAX_ASSISTANT_PRODUCT_ID_LENGTH,
     ) &&
-    new Set(value.productIds).size === value.productIds.length
+    new Set(value.productIds).size === value.productIds.length &&
+    (value.preferredProductIds === undefined ||
+      (Array.isArray(value.preferredProductIds) &&
+        value.preferredProductIds.length <= MAX_ASSISTANT_INVENTORY_PRODUCTS &&
+        value.preferredProductIds.every(
+          (id) =>
+            typeof id === 'string' &&
+            id.trim().length > 0 &&
+            id.length <= MAX_ASSISTANT_PRODUCT_ID_LENGTH &&
+            (value.mode !== 'selected' || (value.productIds as string[]).includes(id)),
+        ) &&
+        new Set(value.preferredProductIds).size === value.preferredProductIds.length))
   );
 }
 

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Check, Search } from 'lucide-react';
+import { Check, Search, Star } from 'lucide-react';
 import {
   LOCATION_LABELS,
   MAX_ASSISTANT_INVENTORY_PRODUCTS,
@@ -8,7 +8,7 @@ import {
   type Batch,
   type InventoryState,
 } from '../domain/types';
-import { compareNames, formatQuantity } from '../domain/inventory';
+import { compareNames, currentStockProductIds, formatQuantity } from '../domain/inventory';
 import { Modal } from './Modal';
 import './inventoryContextPicker.css';
 
@@ -64,6 +64,8 @@ export function InventoryContextPicker({
 }: InventoryContextPickerProps) {
   const [mode, setMode] = useState(value.mode);
   const [selected, setSelected] = useState(() => new Set(value.productIds));
+  const [preferred, setPreferred] = useState(() => new Set(value.preferredProductIds ?? []));
+  const [prioritiesOpen, setPrioritiesOpen] = useState(Boolean(value.preferredProductIds?.length));
   const [query, setQuery] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -78,6 +80,7 @@ export function InventoryContextPicker({
     .filter((product) => batchesByProduct.has(product.id))
     .sort((a, b) => compareNames(a.name, b.name));
   const currentIds = new Set(products.map((product) => product.id));
+  const inStock = currentStockProductIds(inventory);
   const selectedIds = [...selected].filter((id) => currentIds.has(id));
   const normalizedQuery = query.trim().toLocaleLowerCase();
   const matches = products.filter((product) =>
@@ -88,6 +91,9 @@ export function InventoryContextPicker({
       .includes(normalizedQuery),
   );
   const selectedCount = selectedIds.length;
+  const preferredIds = [...preferred].filter(
+    (id) => inStock.has(id) && (mode !== 'selected' || selected.has(id)),
+  );
 
   function toggle(id: string) {
     setSelected((previous) => {
@@ -96,7 +102,21 @@ export function InventoryContextPicker({
       else if (next.size < MAX_ASSISTANT_INVENTORY_PRODUCTS) next.add(id);
       return next;
     });
+    setPreferred((previous) => {
+      const next = new Set(previous);
+      next.delete(id);
+      return next;
+    });
     setLimitNote('');
+  }
+
+  function togglePriority(id: string) {
+    setPreferred((previous) => {
+      const next = new Set(previous);
+      if (next.has(id)) next.delete(id);
+      else if (next.size < MAX_ASSISTANT_INVENTORY_PRODUCTS) next.add(id);
+      return next;
+    });
   }
 
   function selectResults() {
@@ -118,7 +138,11 @@ export function InventoryContextPicker({
     setBusy(true);
     setError('');
     try {
-      await onSave({ mode, productIds: selectedIds });
+      await onSave({
+        mode,
+        productIds: selectedIds,
+        ...(preferredIds.length ? { preferredProductIds: preferredIds } : {}),
+      });
       onClose();
     } catch (reason) {
       setError(
@@ -174,8 +198,27 @@ export function InventoryContextPicker({
             ))}
           </fieldset>
 
-          {mode === 'selected' && (
+          {mode === 'all' && (
+            <button
+              type="button"
+              className="text-button inventory-priorities-toggle"
+              aria-expanded={prioritiesOpen}
+              disabled={busy}
+              onClick={() => setPrioritiesOpen((open) => !open)}
+            >
+              <Star size={16} aria-hidden="true" />
+              {prioritiesOpen ? 'Hide ingredient preferences' : 'Prioritize ingredients'}
+              {preferredIds.length > 0 ? ` (${preferredIds.length})` : ''}
+            </button>
+          )}
+          {(mode === 'selected' || (mode === 'all' && prioritiesOpen)) && (
             <section className="inventory-context-ingredients" aria-label="Choose ingredients">
+              <p
+                className="inventory-context-note inventory-priorities-note"
+                id="ingredient-priority-help"
+              >
+                Star ingredients to use first. Gemini can still suggest other recipes.
+              </p>
               <label className="inventory-context-search">
                 <Search size={18} aria-hidden="true" />
                 <input
@@ -190,31 +233,38 @@ export function InventoryContextPicker({
               </label>
               <div className="inventory-context-selection">
                 <span role="status" aria-live="polite">
-                  {selectedCount} selected
+                  {mode === 'selected' ? `${selectedCount} selected` : 'All inventory shared'}
+                  {preferredIds.length > 0 ? ` · ${preferredIds.length} prioritized` : ''}
                 </span>
                 <div>
-                  <button
-                    type="button"
-                    className="text-button"
-                    onClick={selectResults}
-                    disabled={
-                      busy ||
-                      matches.length === 0 ||
-                      matches.every((product) => selected.has(product.id))
-                    }
-                  >
-                    Select all results
-                  </button>
+                  {mode === 'selected' && (
+                    <button
+                      type="button"
+                      className="text-button"
+                      onClick={selectResults}
+                      disabled={
+                        busy ||
+                        matches.length === 0 ||
+                        matches.every((product) => selected.has(product.id))
+                      }
+                    >
+                      Select all results
+                    </button>
+                  )}
                   <button
                     type="button"
                     className="text-button"
                     onClick={() => {
-                      setSelected(new Set());
+                      if (mode === 'selected') setSelected(new Set());
+                      setPreferred(new Set());
                       setLimitNote('');
                     }}
-                    disabled={busy || selectedCount === 0}
+                    disabled={
+                      busy ||
+                      (mode === 'selected' ? selectedCount === 0 : preferredIds.length === 0)
+                    }
                   >
-                    Clear
+                    {mode === 'selected' ? 'Clear' : 'Clear priorities'}
                   </button>
                 </div>
               </div>
@@ -223,7 +273,7 @@ export function InventoryContextPicker({
                   {limitNote}
                 </p>
               )}
-              {selectedCount === 0 && products.length > 0 && (
+              {mode === 'selected' && selectedCount === 0 && products.length > 0 && (
                 <p className="inventory-context-note">
                   No ingredients selected. Your inventory will not be shared.
                 </p>
@@ -235,28 +285,56 @@ export function InventoryContextPicker({
                     batches.some((batch) => batch.location === location),
                   ).map((location) => LOCATION_LABELS[location]);
                   return (
-                    <label className="inventory-context-item" key={product.id}>
-                      <input
-                        type="checkbox"
-                        checked={selected.has(product.id)}
+                    <div className="inventory-context-item" key={product.id}>
+                      <label className="inventory-context-item-selection">
+                        {mode === 'selected' && (
+                          <input
+                            type="checkbox"
+                            checked={selected.has(product.id)}
+                            disabled={
+                              busy ||
+                              (!selected.has(product.id) &&
+                                selectedCount >= MAX_ASSISTANT_INVENTORY_PRODUCTS)
+                            }
+                            onChange={() => toggle(product.id)}
+                          />
+                        )}
+                        <span>
+                          <strong>{product.name}</strong>
+                          {product.brand && (
+                            <small className="inventory-context-brand">{product.brand}</small>
+                          )}
+                          <small>
+                            {locations.join(' · ')} <span aria-hidden="true">—</span>{' '}
+                            {quantitySummary(batches)}
+                          </small>
+                          {!inStock.has(product.id) && (
+                            <small>Update stock or date to prioritize.</small>
+                          )}
+                        </span>
+                      </label>
+                      <button
+                        type="button"
+                        className="inventory-priority-button"
+                        aria-label={`Prioritize ${product.name}`}
+                        aria-pressed={preferredIds.includes(product.id)}
+                        aria-describedby="ingredient-priority-help"
                         disabled={
                           busy ||
-                          (!selected.has(product.id) &&
-                            selectedCount >= MAX_ASSISTANT_INVENTORY_PRODUCTS)
+                          !inStock.has(product.id) ||
+                          (mode === 'selected' && !selected.has(product.id)) ||
+                          (!preferred.has(product.id) &&
+                            preferredIds.length >= MAX_ASSISTANT_INVENTORY_PRODUCTS)
                         }
-                        onChange={() => toggle(product.id)}
-                      />
-                      <span>
-                        <strong>{product.name}</strong>
-                        {product.brand && (
-                          <small className="inventory-context-brand">{product.brand}</small>
-                        )}
-                        <small>
-                          {locations.join(' · ')} <span aria-hidden="true">—</span>{' '}
-                          {quantitySummary(batches)}
-                        </small>
-                      </span>
-                    </label>
+                        onClick={() => togglePriority(product.id)}
+                      >
+                        <Star
+                          size={19}
+                          aria-hidden="true"
+                          fill={preferredIds.includes(product.id) ? 'currentColor' : 'none'}
+                        />
+                      </button>
+                    </div>
                   );
                 })}
                 {matches.length === 0 && (

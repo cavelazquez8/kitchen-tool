@@ -101,12 +101,11 @@ describe('optional recipe source UI', () => {
     await screen.findByRole('heading', { name: 'Carrot soup' });
     const drawer = await openFilters(user);
     await user.click(within(drawer).getByRole('checkbox', { name: 'Use only selected inventory' }));
-    await user.click(within(drawer).getByRole('combobox', { name: 'Availability' }));
-    await user.click(screen.getByRole('option', { name: 'Ready to cook' }));
     await user.click(within(drawer).getByRole('button', { name: 'Show recipes' }));
-    expect(screen.queryByRole('heading', { name: 'Milk pudding' })).not.toBeInTheDocument();
+    const milkCard = screen.getByRole('heading', { name: 'Milk pudding' }).closest('article')!;
+    expect(within(milkCard).getByText('Almost ready')).toBeVisible();
     rerender(<KitchenHub {...common} inventory={inventory} selectedBatchIds={[]} page="recipes" />);
-    expect(await screen.findByRole('heading', { name: 'Milk pudding' })).toBeVisible();
+    expect(within(milkCard).getByText('Ready to cook')).toBeVisible();
     const updatedDrawer = await openFilters(user);
     expect(
       within(updatedDrawer).queryByRole('checkbox', { name: 'Use only selected inventory' }),

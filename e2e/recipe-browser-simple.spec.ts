@@ -120,9 +120,11 @@ test('starts with saved recipes and keeps searching, filters, sorting, and reset
   await expect(drawer.getByRole('combobox', { name: 'Recipe collection', exact: true })).toHaveText(
     'Saved recipes',
   );
-  await expect(drawer.getByRole('combobox', { name: 'Availability', exact: true })).toHaveText(
-    'Any recipe',
-  );
+  await expect(drawer.getByRole('heading', { name: 'Availability', exact: true })).toHaveCount(0);
+  await expect(drawer.getByRole('heading', { name: 'Your kitchen', exact: true })).toHaveCount(0);
+  await expect(
+    drawer.getByRole('heading', { name: 'Category & cuisine', exact: true }),
+  ).toBeVisible();
   await page.screenshot({
     path: `/tmp/mise-recipes-simple-filters-${testInfo.project.name}.png`,
     fullPage: false,
@@ -134,8 +136,8 @@ test('starts with saved recipes and keeps searching, filters, sorting, and reset
   await expect(cards(page)).toContainText('My tomato pasta');
   await page.getByRole('button', { name: 'Remove Italian filter', exact: true }).click();
   await expect(cards(page)).toHaveCount(6);
-  await chooseRecipeFilter(page, 'Availability', 'Ready to cook');
-  await expect(cards(page)).toHaveCount(3);
+  await chooseRecipeFilter(page, 'Recipe cuisine', 'French');
+  await expect(cards(page)).toHaveCount(2);
   await chooseRecipeFilter(page, 'Recipe category', 'Soup');
   await expect(cards(page)).toHaveCount(1);
   await expect(cards(page)).toContainText('My carrot soup');
@@ -146,14 +148,14 @@ test('starts with saved recipes and keeps searching, filters, sorting, and reset
   await expect(cards(page)).toHaveCount(2);
   await query.fill('');
   await expect(cards(page)).toHaveCount(6);
-  await chooseRecipeSort(page, 'Name A–Z');
+  await chooseRecipeSort(page, 'Name');
   expect(await cards(page).locator('h3').allTextContents()).toEqual(
     [...saved, ...bundled].map((item) => item.title).sort((a, b) => a.localeCompare(b)),
   );
-  await chooseRecipeSort(page, 'Fewest ingredients short');
+  await chooseRecipeSort(page, 'Most matches');
   await expect(cards(page).first()).toContainText('Ready to cook');
   await expect(cards(page).last()).toContainText('C three-bean salad');
-  await expect(cards(page).last()).toContainText('3 ingredients short');
+  await expect(cards(page).last()).toContainText('0 matching ingredients · 3 short');
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   expect(
     await page.evaluate((key) => JSON.parse(localStorage.getItem(key)!).state, inventoryKey),
@@ -186,11 +188,11 @@ test('keeps external search explicit and sorts or filters loaded recipes without
   expect(requests).toHaveLength(0);
   await page.getByRole('button', { name: 'Search RecipeAPI.io', exact: true }).click();
   await expect(cards(page)).toHaveCount(2);
-  await chooseRecipeSort(page, 'Name A–Z');
+  await chooseRecipeSort(page, 'Name');
   await expect(cards(page).first()).toContainText('A remote pasta plate');
-  await chooseRecipeSort(page, 'Fewest ingredients short');
+  await chooseRecipeSort(page, 'Most matches');
   await expect(cards(page).first()).toContainText('Z remote rice plate');
-  await chooseRecipeFilter(page, 'Availability', 'Ready to cook');
+  await chooseRecipeFilter(page, 'Recipe cuisine', 'Japanese');
   await expect(cards(page)).toHaveCount(1);
   await expect(cards(page)).toContainText('Z remote rice plate');
   await clearRecipeFilters(page);

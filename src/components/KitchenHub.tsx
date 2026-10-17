@@ -29,7 +29,7 @@ import {
 } from 'lucide-react';
 import type { InventoryState, ShoppingItem } from '../domain/types';
 import type { InventoryReducer } from '../lib/repository';
-import { formatQuantity } from '../domain/inventory';
+import { currentStockProductIds, formatQuantity } from '../domain/inventory';
 import { matchRecipe, buildShoppingList } from '../recipes/matching';
 import { canPersistProviderRecipe } from '../recipes/providers';
 import { isRecipe, type Recipe } from '../recipes/types';
@@ -299,6 +299,9 @@ export function KitchenHub({
     () => new Set(chatInventory.batches.map((batch) => batch.productId)).size,
     [chatInventory.batches],
   );
+  const prioritizedIngredientCount = [...currentStockProductIds(chatInventory)].filter((id) =>
+    inventoryContext.preferredProductIds?.includes(id),
+  ).length;
   const inventoryContextLabel =
     inventoryContext.mode === 'all'
       ? 'All inventory'
@@ -577,6 +580,7 @@ export function KitchenHub({
               limit: 12,
               fallbackToStarters: grounded,
               includeAiRecipes: true,
+              preferredProductIds: inventoryContext.preferredProductIds,
             },
           )
         : [];
@@ -1333,6 +1337,7 @@ export function KitchenHub({
             >
               <PackageCheck size={15} />
               {inventoryContextLabel}
+              {prioritizedIngredientCount > 0 ? ` · ${prioritizedIngredientCount} prioritized` : ''}
               <ChevronDown size={14} aria-hidden="true" />
             </button>
             <button
@@ -1589,6 +1594,22 @@ export function KitchenHub({
                 {detail.author && detail.totalMinutes !== undefined ? ' · ' : ''}
                 {detail.totalMinutes !== undefined ? detail.totalMinutes + ' minutes' : ''}
               </p>
+            )}
+            {(detail.category || detail.cuisine) && (
+              <dl className="recipe-label-summary">
+                {detail.category && (
+                  <div>
+                    <dt>Category</dt>
+                    <dd>{detail.category}</dd>
+                  </div>
+                )}
+                {detail.cuisine && (
+                  <div>
+                    <dt>Cuisine</dt>
+                    <dd>{detail.cuisine}</dd>
+                  </div>
+                )}
+              </dl>
             )}
             <RecipeServingsControl
               originalServings={detail.servings}

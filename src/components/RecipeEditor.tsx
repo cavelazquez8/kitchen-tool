@@ -4,6 +4,7 @@ import { Modal } from './Modal';
 import { Autocomplete } from './Autocomplete';
 import { FOOD_CATALOG } from '../recipes/catalog';
 import { isRecipe, type Recipe } from '../recipes/types';
+import './recipeBrowser.css';
 export function RecipeEditor({
   initial,
   onClose,
@@ -16,6 +17,8 @@ export function RecipeEditor({
   notes?: readonly string[];
 }) {
   const [draft, setDraft] = useState(initial);
+  const [category, setCategory] = useState(initial.category ?? '');
+  const [cuisine, setCuisine] = useState(initial.cuisine ?? '');
   const [steps, setSteps] = useState(initial.steps.join('\n'));
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
@@ -31,6 +34,8 @@ export function RecipeEditor({
     event.preventDefault();
     const recipe = {
       ...draft,
+      category: category.trim() || undefined,
+      cuisine: cuisine.trim() || undefined,
       title: draft.title.trim(),
       ingredients: draft.ingredients.map((i) => ({ ...i, name: i.name.trim() })),
       steps: steps
@@ -80,6 +85,32 @@ export function RecipeEditor({
             onChange={(e) => setDraft({ ...draft, title: e.target.value })}
           />
         </label>
+        <fieldset className="recipe-label-editor">
+          <legend>
+            Category &amp; cuisine <span className="optional">optional</span>
+          </legend>
+          <p className="field-note">Use your own labels. They appear in recipe filters.</p>
+          <div className="recipe-label-fields">
+            <label>
+              Category
+              <input
+                value={category}
+                maxLength={100}
+                placeholder="e.g. Meal prep"
+                onChange={(event) => setCategory(event.target.value)}
+              />
+            </label>
+            <label>
+              Cuisine
+              <input
+                value={cuisine}
+                maxLength={100}
+                placeholder="e.g. Mexican"
+                onChange={(event) => setCuisine(event.target.value)}
+              />
+            </label>
+          </div>
+        </fieldset>
         <label>
           Original recipe servings <span className="optional">optional</span>
           <input

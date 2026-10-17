@@ -64,12 +64,15 @@ Recipe details show the source serving yield and ingredient multiplier. A target
 six servings for an original four-serving recipe multiplies each recorded ingredient
 by 1.5; missing source amounts or yield are never guessed. Original cooking instructions
 stay as published. Invalid targets must be corrected before planning, shopping, or
-reviewing consumption. Recipe browsing can sort by **Fewest ingredients short**, counting
-missing ingredients and known shortages separately from amounts that need review.
+reviewing consumption. Recipe browsing offers **Name** and **Most matches**. Most matches
+counts distinct canonical ingredient identities recorded in usable stock, including unknown
+or insufficient quantities. More matches rank first even if more shopping is needed;
+shortages and amounts needing review remain visible separately.
 
 The Recipes page starts with the collection and a compact search toolbar. **Sort by**
-contains ordering choices; **Filters** opens the collection, availability, source,
-cuisine, category, and inventory controls. Active filters can be removed individually.
+contains the two ordering choices; **Filters** opens collection, source, cuisine,
+category, and ingredient preferences. **Edit & save** on a recipe lets users fill, change,
+or clear its category and cuisine. Saved labels override source metadata in filters. Active filters can be removed individually.
 The separate Everyday picks/discovery panel has been removed.
 
 Assistant suggestions, attachments, conversation text and the draft are saved with the
@@ -94,3 +97,14 @@ upgrade notice; their missing tools are not represented as working web discovery
 Live publisher imports have been checked on Budget Bytes, RecipeTin Eats and
 Spend With Pennies. Search orchestration is covered by mocked protocol and native
 Worker tests; a user's live Gemini/Tavily search requires their configured accounts.
+
+## Ingredient preferences
+
+In **Inventory in this chat**, stars mark ingredients to prefer. In Choose ingredients
+mode, only shared ingredients can be starred. In All inventory mode, expand
+**Prioritize ingredients** to choose stars without restricting shared inventory.
+Stars do not change the kitchen or shopping list. They add a bounded bonus to the
+cookbook shortlist and explicit soft preferences to Gemini/copy context; query relevance,
+exclusions, original recipes and alternative dishes remain available. None mode shares
+no inventory or priorities. Preferences survive navigation and backup/restore.
+Empty or past-date stock must be reviewed before it can be prioritized.

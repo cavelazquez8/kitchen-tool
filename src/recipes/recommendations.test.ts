@@ -250,3 +250,89 @@ describe('recipe-first local discovery', () => {
     ).toBe('apple');
   });
 });
+
+describe('soft inventory ingredient priorities', () => {
+  function priorityKitchen(): InventoryState {
+    return {
+      products: [
+        { id: 'apple', name: 'Market apples', ingredientName: 'Apples', isStaple: false },
+        { id: 'carrot', name: 'Market carrots', ingredientName: 'Carrots', isStaple: false },
+      ],
+      batches: ['apple', 'carrot'].map((productId) => ({
+        id: `batch-${productId}`,
+        productId,
+        location: 'fridge',
+        quantity: 300,
+        unit: 'g',
+        purchasedOn: '2026-10-01',
+        expiresOn: null,
+      })),
+      tools: [],
+    };
+  }
+
+  it('favors a preferred ingredient without removing alternatives or rewriting source recipes', () => {
+    const apple = dish('apple', 'Apple supper', 'Apples');
+    const carrot = dish('carrot', 'Carrot supper', 'Carrots');
+    const chicken = dish('chicken', 'Chicken supper');
+    const recipes = [apple, carrot, chicken];
+    const original = JSON.stringify(recipes);
+    const inventory = priorityKitchen();
+    expect(recommendRecipes(recipes, inventory).map(({ id }) => id)).toEqual([
+      'apple',
+      'carrot',
+      'chicken',
+    ]);
+    const result = recommendRecipes(recipes, inventory, {
+      preferredProductIds: ['carrot'],
+      today: '2026-10-16',
+    });
+    expect(result).toEqual([carrot, apple, chicken]);
+    expect(result[0]).toBe(carrot);
+    expect(JSON.stringify(recipes)).toBe(original);
+  });
+
+  it('honors requested dishes and exclusions over priorities, including fallback searches', () => {
+    const apple = dish('apple', 'Apple supper', 'Apples');
+    const carrot = dish('carrot', 'Carrot supper', 'Carrots');
+    const recipes = [apple, carrot];
+    const options = { preferredProductIds: ['carrot'], today: '2026-10-16' };
+    expect(recommendRecipes(recipes, priorityKitchen(), { ...options, query: 'apples' })).toEqual([
+      apple,
+    ]);
+    expect(
+      recommendRecipes(recipes, priorityKitchen(), { ...options, query: 'no carrots' }),
+    ).toEqual([apple]);
+    expect(
+      recommendRecipes(recipes, priorityKitchen(), {
+        ...options,
+        query: 'unfindabledish without carrots',
+        fallbackToStarters: true,
+      }),
+    ).toEqual([apple]);
+    expect(
+      recommendRecipes(recipes, priorityKitchen(), { ...options, query: 'unfindabledish' }),
+    ).toEqual([]);
+  });
+
+  it('does not prefer unshared, deleted, empty, or past-date ingredients', () => {
+    const recipes = [
+      dish('apple', 'Apple supper', 'Apples'),
+      dish('carrot', 'Carrot supper', 'Carrots'),
+    ];
+    const options = { preferredProductIds: ['carrot', 'deleted'], today: '2026-10-16' };
+    expect(recommendRecipes(recipes, empty, options).map(({ id }) => id)).toEqual([
+      'apple',
+      'carrot',
+    ]);
+    for (const expired of [false, true]) {
+      const inventory = priorityKitchen();
+      inventory.batches[1].quantity = expired ? 300 : 0;
+      inventory.batches[1].expiresOn = expired ? '2026-10-15' : null;
+      expect(recommendRecipes(recipes, inventory, options).map(({ id }) => id)).toEqual([
+        'apple',
+        'carrot',
+      ]);
+    }
+  });
+});

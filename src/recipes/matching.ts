@@ -42,6 +42,8 @@ export interface RecipeMatch {
   missingCount: number;
   uncertainCount: number;
   matchedCount: number;
+  /** Distinct exact ingredient identities in usable stock, irrespective of amount. */
+  onHandCount: number;
   useSoonCount: number;
   warnings: string[];
 }
@@ -244,6 +246,15 @@ function matchIndexedRecipe(
   const matchedCount = ingredients.filter(
     (item) => item.status === 'available' || item.status === 'check',
   ).length;
+  const onHandCount = new Set(
+    demands
+      .filter(
+        (demand) =>
+          eligibleBatches(index, canonicalIngredientName(demand.ingredient.name), options).batches
+            .length > 0,
+      )
+      .map((demand) => canonicalIngredientName(demand.ingredient.name)),
+  ).size;
   const today = index.today;
   const cutoff = new Date(`${today}T12:00:00Z`);
   cutoff.setUTCDate(cutoff.getUTCDate() + 3);
@@ -259,6 +270,7 @@ function matchIndexedRecipe(
     missingCount,
     uncertainCount,
     matchedCount,
+    onHandCount,
     useSoonCount,
     warnings,
     status: missingCount > 0 ? 'almost' : uncertainCount > 0 ? 'check' : 'ready',

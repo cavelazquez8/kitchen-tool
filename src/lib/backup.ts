@@ -125,6 +125,13 @@ export function buildInventoryBackup(state: InventoryState): InventoryBackup {
                   inventoryContext: {
                     mode: state.assistantSession.inventoryContext.mode,
                     productIds: [...state.assistantSession.inventoryContext.productIds],
+                    ...(state.assistantSession.inventoryContext.preferredProductIds === undefined
+                      ? {}
+                      : {
+                          preferredProductIds: [
+                            ...state.assistantSession.inventoryContext.preferredProductIds,
+                          ],
+                        }),
                   },
                 }),
           },

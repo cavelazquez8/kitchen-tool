@@ -181,3 +181,147 @@ describe('chat inventory selection', () => {
     ).toBeVisible();
   });
 });
+
+describe('soft ingredient priorities', () => {
+  it('stars an ingredient independently of sharing and disables stars for unshared ingredients', async () => {
+    const { user, save } = setup({ mode: 'selected', productIds: ['a'] });
+    const carrots = screen.getByRole('checkbox', { name: /Garden carrots/ });
+    const priority = screen.getByRole('button', { name: 'Prioritize Garden carrots' });
+    expect(screen.getByRole('button', { name: 'Prioritize Greek yogurt' })).toBeDisabled();
+    await user.click(priority);
+    expect(priority).toHaveAttribute('aria-pressed', 'true');
+    expect(carrots).toBeChecked();
+    expect(screen.getByRole('status')).toHaveTextContent('1 selected · 1 prioritized');
+    await user.click(priority);
+    expect(priority).toHaveAttribute('aria-pressed', 'false');
+    expect(carrots).toBeChecked();
+    await user.click(priority);
+    await user.click(screen.getByRole('button', { name: 'Apply to chat' }));
+    expect(save).toHaveBeenCalledExactlyOnceWith({
+      mode: 'selected',
+      productIds: ['a'],
+      preferredProductIds: ['a'],
+    });
+  });
+
+  it('removes a priority when its ingredient is unshared and Clear also removes hidden priorities', async () => {
+    const { user, save } = setup({
+      mode: 'selected',
+      productIds: ['a', 'b'],
+      preferredProductIds: ['a', 'b'],
+    });
+    await user.click(screen.getByRole('checkbox', { name: /Garden carrots/ }));
+    const priority = screen.getByRole('button', { name: 'Prioritize Garden carrots' });
+    expect(priority).toBeDisabled();
+    expect(priority).toHaveAttribute('aria-pressed', 'false');
+    await user.click(screen.getByRole('checkbox', { name: /Garden carrots/ }));
+    expect(priority).toHaveAttribute('aria-pressed', 'false');
+    await user.type(screen.getByRole('searchbox'), 'milk');
+    await user.click(screen.getByRole('button', { name: 'Clear' }));
+    expect(screen.getByRole('status')).toHaveTextContent('0 selected');
+    await user.click(screen.getByRole('button', { name: 'Apply to chat' }));
+    expect(save).toHaveBeenCalledExactlyOnceWith({ mode: 'selected', productIds: [] });
+  });
+
+  it('lets all-inventory users choose and clear priorities without changing remembered selections', async () => {
+    const { user, save } = setup({ mode: 'all', productIds: ['a'] });
+    await user.click(screen.getByRole('button', { name: 'Prioritize ingredients' }));
+    expect(screen.queryByRole('checkbox')).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Prioritize Greek yogurt' }));
+    expect(screen.getByRole('status')).toHaveTextContent('All inventory shared · 1 prioritized');
+    await user.type(screen.getByRole('searchbox'), 'carrot');
+    await user.click(screen.getByRole('button', { name: 'Clear priorities' }));
+    expect(screen.getByRole('status')).not.toHaveTextContent('prioritized');
+    await user.click(screen.getByRole('button', { name: 'Apply to chat' }));
+    expect(save).toHaveBeenCalledExactlyOnceWith({ mode: 'all', productIds: ['a'] });
+  });
+
+  it('keeps saved priorities when reopened and discards a cancelled priority draft', async () => {
+    const value: AssistantInventoryContext = {
+      mode: 'all',
+      productIds: [],
+      preferredProductIds: ['a'],
+    };
+    let controls = setup(value);
+    expect(screen.getByRole('button', { name: 'Prioritize Garden carrots' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+    await controls.user.click(screen.getByRole('button', { name: 'Prioritize Greek yogurt' }));
+    await controls.user.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(controls.save).not.toHaveBeenCalled();
+    expect(value.preferredProductIds).toEqual(['a']);
+    cleanup();
+    controls = setup(value);
+    expect(screen.getByRole('button', { name: 'Prioritize Garden carrots' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+    expect(screen.getByRole('button', { name: 'Prioritize Greek yogurt' })).toHaveAttribute(
+      'aria-pressed',
+      'false',
+    );
+    await controls.user.click(screen.getByRole('button', { name: 'Prioritize Greek yogurt' }));
+    await controls.user.click(screen.getByRole('button', { name: 'Apply to chat' }));
+    const saved = controls.save.mock.calls[0][0] as AssistantInventoryContext;
+    cleanup();
+    setup(saved);
+    expect(screen.getByRole('button', { name: 'Prioritize Garden carrots' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+    expect(screen.getByRole('button', { name: 'Prioritize Greek yogurt' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+  });
+
+  it('retains a priority after a failed save and shares none while No inventory is selected', async () => {
+    const { user, save, close } = setup({
+      mode: 'selected',
+      productIds: ['a'],
+      preferredProductIds: ['a'],
+    });
+    save.mockRejectedValueOnce(new Error('Please retry saving.'));
+    await user.click(screen.getByRole('button', { name: 'Apply to chat' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('Please retry saving.');
+    expect(screen.getByRole('button', { name: 'Prioritize Garden carrots' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+    expect(close).not.toHaveBeenCalled();
+    await user.click(screen.getByRole('radio', { name: 'No inventory' }));
+    expect(
+      screen.queryByRole('button', { name: 'Prioritize Garden carrots' }),
+    ).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Apply to chat' }));
+    expect(save).toHaveBeenLastCalledWith({
+      mode: 'none',
+      productIds: ['a'],
+      preferredProductIds: ['a'],
+    });
+    expect(close).toHaveBeenCalledOnce();
+  });
+});
+
+it('disables ingredient priorities for empty or past-date stock', () => {
+  const state = inventory();
+  state.batches
+    .filter((batch) => batch.productId === 'a')
+    .forEach((batch) => {
+      batch.quantity = 0;
+    });
+  state.batches.find((batch) => batch.productId === 'b')!.expiresOn = '1900-01-01';
+  render(
+    <InventoryContextPicker
+      inventory={state}
+      value={{ mode: 'selected', productIds: ['a', 'b', 'c'], preferredProductIds: ['a', 'b'] }}
+      onSave={vi.fn()}
+      onClose={vi.fn()}
+    />,
+  );
+  expect(screen.getByRole('button', { name: 'Prioritize Garden carrots' })).toBeDisabled();
+  expect(screen.getByRole('button', { name: 'Prioritize Greek yogurt' })).toBeDisabled();
+  expect(screen.getByRole('button', { name: 'Prioritize Whole milk' })).toBeEnabled();
+  expect(screen.getByRole('status')).not.toHaveTextContent('prioritized');
+});

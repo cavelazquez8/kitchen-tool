@@ -250,6 +250,9 @@ test('retains selected ingredients across navigation, reload, and backup restora
   await picker.getByRole('radio', { name: 'Choose ingredients', exact: true }).check();
   await picker.getByRole('checkbox', { name: /Selected orchard carrots/ }).check();
   await picker.getByRole('checkbox', { name: /Excluded crimson lentils/ }).check();
+  await picker
+    .getByRole('button', { name: 'Prioritize Selected orchard carrots', exact: true })
+    .click();
   await picker.getByRole('button', { name: 'Apply to chat', exact: true }).click();
   await navigate(page, 'Inventory');
   await navigate(page, 'Gemini');
@@ -264,6 +267,9 @@ test('retains selected ingredients across navigation, reload, and backup restora
   ).toBeChecked();
   await expect(picker.getByRole('checkbox', { name: /Selected orchard carrots/ })).toBeChecked();
   await expect(picker.getByRole('checkbox', { name: /Excluded crimson lentils/ })).toBeChecked();
+  await expect(
+    picker.getByRole('button', { name: 'Prioritize Selected orchard carrots', exact: true }),
+  ).toHaveAttribute('aria-pressed', 'true');
   await picker.getByRole('button', { name: 'Apply to chat', exact: true }).click();
 
   await page
@@ -279,6 +285,7 @@ test('retains selected ingredients across navigation, reload, and backup restora
   expect(backup.inventory.assistantSession?.inventoryContext).toEqual({
     mode: 'selected',
     productIds: ['carrots', 'lentils'],
+    preferredProductIds: ['carrots'],
   });
   expect(backupText).not.toContain(backend);
   expect(backupText).not.toContain('test_only_');
@@ -311,6 +318,7 @@ test('retains selected ingredients across navigation, reload, and backup restora
   expect((await storedKitchen(page)).assistantSession?.inventoryContext).toEqual({
     mode: 'selected',
     productIds: ['carrots', 'lentils'],
+    preferredProductIds: ['carrots'],
   });
 });
 
@@ -420,4 +428,77 @@ test('scrolls long ingredient choices by touch while keeping Apply reachable on 
     ).toContainText('1 ingredient');
   }
   await touch.detach();
+});
+
+test('sends starred preferences only for shared inventory and keeps starring separate from selection', async ({
+  page,
+}, testInfo) => {
+  const requests = await recordRequests(page);
+  let picker = await openPicker(page);
+  await picker.getByRole('button', { name: 'Prioritize ingredients', exact: true }).click();
+  const carrotPriority = picker.getByRole('button', {
+    name: 'Prioritize Selected orchard carrots',
+    exact: true,
+  });
+  await carrotPriority.click();
+  await expect(carrotPriority).toHaveAttribute('aria-pressed', 'true');
+  await expect(picker.getByRole('checkbox')).toHaveCount(0);
+  await picker.getByRole('button', { name: 'Apply to chat', exact: true }).click();
+  await sendMessage(page);
+  await expect.poll(() => requests.length).toBe(1);
+  expect(requests[0].inventory).toContain(
+    'Ingredient preferences (soft, not required): Selected orchard carrots',
+  );
+  expect(requests[0].inventory).toContain('Do not exclude other recipes');
+
+  picker = await openPicker(page);
+  await picker.getByRole('radio', { name: 'Choose ingredients', exact: true }).check();
+  await expect(picker.getByRole('checkbox', { checked: true })).toHaveCount(0);
+  await expect(
+    picker.getByRole('button', { name: 'Prioritize Selected orchard carrots', exact: true }),
+  ).toBeDisabled();
+  const celery = picker.getByRole('checkbox', { name: /Excluded garden celery/ });
+  await celery.check();
+  await picker
+    .getByRole('button', { name: 'Prioritize Excluded garden celery', exact: true })
+    .click();
+  await expect(celery).toBeChecked();
+  await expect(picker.getByRole('checkbox', { checked: true })).toHaveCount(1);
+  await page.screenshot({
+    path: `/tmp/mise-ingredient-priorities-${testInfo.project.name}.png`,
+    fullPage: false,
+  });
+  await picker.getByRole('button', { name: 'Apply to chat', exact: true }).click();
+  await sendMessage(page);
+  await expect.poll(() => requests.length).toBe(2);
+  expect(requests[1].inventory).toContain(
+    'Ingredient preferences (soft, not required): Excluded garden celery',
+  );
+  expect(requests[1].inventory).not.toContain('Selected orchard carrots');
+  expect(requests[1].inventory).not.toContain('Excluded crimson lentils');
+  expect((await storedKitchen(page)).assistantSession?.inventoryContext).toEqual({
+    mode: 'selected',
+    productIds: ['celery'],
+    preferredProductIds: ['celery'],
+  });
+
+  picker = await openPicker(page);
+  await picker.getByRole('radio', { name: 'No inventory', exact: true }).check();
+  await picker.getByRole('button', { name: 'Apply to chat', exact: true }).click();
+  await sendMessage(page);
+  await expect.poll(() => requests.length).toBe(3);
+  expect(requests[2].inventory).toBe(
+    'Inventory not shared for this message. Availability has not been checked.',
+  );
+
+  picker = await openPicker(page);
+  await picker.getByRole('radio', { name: 'Choose ingredients', exact: true }).check();
+  await picker.getByRole('button', { name: 'Clear', exact: true }).click();
+  await picker.getByRole('button', { name: 'Apply to chat', exact: true }).click();
+  await sendMessage(page);
+  await expect.poll(() => requests.length).toBe(4);
+  expect(requests[3].inventory).toContain('No ingredients selected');
+  expect(requests[3].inventory).not.toContain('Ingredient preferences');
+  for (const product of inventory.products)
+    expect(requests[3].inventory).not.toContain(product.name);
 });

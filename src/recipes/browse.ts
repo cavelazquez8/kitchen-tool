@@ -5,7 +5,7 @@ import type { Recipe } from './types';
 
 export type BrowseSource = 'library' | 'themealdb' | 'recipeapi' | 'spoonacular';
 export type BrowseFilter = 'all' | 'ready' | 'close' | 'saved';
-export type BrowseOrder = 'kitchen' | 'browse' | 'fewest-short';
+export type BrowseOrder = 'kitchen' | 'browse' | 'fewest-short' | 'most-matches';
 export type RecipeCollection = 'all' | 'saved' | 'imported' | 'manual' | 'ai';
 
 export interface BrowseOptions {
@@ -50,6 +50,16 @@ export function browseRecipes(
       (a, b) =>
         (options.prioritizeExpiration ? b.useSoonCount - a.useSoonCount : 0) ||
         a.recipe.title.localeCompare(b.recipe.title),
+    );
+  if (options.order === 'most-matches')
+    matches.sort(
+      (a, b) =>
+        b.onHandCount - a.onHandCount ||
+        (options.prioritizeExpiration ? b.useSoonCount - a.useSoonCount : 0) ||
+        a.missingCount - b.missingCount ||
+        a.uncertainCount - b.uncertainCount ||
+        a.recipe.title.localeCompare(b.recipe.title) ||
+        a.recipe.id.localeCompare(b.recipe.id),
     );
   if (options.order === 'fewest-short')
     matches.sort(

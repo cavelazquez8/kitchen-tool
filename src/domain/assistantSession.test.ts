@@ -6,6 +6,7 @@ import {
   isInventoryState,
   type InventoryState,
 } from './types';
+import { updateAssistantSession } from '../ai/conversation';
 import { buildInventoryBackup } from '../lib/backup';
 import { createLocalRepository } from '../lib/localRepository';
 import type { Recipe } from '../recipes/types';
@@ -108,6 +109,9 @@ describe('persistent assistant recipe context', () => {
       { mode: 'none' as const, productIds: [] },
       { mode: 'selected' as const, productIds: [] },
       { mode: 'selected' as const, productIds: ['carrots', 'deleted-product'] },
+      { mode: 'all' as const, productIds: [], preferredProductIds: ['carrots'] },
+      { mode: 'none' as const, productIds: ['carrots'], preferredProductIds: ['carrots'] },
+      { mode: 'selected' as const, productIds: ['carrots'], preferredProductIds: ['carrots'] },
     ]) {
       localStorage.clear();
       const repository = createLocalRepository();
@@ -121,6 +125,17 @@ describe('persistent assistant recipe context', () => {
       expect(backup.inventory.assistantSession?.inventoryContext?.productIds).not.toBe(
         inventoryContext.productIds,
       );
+      if (inventoryContext.preferredProductIds) {
+        const copiedPriorities =
+          backup.inventory.assistantSession?.inventoryContext?.preferredProductIds;
+        expect(copiedPriorities).not.toBe(inventoryContext.preferredProductIds);
+        copiedPriorities!.push('new-product');
+        expect(inventoryContext.preferredProductIds).toEqual(['carrots']);
+      }
+      expect(
+        updateAssistantSession(repository.getSnapshot().state, { draft: 'Follow up' })
+          .assistantSession?.inventoryContext,
+      ).toEqual(inventoryContext);
     }
   });
 
@@ -177,5 +192,39 @@ describe('persistent assistant recipe context', () => {
     expect(JSON.stringify(backup)).not.toContain('PRIVATE_CONTEXT_TOKEN');
     backup.inventory.assistantSession!.inventoryContext!.productIds.push('new-product');
     expect(state.assistantSession.inventoryContext.productIds).toEqual(['carrots']);
+  });
+});
+
+describe('persisted ingredient priority validation', () => {
+  it('rejects invalid or out-of-scope preferred IDs instead of restoring invalid context', () => {
+    for (const preferredProductIds of [
+      null,
+      'carrots',
+      {},
+      [''],
+      [' '],
+      [42],
+      ['carrots', 'carrots'],
+      ['private'],
+      ['x'.repeat(MAX_ASSISTANT_PRODUCT_ID_LENGTH + 1)],
+      Array.from({ length: MAX_ASSISTANT_INVENTORY_PRODUCTS + 1 }, (_, index) => `id-${index}`),
+    ]) {
+      const inventoryContext = { mode: 'selected', productIds: ['carrots'], preferredProductIds };
+      expect(isAssistantSession({ ...session, inventoryContext })).toBe(false);
+      expect(
+        isInventoryState({
+          products: [],
+          batches: [],
+          tools: [],
+          assistantSession: { ...session, inventoryContext },
+        }),
+      ).toBe(false);
+    }
+    expect(
+      isAssistantSession({
+        ...session,
+        inventoryContext: { mode: 'selected', productIds: [], preferredProductIds: [] },
+      }),
+    ).toBe(true);
   });
 });

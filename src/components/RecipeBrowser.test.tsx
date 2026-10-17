@@ -21,6 +21,8 @@ function recipe(id: string, title: string, ingredients: Recipe['ingredients']): 
     servings: 2,
     ingredients,
     steps: ['Follow the recorded recipe.'],
+    category: id === 'ready' ? 'Soup' : 'Dinner',
+    cuisine: id === 'unknown' ? 'French' : 'American',
     source: { type: 'manual' },
   };
 }
@@ -29,6 +31,7 @@ const recipes = [
   recipe('two-short', 'Alpha dinner', [
     { name: 'Chicken breast', quantity: 600, unit: 'g' },
     { name: 'Rice', quantity: 100, unit: 'g' },
+    { name: 'Carrots', quantity: 100, unit: 'g' },
   ]),
   recipe('one-short', 'Bravo dinner', [{ name: 'Chicken breast', quantity: 600, unit: 'g' }]),
   recipe('unknown', 'Yankee dinner', [{ name: 'Carrots', quantity: 100, unit: 'g' }]),
@@ -115,7 +118,7 @@ afterEach(() => {
   localStorage.clear();
 });
 
-describe('recipe shortage sorting', () => {
+describe('recipe matching sorting', () => {
   it('sorts the current collection immediately, labels unknown amounts separately, and follows inventory edits', async () => {
     const kitchen = inventory();
     const initial = props(kitchen);
@@ -128,18 +131,25 @@ describe('recipe shortage sorting', () => {
       'Yankee dinner',
       'Zulu dinner',
     ]);
-    await choose(user, 'Sort by', 'Fewest ingredients short');
+    await user.click(screen.getByRole('combobox', { name: 'Sort by' }));
+    expect(screen.getAllByRole('option').map((option) => option.textContent)).toEqual([
+      'Name',
+      'Most matches',
+    ]);
+    await user.click(screen.getByRole('option', { name: 'Most matches' }));
     expect(cardTitles(container)).toEqual([
+      'Alpha dinner',
       'Zulu dinner',
       'Yankee dinner',
       'Bravo dinner',
-      'Alpha dinner',
     ]);
     const unknown = screen.getByRole('heading', { name: 'Yankee dinner' }).closest('article')!;
-    expect(within(unknown).getByText('0 ingredients short · 1 amount to check')).toBeVisible();
+    expect(
+      within(unknown).getByText('1 matching ingredient · 0 short · 1 amount to check'),
+    ).toBeVisible();
     expect(within(unknown).getByText('Check quantities')).toBeVisible();
     expect(
-      screen.getByText(/Missing ingredients and insufficient amounts count as short/),
+      screen.getByText(/Matches count ingredients you have, even if you need more/),
     ).toBeVisible();
 
     const updated = {
@@ -150,15 +160,13 @@ describe('recipe shortage sorting', () => {
     };
     rerender(<RecipeBrowser {...initial} inventory={updated} relevant={updated} />);
     expect(cardTitles(container)).toEqual([
+      'Alpha dinner',
       'Bravo dinner',
       'Zulu dinner',
       'Yankee dinner',
-      'Alpha dinner',
     ]);
-    expect(screen.getByRole('combobox', { name: 'Sort by' })).toHaveTextContent(
-      'Fewest ingredients short',
-    );
-    await choose(user, 'Sort by', 'Name A–Z');
+    expect(screen.getByRole('combobox', { name: 'Sort by' })).toHaveTextContent('Most matches');
+    await choose(user, 'Sort by', 'Name');
     expect(cardTitles(container)).toEqual([
       'Alpha dinner',
       'Bravo dinner',
@@ -191,12 +199,12 @@ describe('recipe shortage sorting', () => {
     await user.click(screen.getByRole('button', { name: 'Search RecipeAPI.io' }));
     await screen.findByText('4 recipes loaded · 4 match your filters.');
     expect(searchRecipeProviders).toHaveBeenCalledOnce();
-    await choose(user, 'Sort by', 'Fewest ingredients short');
+    await choose(user, 'Sort by', 'Most matches');
     expect(cardTitles(container)).toEqual([
+      'Alpha dinner',
       'Zulu dinner',
       'Yankee dinner',
       'Bravo dinner',
-      'Alpha dinner',
     ]);
     expect(screen.getByText(/Showing 4 of 4 recipes · RecipeAPI.io/)).toBeVisible();
     expect(searchRecipeProviders).toHaveBeenCalledOnce();
@@ -207,32 +215,37 @@ describe('recipe shortage sorting', () => {
     const { container } = render(<RecipeBrowser {...props()} />);
     await screen.findByText(/Showing 4 of 4 recipes/);
     await user.type(screen.getByRole('textbox', { name: 'Find recipes' }), 'dinner');
-    await choose(user, 'Sort by', 'Fewest ingredients short');
+    await choose(user, 'Sort by', 'Most matches');
     await user.click(screen.getByRole('button', { name: 'Filters (1)' }));
-    await choose(user, 'Availability', 'Ready to cook');
-    expect(screen.getByRole('dialog', { name: 'Filter recipes' })).toBeVisible();
+    await choose(user, 'Recipe category', 'Soup');
+    const drawer = screen.getByRole('dialog', { name: 'Filter recipes' });
+    expect(drawer).toBeVisible();
+    expect(within(drawer).queryByRole('heading', { name: 'Availability' })).not.toBeInTheDocument();
+    expect(within(drawer).queryByRole('heading', { name: 'Your kitchen' })).not.toBeInTheDocument();
+    expect(within(drawer).getByRole('heading', { name: 'Category & cuisine' })).toBeVisible();
+    expect(
+      within(drawer).getByRole('checkbox', { name: 'Prioritize expiring ingredients' }),
+    ).toBeVisible();
     expect(cardTitles(container)).toEqual(['Zulu dinner']);
     await user.click(screen.getByRole('button', { name: 'Show recipes' }));
     expect(screen.getByRole('button', { name: 'Filters (2)' })).toBeVisible();
-    await user.click(screen.getByRole('button', { name: 'Remove Ready to cook filter' }));
+    await user.click(screen.getByRole('button', { name: 'Remove Soup filter' }));
     expect(cardTitles(container)).toEqual([
+      'Alpha dinner',
       'Zulu dinner',
       'Yankee dinner',
       'Bravo dinner',
-      'Alpha dinner',
     ]);
     expect(screen.getByRole('button', { name: 'Remove Saved recipes filter' })).toBeVisible();
     await user.click(screen.getByRole('button', { name: 'Clear all' }));
     expect(screen.getByRole('textbox', { name: 'Find recipes' })).toHaveValue('dinner');
-    expect(screen.getByRole('combobox', { name: 'Sort by' })).toHaveTextContent(
-      'Fewest ingredients short',
-    );
+    expect(screen.getByRole('combobox', { name: 'Sort by' })).toHaveTextContent('Most matches');
     expect(screen.getByRole('button', { name: 'Filters' })).toBeVisible();
     expect(screen.queryByRole('group', { name: 'Active recipe filters' })).not.toBeInTheDocument();
     expect(searchRecipeProviders).not.toHaveBeenCalled();
   });
 
-  it('keeps online source and loaded results when Clear all removes availability filters', async () => {
+  it('keeps online source and loaded results when Clear all removes category filters', async () => {
     vi.mocked(searchRecipeProviders).mockResolvedValue({
       provider: 'recipeapi',
       storage: 'personal',
@@ -249,7 +262,7 @@ describe('recipe shortage sorting', () => {
     await user.type(screen.getByRole('textbox', { name: 'Find recipes' }), 'dinner');
     await user.click(screen.getByRole('button', { name: 'Search RecipeAPI.io' }));
     await screen.findByText('4 recipes loaded · 4 match your filters.');
-    await chooseFilter(user, 'Availability', 'Ready to cook');
+    await chooseFilter(user, 'Recipe category', 'Soup');
     expect(screen.getByText('4 recipes loaded · 1 match your filters.')).toBeVisible();
     await user.click(screen.getByRole('button', { name: 'Clear all' }));
     expect(screen.getByRole('textbox', { name: 'Find recipes' })).toHaveValue('dinner');

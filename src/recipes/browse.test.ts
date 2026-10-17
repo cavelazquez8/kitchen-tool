@@ -316,6 +316,82 @@ describe('shared recipe browsing', () => {
     ).toEqual(['ready', 'close']);
   });
 
+  it('puts more ingredients on hand before readiness and separates quantities from identity matches', () => {
+    const inventory = kitchen();
+    inventory.batches[1] = { ...inventory.batches[1], quantity: null };
+    const moreMatches = recipe('more-matches', {
+      title: 'Z two matches',
+      ingredients: [
+        { name: 'Chicken breasts', quantity: 900, unit: 'g' },
+        { name: 'Courgettes', quantity: 300, unit: 'g' },
+        { name: 'Rice', quantity: 100, unit: 'g' },
+        { name: 'Cheese', quantity: 100, unit: 'g' },
+      ],
+    });
+    const ready = recipe('ready', { title: 'A one match' });
+    const recipes = [ready, moreMatches];
+    const matches = browseRecipes(recipes, inventory, { order: 'most-matches' });
+    expect(matches.map((match) => match.recipe.id)).toEqual(['more-matches', 'ready']);
+    expect(matches[0]).toMatchObject({ onHandCount: 2, missingCount: 3, uncertainCount: 1 });
+    expect(matches[1]).toMatchObject({ onHandCount: 1, missingCount: 0, status: 'ready' });
+    expect(recipes).toEqual([ready, moreMatches]);
+  });
+
+  it('counts distinct exact ingredient identities and excludes optional, depleted, expired, and substitution-only stock', () => {
+    const inventory = kitchen();
+    inventory.products.push(
+      { id: 'rice', name: 'Rice', isStaple: false },
+      { id: 'milk', name: 'Whole milk', isStaple: false },
+      { id: 'eggs', name: 'Eggs', isStaple: false },
+    );
+    inventory.batches.push(
+      { ...inventory.batches[0], id: 'rice:1', productId: 'rice', quantity: 0 },
+      { ...inventory.batches[0], id: 'milk:1', productId: 'milk', quantity: 500 },
+      { ...inventory.batches[0], id: 'eggs:1', productId: 'eggs', expiresOn: '2026-10-11' },
+    );
+    const dish = recipe('distinct', {
+      ingredients: [
+        { name: 'Chicken breast', quantity: 100, unit: 'g' },
+        { name: 'Chicken breasts', quantity: 1, unit: 'each' },
+        { name: 'Courgette', quantity: 100, unit: 'g', optional: true },
+        { name: 'Rice', quantity: 100, unit: 'g' },
+        { name: 'Milk', quantity: 100, unit: 'g' },
+        { name: 'Eggs', quantity: 1, unit: 'each' },
+      ],
+    });
+    const [match] = browseRecipes([dish], inventory, { order: 'most-matches' });
+    expect(match.onHandCount).toBe(1);
+    expect(match.ingredients.find((item) => item.ingredient.name === 'Milk')?.status).toBe('check');
+    expect(match.ingredients.filter((item) => item.status === 'missing')).toHaveLength(2);
+    expect(match.ingredients.some((item) => item.ingredient.optional)).toBe(false);
+  });
+
+  it('uses expiration only within equal match counts and stable title/ID ties', () => {
+    const chicken = recipe('chicken', { title: 'Alpha dinner' });
+    const tied = { ...chicken, id: 'chicken-tied' };
+    const vegetables = recipe('vegetables', {
+      title: 'Zucchini supper',
+      ingredients: [{ name: 'Courgette', quantity: 200, unit: 'g' }],
+    });
+    const mostMatches = recipe('both', {
+      title: 'Z both',
+      ingredients: [
+        ...chicken.ingredients,
+        ...vegetables.ingredients,
+        { name: 'Rice', quantity: 100, unit: 'g' },
+      ],
+    });
+    const recipes = [tied, vegetables, mostMatches, chicken];
+    const options = { order: 'most-matches' as const, prioritizeExpiration: true };
+    const expected = ['both', 'vegetables', 'chicken', 'chicken-tied'];
+    expect(browseRecipes(recipes, kitchen(), options).map((match) => match.recipe.id)).toEqual(
+      expected,
+    );
+    expect(
+      browseRecipes([...recipes].reverse(), kitchen(), options).map((match) => match.recipe.id),
+    ).toEqual(expected);
+  });
+
   it('keeps saved edits and attribution when combining sourced recipes', () => {
     const original = recipe('wikibooks:1', {
       source: { type: 'wikibooks', attribution: 'Wikibooks contributors', license: 'CC BY-SA 4.0' },

@@ -23,7 +23,6 @@ import {
   selectRecipeCollection,
   recipeCollectionLabel,
   type RecipeCollection,
-  type BrowseFilter,
   type BrowseOrder,
   type BrowseSource,
 } from '../recipes/browse';
@@ -66,10 +65,15 @@ function safeLink(value?: string) {
     return undefined;
   }
 }
-function availabilitySummary(match: RecipeMatch, showShortageCount: boolean): string {
-  const count = match.missingCount || showShortageCount ? match.missingCount : match.matchedCount;
+function availabilitySummary(match: RecipeMatch, showMatches: boolean): string {
+  if (showMatches) {
+    const matches = `${match.onHandCount} matching ingredient${match.onHandCount === 1 ? '' : 's'}`;
+    const short = `${match.missingCount} short`;
+    return `${matches} · ${short}${match.uncertainCount ? ` · ${match.uncertainCount} amount${match.uncertainCount === 1 ? '' : 's'} to check` : ''}`;
+  }
+  const count = match.missingCount || match.matchedCount;
   const summary = `${count} ingredient${count === 1 ? '' : 's'} ${
-    match.missingCount || showShortageCount ? 'short' : 'on hand'
+    match.missingCount ? 'short' : 'on hand'
   }`;
   return match.uncertainCount
     ? `${summary} · ${match.uncertainCount} amount${match.uncertainCount === 1 ? '' : 's'} to check`
@@ -83,7 +87,7 @@ function RecipeCard({
   onAddToGemini,
   inGeminiContext,
   onRemoveSaved,
-  showShortageCount,
+  showMatches,
 }: {
   match: RecipeMatch;
   saved: boolean;
@@ -92,7 +96,7 @@ function RecipeCard({
   onAddToGemini: () => void;
   inGeminiContext: boolean;
   onRemoveSaved?: () => void;
-  showShortageCount: boolean;
+  showMatches: boolean;
 }) {
   const recipe = match.recipe;
   return (
@@ -110,7 +114,7 @@ function RecipeCard({
         <button className="recipe-title" onClick={onOpen}>
           <h3>{recipe.title}</h3>
         </button>
-        <p>{availabilitySummary(match, showShortageCount)}</p>
+        <p>{availabilitySummary(match, showMatches)}</p>
         <small>
           {recipe.source.name ?? sourceLabels[recipe.source.type]}
           {recipe.servings ? ` · ${recipe.servings} servings` : ' · Yield not recorded'}
@@ -184,7 +188,6 @@ export function RecipeBrowser({
   const [query, setQuery] = useState('');
   const [category, setCategory] = useState('');
   const [cuisine, setCuisine] = useState('');
-  const [filter, setFilter] = useState<BrowseFilter>('all');
   const [collection, setCollection] = useState<RecipeCollection>('saved');
   const [order, setOrder] = useState<BrowseOrder>('browse');
   const [prioritize, setPrioritize] = useState(false);
@@ -252,23 +255,11 @@ export function RecipeBrowser({
         query: source === 'library' ? query : '',
         category,
         cuisine,
-        filter,
         order,
         prioritizeExpiration: prioritize,
         savedIds: saved.map((recipe) => recipe.id),
       }),
-    [
-      source,
-      collectionRecipes,
-      relevant,
-      query,
-      category,
-      cuisine,
-      filter,
-      order,
-      prioritize,
-      saved,
-    ],
+    [source, collectionRecipes, relevant, query, category, cuisine, order, prioritize, saved],
   );
   const sourceName = recipeSourceName(source);
   const provider = RECIPE_PROVIDER_INFO.find((item) => item.id === source);
@@ -328,7 +319,6 @@ export function RecipeBrowser({
     if (source === 'library' || !savedReveal.id.startsWith(`${source}:`)) {
       resetOnline();
       setSource('library');
-      setFilter('all');
       setCollection('saved');
       setQuery('');
       setCategory('');
@@ -342,7 +332,6 @@ export function RecipeBrowser({
     setSource(next);
     if (next !== 'library') {
       setCollection('all');
-      if (filter === 'saved') setFilter('all');
     }
     setCategory('');
     setCuisine('');
@@ -351,7 +340,6 @@ export function RecipeBrowser({
   function changeCollection(next: RecipeCollection) {
     if (next !== 'all' && source !== 'library') changeSource('library');
     setCollection(next);
-    if (filter === 'saved') setFilter('all');
     setCategory('');
     setCuisine('');
     setVisibleCount(PAGE_SIZE);
@@ -365,7 +353,6 @@ export function RecipeBrowser({
   function clearFilters() {
     setCategory('');
     setCuisine('');
-    setFilter('all');
     setCollection('all');
     setPrioritize(false);
     onUseSelectionChange(false);
@@ -374,7 +361,6 @@ export function RecipeBrowser({
   function showLoadedRecipes() {
     setCategory('');
     setCuisine('');
-    setFilter('all');
     setCollection('all');
     setVisibleCount(PAGE_SIZE);
   }
@@ -467,15 +453,6 @@ export function RecipeBrowser({
             id: 'collection',
             label: recipeCollectionLabel(collection),
             clear: () => setCollection('all'),
-          },
-        ]
-      : []),
-    ...(filter !== 'all'
-      ? [
-          {
-            id: 'availability',
-            label: filter === 'ready' ? 'Ready to cook' : 'Missing up to 2',
-            clear: () => setFilter('all'),
           },
         ]
       : []),
@@ -624,9 +601,8 @@ export function RecipeBrowser({
             label="Sort by"
             value={order}
             options={[
-              { value: 'kitchen', label: 'Recommended' },
-              { value: 'browse', label: 'Name A–Z' },
-              { value: 'fewest-short', label: 'Fewest ingredients short' },
+              { value: 'browse', label: 'Name' },
+              { value: 'most-matches', label: 'Most matches' },
             ]}
             onChange={(value) => {
               setOrder(value as BrowseOrder);
@@ -676,24 +652,9 @@ export function RecipeBrowser({
             />
             <p>All recipes includes the community cookbook.</p>
           </section>
-          <section className="recipe-filter-group" aria-label="Availability filter">
-            <h3>Availability</h3>
-            <Choice
-              label="Availability"
-              value={filter}
-              options={[
-                { value: 'all', label: 'Any recipe' },
-                { value: 'ready', label: 'Ready to cook' },
-                { value: 'close', label: 'Missing up to 2' },
-              ]}
-              onChange={(value) => {
-                setFilter(value as BrowseFilter);
-                setVisibleCount(PAGE_SIZE);
-              }}
-            />
-          </section>
           <section className="recipe-filter-group" aria-label="Recipe details filters">
-            <h3>Recipe details</h3>
+            <h3>Category &amp; cuisine</h3>
+            <p>From recipe details. Edit a recipe to change its category or cuisine.</p>
             <label className="recipe-filter-field">
               <span>Category</span>
               <Choice
@@ -731,9 +692,8 @@ export function RecipeBrowser({
           </section>
           <section
             className="recipe-filter-group recipe-kitchen-filters"
-            aria-label="Kitchen preferences"
+            aria-label="Ingredient preferences"
           >
-            <h3>Your kitchen</h3>
             <label>
               <input
                 type="checkbox"
@@ -745,6 +705,7 @@ export function RecipeBrowser({
               />
               <span>Prioritize expiring ingredients</span>
             </label>
+            <p>Favors recipes using ingredients with a recorded date in the next 3 days.</p>
             {selectedBatchIds.length > 0 && (
               <label>
                 <input
@@ -848,10 +809,10 @@ export function RecipeBrowser({
             {query.trim() && (source === 'library' || results) ? ` for “${query.trim()}”` : ''}
           </span>
         </div>
-        {order === 'fewest-short' && (
+        {order === 'most-matches' && (
           <p className="recipe-order-note">
-            Missing ingredients and insufficient amounts count as short. Unknown amounts need a
-            check. Counts use the original recipe quantities.
+            Matches count ingredients you have, even if you need more. Amounts are checked
+            separately against the original recipe.
           </p>
         )}
         {source !== 'library' && results && (
@@ -870,7 +831,7 @@ export function RecipeBrowser({
               <article className="recipe-discovery-card" key={match.recipe.id}>
                 <span className={`match-badge ${match.status}`}>{labels[match.status]}</span>
                 <h3>{match.recipe.title}</h3>
-                <p>{availabilitySummary(match, order === 'fewest-short')}</p>
+                <p>{availabilitySummary(match, order === 'most-matches')}</p>
                 {match.recipe.source.attribution && (
                   <small>{match.recipe.source.attribution}</small>
                 )}
@@ -889,7 +850,7 @@ export function RecipeBrowser({
               <RecipeCard
                 key={match.recipe.id}
                 match={match}
-                showShortageCount={order === 'fewest-short'}
+                showMatches={order === 'most-matches'}
                 saved={saved.some((recipe) => recipe.id === match.recipe.id)}
                 onOpen={() => onOpen(match.recipe)}
                 onSave={() => onSave(match.recipe)}
