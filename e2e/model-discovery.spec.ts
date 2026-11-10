@@ -202,7 +202,7 @@ test('reviews a newly discovered free model explicitly, saves it, and uses it fo
     .filter({ visible: true })
     .first()
     .click();
-  await page.getByRole('radio', { name: 'Create with my inventory', exact: true }).check();
+  await page.getByRole('radio', { name: 'Create a recipe', exact: true }).check();
   await page
     .getByRole('textbox', { name: 'Message Gemini', exact: true })
     .fill('Help me choose dinner.');

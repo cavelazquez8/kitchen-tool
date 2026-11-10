@@ -1060,7 +1060,7 @@ test('uses mocked Gemini recipes, keeps follow-up context, bounds history, and e
   const message = page.getByRole('textbox', { name: 'Message Gemini', exact: true });
   const ask = page.getByRole('button', { name: 'Ask Gemini', exact: true });
   await page.getByRole('button', { name: 'Conversation options', exact: true }).click();
-  await page.getByRole('radio', { name: 'Create with my inventory', exact: true }).check();
+  await page.getByRole('radio', { name: 'Create a recipe', exact: true }).check();
   await message.fill('Make me a familiar chicken recipe.');
   await ask.click();
   const card = page

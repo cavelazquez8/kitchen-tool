@@ -273,7 +273,7 @@ test('shares only explicitly attached report context and preserves it after a re
   });
   await navigateGemini(page);
   await page.getByRole('button', { name: 'Conversation options', exact: true }).click();
-  await page.getByRole('radio', { name: 'Create with my inventory', exact: true }).check();
+  await page.getByRole('radio', { name: 'Create a recipe', exact: true }).check();
   await ask(page, 'Suggest a simple dinner.');
   await expect.poll(() => requests.length).toBe(1);
   expect(requests[0].profile).toBeUndefined();
@@ -313,7 +313,7 @@ test('shares only explicitly attached report context and preserves it after a re
   await expect(context).toContainText('Second report');
   await expect(context).not.toContainText('First report');
   await page.getByRole('button', { name: 'Conversation options', exact: true }).click();
-  await page.getByRole('radio', { name: 'Create with my inventory', exact: true }).check();
+  await page.getByRole('radio', { name: 'Create a recipe', exact: true }).check();
   await ask(page, 'Suggest another dinner.');
   await expect.poll(() => requests.length).toBe(5);
   expect(requests[4].profile).toContain(reports[1].text);
@@ -356,7 +356,7 @@ test('saves the chosen Gemini model, verifies its backend setting, and uses it f
   await reloadedSettings.getByRole('button', { name: 'Close', exact: true }).click();
   await navigateGemini(page);
   await page.getByRole('button', { name: 'Conversation options', exact: true }).click();
-  await page.getByRole('radio', { name: 'Create with my inventory', exact: true }).check();
+  await page.getByRole('radio', { name: 'Create a recipe', exact: true }).check();
   await ask(page, 'Help me choose a meal.');
   await expect.poll(() => requests.length).toBe(1);
   expect(requests[0].model).toBe('gemini-3.1-flash-lite');
