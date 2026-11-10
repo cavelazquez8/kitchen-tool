@@ -143,11 +143,36 @@ const PLURALS: Record<string, string> = {
 
 const PREPARATION =
   '(?:(?:finely|roughly|thinly|freshly|coarsely)\\s+)?(?:chopped|diced|sliced|minced|grated|peeled|washed|trimmed|rinsed|drained|juiced|beaten|melted|softened|heated|divided|seeded)';
+// After a comma, a recipe line describes how to prepare the ingredient it already named
+// ("onion, diced small", "eggs, separated", "potatoes, peeled and cut into chunks").
+// This wider list applies only to that trailing clause. Words that can name a different
+// product ("ground", "crushed", "cooked", "toasted") and alternatives (", or …") are left
+// in place so they never match plain stock.
+const TAIL_STEP = [
+  `(?:(?:finely|roughly|thinly|freshly|coarsely|lightly|well|neatly|very)\\s+)?` +
+    `(?:chopped|diced|sliced|minced|grated|peeled|washed|trimmed|rinsed|drained|juiced|beaten|` +
+    `melted|softened|heated|divided|seeded|cubed|quartered|halved|shredded|crumbled|julienned|` +
+    `mashed|smashed|pressed|cracked|thawed|sifted|cleaned|stemmed|pureed|zested|cored|pitted|` +
+    `deveined|separated|cooled|warmed|chilled|scrubbed|hulled|deseeded|destemmed|torn|shelled)` +
+    `(?:\\s+(?:small|fine|finely|thin|thinly|thick|thickly|coarsely|roughly|lengthwise|crosswise))?` +
+    `(?:\\s+in half)?`,
+  `cut into [^,()]+`,
+  `split in half`,
+  `in (?:small|medium|large) dice`,
+  `(?:at )?room temperature`,
+].join('|');
+const USAGE_NOTE =
+  'divided|as needed|as desired|if desired|if needed|to garnish|for garnish|to serve|for drizzling';
 const PREPARATION_SUFFIX = new RegExp(
-  `,\\s*${PREPARATION}(?:\\s+(?:and\\s+)?${PREPARATION})*(?:,?\\s+divided)?$`,
+  `(?:,\\s*(?:${TAIL_STEP})(?:(?:\\s*,\\s*|\\s+(?:and\\s+)?|\\s+then\\s+)(?:${TAIL_STEP}))*` +
+    `(?:,?\\s+(?:${USAGE_NOTE}))?|,\\s*(?:${USAGE_NOTE}))$`,
   'i',
 );
 const PREPARATION_PREFIX = new RegExp(`^${PREPARATION}\\s+`, 'i');
+// Size and marketing words describe a whole fruit, vegetable, or egg, never a different
+// product. They are removed only when what remains is one of those known foods.
+const SIZE_PREFIX = /^(?:(?:organic|fresh|extra large|extra small|jumbo|large|medium|small)\s+)+/;
+
 const PRODUCE = new Set([
   'apple',
   'apricot',
@@ -234,8 +259,8 @@ export function canonicalIngredientName(value: string): string {
   // different cut/product (ground beef, crushed tomatoes), rather than a step.
   name = ALIASES[name] ?? name.replace(PREPARATION_PREFIX, '');
   name = nounAliases(name);
-  const withoutMarketing = nounAliases(name.replace(/^(?:(?:organic|fresh)\s+)+/, ''));
-  if (PRODUCE.has(withoutMarketing)) name = withoutMarketing;
+  const withoutDescriptors = nounAliases(name.replace(SIZE_PREFIX, ''));
+  if (PRODUCE.has(withoutDescriptors) || withoutDescriptors === 'egg') name = withoutDescriptors;
   return name;
 }
 

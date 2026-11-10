@@ -404,3 +404,19 @@ describe('readiness badge', () => {
     expect(readinessBadge({ status: 'almost', missingCount: 31 }).label).toBe('Needs shopping');
   });
 });
+
+describe('recipe wording against plain stock', () => {
+  it('finds stocked onions and eggs behind preparation and size wording', () => {
+    const onions = inventory('Onions', [{ quantity: 3, unit: 'each' }]);
+    const eggs = inventory('Eggs', [{ quantity: 12, unit: 'each' }]);
+    expect(matchRecipe(recipe(0.5, 'each', 'onion, diced small'), onions, options).status).toBe(
+      'ready',
+    );
+    expect(matchRecipe(recipe(1, 'each', 'medium onion'), onions, options).status).toBe('ready');
+    expect(matchRecipe(recipe(2, 'each', 'large eggs'), eggs, options).status).toBe('ready');
+    expect(matchRecipe(recipe(3, 'each', 'eggs, separated'), eggs, options).status).toBe('ready');
+    expect(matchRecipe(recipe(2, 'each', 'egg whites'), eggs, options).ingredients[0].status).toBe(
+      'missing',
+    );
+  });
+});

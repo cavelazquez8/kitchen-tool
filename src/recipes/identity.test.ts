@@ -22,6 +22,20 @@ describe('ingredient identity', () => {
     ['Eggs, beaten', 'egg'],
     ['Unsalted butter, melted', 'unsalted butter'],
     ['Lemons, juiced', 'lemon'],
+    ['onion, diced small', 'onion'],
+    ['red onion, sliced thin', 'red onion'],
+    ['potatoes, peeled and cut into chunks', 'potato'],
+    ['carrots, cut into 1 cm pieces', 'carrot'],
+    ['eggs, separated', 'egg'],
+    ['eggs, lightly beaten, at room temperature', 'egg'],
+    ['butter, at room temperature', 'butter'],
+    ['lemon, zested and juiced', 'lemon'],
+    ['salt, as needed', 'salt'],
+    ['large eggs', 'egg'],
+    ['Extra-large eggs', 'egg'],
+    ['medium onion', 'onion'],
+    ['small red onion', 'red onion'],
+    ['large organic carrots', 'carrot'],
   ])('normalizes %s without altering unknown wording', (source, expected) => {
     expect(canonicalIngredientName(source)).toBe(expected);
   });
@@ -37,6 +51,18 @@ describe('ingredient identity', () => {
     ['soy sauce', 'low sodium soy sauce'],
     ['cooked rice', 'rice'],
     ['crushed tomatoes', 'tomatoes'],
+    ['egg whites', 'eggs'],
+    ['large egg yolks', 'eggs'],
+    ['green onions, sliced thin', 'onions'],
+    ['red onion, diced', 'onion'],
+    ['sweet potatoes, cubed', 'potatoes'],
+    ['coconut milk', 'milk'],
+    ['tomatoes, crushed', 'tomatoes'],
+    ['rice, cooked', 'rice'],
+    ['black pepper, ground', 'black pepper'],
+    ['beans, or lentils', 'beans'],
+    ['medium grain rice', 'rice'],
+    ['mashed potatoes', 'potatoes'],
   ])('keeps %s distinct from %s', (first, second) => {
     expect(canonicalIngredientName(first)).not.toBe(canonicalIngredientName(second));
   });
