@@ -277,6 +277,24 @@ function matchIndexedRecipe(
   };
 }
 
+/** Short-list size that still reads as "almost ready" rather than a shopping trip. */
+const ALMOST_READY_MISSING = 2;
+
+/**
+ * Display label for a recipe's readiness. The ranking tier stays `match.status`; this only
+ * keeps the badge from calling a recipe with many missing ingredients "almost ready".
+ */
+export function readinessBadge(match: Pick<RecipeMatch, 'status' | 'missingCount'>): {
+  tone: 'ready' | 'almost' | 'check' | 'shopping';
+  label: string;
+} {
+  if (match.status === 'ready') return { tone: 'ready', label: 'Ready to cook' };
+  if (match.status === 'check') return { tone: 'check', label: 'Check quantities' };
+  return match.missingCount <= ALMOST_READY_MISSING
+    ? { tone: 'almost', label: 'Almost ready' }
+    : { tone: 'shopping', label: 'Needs shopping' };
+}
+
 export function rankRecipes(
   recipes: readonly Recipe[],
   inventory: InventoryState,

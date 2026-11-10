@@ -33,6 +33,7 @@ import { searchRecipeProviders } from '../recipes/providerClient';
 import { RECIPE_PROVIDER_INFO, type RecipeProviderSearch } from '../recipes/providers';
 import { readGeminiConnection } from '../ai/client';
 import { Choice } from './Choice';
+import { MatchBadge } from './MatchBadge';
 import { Modal } from './Modal';
 import './recipeProviders.css';
 import './recipeBrowser.css';
@@ -49,7 +50,6 @@ type SourceResults = {
   expiresAt?: number;
   warnings: string[];
 };
-const labels = { ready: 'Ready to cook', almost: 'Almost ready', check: 'Check quantities' };
 const sourceLabels = {
   themealdb: 'TheMealDB',
   wikibooks: 'Wikibooks Cookbook',
@@ -110,7 +110,7 @@ function RecipeCard({
         </div>
       )}
       <div className="recipe-card-body">
-        <span className={`match-badge ${match.status}`}>{labels[match.status]}</span>
+        <MatchBadge match={match} />
         <button className="recipe-title" onClick={onOpen}>
           <h3>{recipe.title}</h3>
         </button>
@@ -829,7 +829,7 @@ export function RecipeBrowser({
           {matches.slice(0, visibleCount).map((match) =>
             source === 'spoonacular' ? (
               <article className="recipe-discovery-card" key={match.recipe.id}>
-                <span className={`match-badge ${match.status}`}>{labels[match.status]}</span>
+                <MatchBadge match={match} />
                 <h3>{match.recipe.title}</h3>
                 <p>{availabilitySummary(match, order === 'most-matches')}</p>
                 {match.recipe.source.attribution && (

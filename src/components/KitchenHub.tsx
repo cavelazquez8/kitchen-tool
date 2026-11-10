@@ -74,6 +74,7 @@ import {
   type AiReply,
 } from '../ai/client';
 import { Modal } from './Modal';
+import { MatchBadge } from './MatchBadge';
 import { Autocomplete } from './Autocomplete';
 import { RecipeEditor } from './RecipeEditor';
 import { FinishCooking } from './FinishCooking';
@@ -104,7 +105,6 @@ interface Props {
   attachedBodyScanIds?: string[];
   onBodyScanAttachmentsChange?: (ids: string[]) => void;
 }
-const labels = { ready: 'Ready to cook', almost: 'Almost ready', check: 'Check quantities' };
 const sourceLabels = {
   themealdb: 'TheMealDB',
   wikibooks: 'Wikibooks Cookbook',
@@ -174,7 +174,7 @@ function RecipeCard({
         </div>
       )}
       <div className="recipe-card-body">
-        <span className={`match-badge ${match.status}`}>{labels[match.status]}</span>
+        <MatchBadge match={match} />
         <button className="recipe-title" onClick={onOpen}>
           <h3>{recipe.title}</h3>
         </button>
@@ -1617,9 +1617,7 @@ export function KitchenHub({
               onChange={setDetailServings}
             />
             <div className="hub-actions">
-              <span className={`match-badge ${detailMatch.status}`}>
-                {labels[detailMatch.status]}
-              </span>
+              <MatchBadge match={detailMatch} />
               <button
                 className="button secondary"
                 onClick={() => {

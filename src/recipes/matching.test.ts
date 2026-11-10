@@ -1,7 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import type { Batch, InventoryState } from '../domain/types';
 import type { Recipe } from './types';
-import { buildShoppingList, canonicalIngredientName, matchRecipe, rankRecipes } from './matching';
+import {
+  buildShoppingList,
+  canonicalIngredientName,
+  matchRecipe,
+  rankRecipes,
+  readinessBadge,
+} from './matching';
 
 function inventory(
   name: string,
@@ -379,5 +385,22 @@ describe('shopping list calculation', () => {
       options,
     );
     expect(result.items[0]).toMatchObject({ name: 'Salt', quantity: null, status: 'check' });
+  });
+});
+
+describe('readiness badge', () => {
+  it('reserves "Almost ready" for short lists and keeps the ranking status intact', () => {
+    expect(readinessBadge({ status: 'ready', missingCount: 0 }).label).toBe('Ready to cook');
+    expect(readinessBadge({ status: 'check', missingCount: 0 }).label).toBe('Check quantities');
+    expect(readinessBadge({ status: 'almost', missingCount: 1 })).toEqual({
+      tone: 'almost',
+      label: 'Almost ready',
+    });
+    expect(readinessBadge({ status: 'almost', missingCount: 2 }).label).toBe('Almost ready');
+    expect(readinessBadge({ status: 'almost', missingCount: 3 })).toEqual({
+      tone: 'shopping',
+      label: 'Needs shopping',
+    });
+    expect(readinessBadge({ status: 'almost', missingCount: 31 }).label).toBe('Needs shopping');
   });
 });
