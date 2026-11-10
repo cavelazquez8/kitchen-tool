@@ -1,3 +1,4 @@
+import { openSettings } from './helpers/settings';
 import { openRecipeFilters, closeRecipeFilters, chooseRecipeFilter } from './helpers/recipeFilters';
 import { expect, test, type Page } from '@playwright/test';
 import { readFile } from 'node:fs/promises';
@@ -118,7 +119,7 @@ test('saves a selected RecipeAPI recipe with attribution and loads another page'
   await detail.getByRole('button', { name: 'Add to meal plan', exact: true }).click();
   await expect(detail.getByRole('button', { name: 'Update meal plan', exact: true })).toBeVisible();
   await detail.getByRole('button', { name: 'Close', exact: true }).click();
-  await page.getByRole('button', { name: 'Local only', exact: true }).click();
+  await openSettings(page);
   const settings = page.getByRole('dialog', { name: 'Your kitchen, your way' });
   const downloadPromise = page.waitForEvent('download');
   await settings.getByRole('button', { name: 'Download backup', exact: true }).click();
@@ -224,7 +225,7 @@ test('explains updating an older Worker without disturbing the saved Gemini conn
   });
   await page.goto('/');
   expect(checks).toBe(0);
-  await page.getByRole('button', { name: 'Local only', exact: true }).click();
+  await openSettings(page);
   const settings = page.getByRole('dialog', { name: 'Your kitchen, your way' });
   await settings.getByRole('button', { name: 'Check recipe sources', exact: true }).click();
   await expect(settings.locator('.settings-note[role="status"]')).toContainText('latest Worker');
@@ -283,7 +284,7 @@ test('tests configured recipe sources independently without saving their connect
     );
   });
   await page.goto('/');
-  await page.getByRole('button', { name: 'Local only', exact: true }).click();
+  await openSettings(page);
   const settings = page.getByRole('dialog', { name: 'Your kitchen, your way' });
   expect(searches).toHaveLength(0);
   expect(checks).toBe(0);

@@ -31,9 +31,8 @@
   font-size: 12px;
 }
 .nutrition-basis button[aria-pressed='true'] {
-  color: #e1ece6;
+  color: var(--label);
   background: #ffffff0e;
-  box-shadow: 0 1px 5px #0002;
 }
 .nutrition-basis button:disabled {
   opacity: 0.4;
@@ -53,11 +52,11 @@
   white-space: nowrap;
 }
 .recipe-nutrition .nutrition-macros small {
-  font-size: 10px;
+  font-size: 12px;
   line-height: 1.4;
 }
 .nutrition-progress {
-  color: #a7cbb7;
+  color: var(--label-2);
   font-size: 12px;
   line-height: 1.6;
 }

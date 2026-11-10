@@ -8,8 +8,8 @@
   width: 100%;
   min-height: 48px;
   gap: 16px;
-  background: var(--panel, #191e1b);
-  border-color: #3a443d;
+  background: var(--field);
+  border-color: transparent;
   border-radius: 12px;
 }
 .mise-selector .choice-button span {
@@ -18,13 +18,13 @@
   white-space: nowrap;
 }
 .mise-selector .choice-button[aria-expanded='true'] {
-  border-color: #8aab8b;
+  border-color: transparent;
 }
 .selector-backdrop {
   position: fixed;
   inset: 0;
   z-index: 180;
-  background: #060a0780;
+  background: color-mix(in srgb, var(--bg) 50%, transparent);
 }
 .selector-panel {
   position: fixed;
@@ -33,11 +33,11 @@
   top: var(--selector-top);
   width: var(--selector-width);
   padding: 16px;
-  border: 1px solid #3b473e;
+  border: 1px solid var(--separator);
   border-radius: 20px;
-  background: #1b231e;
+  background: var(--surface);
   box-shadow: 0 24px 80px #0008;
-  color: #edf1ec;
+  color: var(--label);
 }
 .selector-heading {
   display: flex;
@@ -52,7 +52,7 @@
   line-height: 1.4;
 }
 .selector-heading p {
-  color: #a2afa6;
+  color: var(--label-2);
   font-size: 12px;
   line-height: 1.5;
   margin-top: 3px;
@@ -64,7 +64,7 @@
   height: 36px;
   border: 0;
   border-radius: 50%;
-  background: #2c352e;
+  background: var(--surface-2);
   flex-shrink: 0;
 }
 .selector-search {
@@ -74,19 +74,19 @@
   padding: 0 13px;
   height: 48px;
   margin-bottom: 10px;
-  color: #a2afa6;
-  border: 1px solid #3a463e;
+  color: var(--label-2);
+  border: 1px solid var(--separator);
   border-radius: 12px;
-  background: #121a15;
+  background: var(--surface);
 }
 .selector-search:focus-within {
-  border-color: #9fc4a2;
+  border-color: var(--separator);
 }
 .selector-search input {
   min-width: 0;
   width: 100%;
   background: transparent;
-  color: #edf1ec;
+  color: var(--label);
   border: 0;
   padding: 0;
   outline: none;
@@ -99,7 +99,7 @@
   overscroll-behavior: contain;
   touch-action: pan-y;
   scrollbar-width: thin;
-  scrollbar-color: #4a5d50 transparent;
+  scrollbar-color: var(--surface-3) transparent;
 }
 .selector-options [role='option'] {
   display: flex;
@@ -114,27 +114,27 @@
   cursor: pointer;
 }
 .selector-options [role='option'][aria-selected='true'] {
-  background: #293c2d;
-  color: #c3ecc3;
+  background: var(--surface-2);
+  color: var(--accent);
 }
 .selector-options [role='option'].active {
-  box-shadow: inset 0 0 0 1px #718775;
+  box-shadow: inset 0 0 0 1px var(--surface-3);
 }
 .selector-empty {
   padding: 18px 10px 10px;
   font-size: 14px;
-  color: #a2afa6;
+  color: var(--label-2);
   line-height: 1.5;
 }
 .mise-selector .suggestion-options {
-  background: #1b231e;
-  border-color: #3b473e;
+  background: var(--surface);
+  border-color: var(--separator);
   box-shadow: 0 16px 40px #0006;
   padding: 6px;
   touch-action: pan-y;
   overscroll-behavior: contain;
   scrollbar-width: thin;
-  scrollbar-color: #4a5d50 transparent;
+  scrollbar-color: var(--surface-3) transparent;
 }
 .mise-selector .suggestion-options [role='option'] {
   min-height: 48px;
@@ -152,7 +152,7 @@
   justify-content: space-between;
   gap: 6px 12px;
   margin-top: 7px;
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.5;
   color: var(--muted);
 }
@@ -167,12 +167,12 @@
 }
 @media (hover: hover) {
   .selector-options [role='option']:hover {
-    background: #29352c;
+    background: var(--surface-2);
   }
 }
 @media (max-width: 650px) {
   .selector-backdrop {
-    background: #050a07a6;
+    background: color-mix(in srgb, var(--bg) 65%, transparent);
     backdrop-filter: blur(4px);
   }
   .selector-panel {
@@ -190,7 +190,7 @@
     display: block;
     width: 36px;
     height: 4px;
-    background: #55675b;
+    background: var(--surface-3);
     border-radius: 4px;
     margin: -9px auto 15px;
   }
@@ -231,7 +231,7 @@
   overflow-y: auto;
   overscroll-behavior: contain;
   touch-action: pan-y;
-  border: 1px solid #3b473e;
+  border: 1px solid var(--separator);
   border-radius: 12px;
 }
 .packaged-food-results button {
@@ -241,9 +241,9 @@
   gap: 12px;
   text-align: left;
   border: 0;
-  border-bottom: 1px solid #313b34;
+  border-bottom: 1px solid var(--separator);
   padding: 12px;
-  background: #1b231e;
+  background: var(--surface);
   min-height: 58px;
 }
 .packaged-food-results strong {
@@ -253,7 +253,7 @@
 }
 .packaged-food-results small {
   display: block;
-  font-size: 11px;
+  font-size: 12px;
   color: var(--muted);
   margin-top: 4px;
 }
@@ -272,8 +272,8 @@
   margin: 10px 0;
 }
 .food-identity-candidates button {
-  background: #293c2d;
-  border: 1px solid #49624e;
+  background: var(--surface-2);
+  border: 1px solid var(--separator);
   border-radius: 10px;
   min-height: 42px;
   padding: 9px 12px;
@@ -291,16 +291,16 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  color: #b9daba;
+  color: var(--label-2);
 }
 .food-identity-confirmed p {
   flex: 1;
   font-size: 12px;
   line-height: 1.5;
-  color: #acb9af;
+  color: var(--label-2);
 }
 .food-identity-confirmed strong {
-  color: #d8ebd7;
+  color: var(--label);
   font-weight: 500;
 }
 .food-identity-confirmed button {

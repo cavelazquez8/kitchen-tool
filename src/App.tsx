@@ -4,17 +4,10 @@ import {
   ArrowDownToLine,
   ArrowRight,
   Check,
-  ChevronDown,
-  ChevronRight,
   CircleHelp,
   Clipboard,
-  Cloud,
-  CookingPot,
   ExternalLink,
-  Flame,
-  Leaf,
   BookOpen,
-  MessageCircle,
   ShoppingCart,
   Undo2,
   Package,
@@ -22,7 +15,6 @@ import {
   ScanLine,
   Search,
   Settings,
-  ShieldCheck,
   Sparkles,
   Trash2,
   Utensils,
@@ -127,6 +119,7 @@ export default function App() {
   const [sort, setSort] = useState('name');
   const [expanded, setExpanded] = useState<string | null>(null);
   const [selected, setSelected] = useState<string[]>([]);
+  const [selecting, setSelecting] = useState(false);
   const [editor, setEditor] = useState<Editor | null>(null);
   const [draft, setDraft] = useState<ItemDraft>(newDraft);
   const [formError, setFormError] = useState('');
@@ -570,14 +563,8 @@ export default function App() {
           }}
           aria-label="Mise home"
         >
-          <span className="brand-mark">
-            m<span>·</span>
-          </span>
-          <div>
-            mise<span>YOUR KITCHEN, IN ORDER</span>
-          </div>
+          Mise
         </a>
-        <div className="nav-label">YOUR SPACE</div>
         <nav className="main-nav" aria-label="Main navigation">
           <button
             aria-label="Inventory"
@@ -625,13 +612,6 @@ export default function App() {
             </button>
           ))}
         </nav>
-        <div className="sidebar-note">
-          <Leaf size={23} />
-          <p>
-            A little less waste.
-            <br />A little more possibility.
-          </p>
-        </div>
         <div className="sidebar-bottom">
           <button
             aria-label="Settings and backup"
@@ -639,42 +619,12 @@ export default function App() {
             onClick={() => setSettingsOpen(true)}
           >
             <Settings size={18} />
-            <span>Settings & backup</span>
+            <span>Settings</span>
           </button>
-          <div className="version">
-            MISE <span>v0.1</span>
-          </div>
         </div>
       </aside>
       <main className="main-content">
         <header className="topbar">
-          <div className="mobile-brand">
-            mise<span>·</span>
-          </div>
-          <span className="topbar-context">
-            {page === 'inventory'
-              ? 'The everyday, made easier'
-              : page === 'tools'
-                ? 'Everything you cook with'
-                : page === 'recipes'
-                  ? 'Make something good'
-                  : page === 'shopping'
-                    ? 'Bring home what you need'
-                    : 'A little help in your kitchen'}
-          </span>
-          <button className={`sync-pill ${snapshot.mode}`} onClick={() => setSettingsOpen(true)}>
-            <span className="status-dot" />
-            {snapshot.status === 'saving'
-              ? 'Saving…'
-              : snapshot.status === 'loading'
-                ? 'Connecting…'
-                : snapshot.status === 'error'
-                  ? 'Saving unavailable'
-                  : snapshot.mode === 'cloud'
-                    ? 'Synced kitchen'
-                    : 'Local only'}
-            <ChevronDown size={14} />
-          </button>
           <button
             className="icon-button mobile-settings"
             aria-label="Settings and backup"
@@ -693,43 +643,29 @@ export default function App() {
           )}
           {page !== 'recipes' && (
             <div className="page-heading">
-              <div>
-                <div className="eyebrow">
-                  <span />
-                  YOUR EVERYDAY, ORGANIZED
-                </div>
-                <h1>
-                  {page === 'inventory'
-                    ? 'Your kitchen inventory'
-                    : page === 'tools'
-                      ? 'Your kitchen tools'
-                      : page === 'shopping'
-                        ? 'Your shopping list'
-                        : 'Cook with Gemini'}
-                </h1>
-                <p>
-                  {page === 'inventory'
-                    ? 'Know what’s here. Make something good.'
-                    : page === 'tools'
-                      ? 'The right tools make all the difference.'
-                      : page === 'shopping'
-                        ? 'Plan meals. Buy just what’s missing.'
-                        : 'Your ingredients, your recipes, your conversation.'}
-                </p>
-              </div>
+              <h1>
+                {page === 'inventory'
+                  ? 'Inventory'
+                  : page === 'tools'
+                    ? 'Tools'
+                    : page === 'shopping'
+                      ? 'Shopping'
+                      : 'Gemini'}
+              </h1>
               {page === 'inventory' && (
                 <div className="heading-actions">
                   <button
                     className="button secondary"
+                    aria-label="Scan groceries"
                     onClick={() => {
                       openScanner();
                     }}
                   >
-                    <ScanLine size={19} />
-                    <span>Scan groceries</span>
+                    <ScanLine size={18} />
+                    <span>Scan</span>
                   </button>
                   <button className="button primary" onClick={openAdd}>
-                    <Plus size={19} />
+                    <Plus size={18} />
                     <span>Add item</span>
                   </button>
                 </div>
@@ -754,61 +690,6 @@ export default function App() {
             />
           ) : page === 'inventory' ? (
             <>
-              <div className="overview-grid">
-                <button
-                  className={`overview-card ${filter === 'all' ? 'chosen' : ''}`}
-                  onClick={() => setFilter('all')}
-                >
-                  <div className="overview-icon green">
-                    <Package size={21} />
-                  </div>
-                  <div>
-                    <span>In your kitchen</span>
-                    <strong>
-                      {groups.length}
-                      <small>{groups.length === 1 ? 'item' : 'items'}</small>
-                    </strong>
-                  </div>
-                  <ChevronRight size={16} />
-                </button>
-                <button
-                  className={`overview-card ${filter === 'soon' ? 'chosen' : ''}`}
-                  onClick={() => {
-                    setFilter((current) => (current === 'soon' ? 'all' : 'soon'));
-                    setSort('expiry');
-                  }}
-                >
-                  <div className="overview-icon amber">
-                    <Flame size={21} />
-                  </div>
-                  <div>
-                    <span>Check soon</span>
-                    <strong>
-                      {soonCount}
-                      <small>{soonCount === 1 ? 'batch' : 'batches'}</small>
-                    </strong>
-                  </div>
-                  <ChevronRight size={16} />
-                </button>
-                <button
-                  className={`overview-card ${filter === 'undated' ? 'chosen' : ''}`}
-                  onClick={() =>
-                    setFilter((current) => (current === 'undated' ? 'all' : 'undated'))
-                  }
-                >
-                  <div className="overview-icon neutral">
-                    <CircleHelp size={21} />
-                  </div>
-                  <div>
-                    <span>Missing a date</span>
-                    <strong>
-                      {undatedCount}
-                      <small>{undatedCount === 1 ? 'batch' : 'batches'}</small>
-                    </strong>
-                  </div>
-                  <ChevronRight size={16} />
-                </button>
-              </div>
               <div className="inventory-panel">
                 <div className="panel-controls">
                   <div className="storage-tabs" role="group" aria-label="Storage location">
@@ -818,12 +699,7 @@ export default function App() {
                         className={location === value ? 'active' : ''}
                         onClick={() => setLocation(value)}
                       >
-                        {value === 'all' ? 'Everything' : locationNames[value]}
-                        <span>
-                          {value === 'all'
-                            ? groups.length
-                            : groups.filter((group) => group.location === value).length}
-                        </span>
+                        {value === 'all' ? 'All' : locationNames[value]}
                       </button>
                     ))}
                   </div>
@@ -837,17 +713,57 @@ export default function App() {
                         onChange={(event) => setSearch(event.target.value)}
                       />
                     </label>
-                    <Choice
-                      label="Sort inventory"
-                      value={sort}
-                      onChange={setSort}
-                      options={[
-                        { value: 'name', label: 'Name A–Z' },
-                        { value: 'expiry', label: 'Expiration date' },
-                        { value: 'purchased', label: 'Recently bought' },
-                      ]}
-                    />
                   </div>
+                  {(groups.length > 0 || filter !== 'all') && (
+                    <div className="list-options">
+                      {(soonCount > 0 || filter === 'soon') && (
+                        <button
+                          className={`filter-chip ${filter === 'soon' ? 'active' : ''}`}
+                          aria-pressed={filter === 'soon'}
+                          onClick={() => {
+                            setFilter((current) => (current === 'soon' ? 'all' : 'soon'));
+                            setSort('expiry');
+                          }}
+                        >
+                          Expiring soon <span>{soonCount}</span>
+                        </button>
+                      )}
+                      {(undatedCount > 0 || filter === 'undated') && (
+                        <button
+                          className={`filter-chip ${filter === 'undated' ? 'active' : ''}`}
+                          aria-pressed={filter === 'undated'}
+                          onClick={() =>
+                            setFilter((current) => (current === 'undated' ? 'all' : 'undated'))
+                          }
+                        >
+                          Missing a date <span>{undatedCount}</span>
+                        </button>
+                      )}
+                      {groups.length > 0 && (
+                        <div className="sort-control">
+                          <Choice
+                            label="Sort inventory"
+                            value={sort}
+                            onChange={setSort}
+                            options={[
+                              { value: 'name', label: 'Name A–Z' },
+                              { value: 'expiry', label: 'Expiration date' },
+                              { value: 'purchased', label: 'Recently bought' },
+                            ]}
+                          />
+                        </div>
+                      )}
+                      {groups.length > 0 && (
+                        <button
+                          className="text-button select-toggle"
+                          aria-pressed={selecting}
+                          onClick={() => setSelecting((current) => !current)}
+                        >
+                          {selecting ? 'Done' : 'Select'}
+                        </button>
+                      )}
+                    </div>
+                  )}
                 </div>
                 {selected.length > 0 && (
                   <div className="selection-bar">
@@ -887,32 +803,15 @@ export default function App() {
                 )}
                 {!inventory.batches.length && snapshot.status !== 'loading' ? (
                   <div className="empty-state">
-                    <div className="empty-art">
-                      <div className="empty-orbit" />
-                      <div className="empty-basket">
-                        <CookingPot size={52} strokeWidth={1.25} />
-                        <span>
-                          <Leaf size={21} />
-                        </span>
-                      </div>
-                      <span className="art-dot one" />
-                      <span className="art-dot two" />
-                    </div>
-                    <div className="eyebrow">A FRESH START</div>
-                    <h2>A calmer kitchen starts here.</h2>
-                    <p>
-                      Add a few ingredients you already have.
-                      <br />
-                      We’ll keep everything in one easy place.
-                    </p>
+                    <h2>No items yet</h2>
+                    <p>Add what’s in your fridge, freezer, and pantry.</p>
                     <button className="button primary" onClick={openAdd}>
                       <Plus size={18} />
                       Add your first item
                     </button>
                     <button className="text-button" onClick={openScanner}>
                       <ScanLine size={16} />
-                      Or scan your groceries
-                      <ArrowRight size={15} />
+                      Or scan groceries
                     </button>
                   </div>
                 ) : (
@@ -921,6 +820,7 @@ export default function App() {
                       groups={visibleGroups}
                       expanded={expanded}
                       selected={selected}
+                      selectable={selecting || selected.length > 0}
                       onToggleGroup={(id) => setExpanded((current) => (current === id ? null : id))}
                       onToggleSelected={toggleSelected}
                       onEdit={openEdit}
@@ -944,63 +844,7 @@ export default function App() {
                     />
                   </>
                 )}
-                <div className="panel-footer">
-                  <ShieldCheck size={15} />
-                  <span>
-                    {snapshot.mode === 'cloud'
-                      ? 'Saved to your personal kitchen'
-                      : 'Saved in this browser'}
-                    {snapshot.status === 'saving' ? ' · Saving…' : ''}
-                  </span>
-                  <span>
-                    {inventory.batches.length} purchase{' '}
-                    {inventory.batches.length === 1 ? 'batch' : 'batches'}
-                  </span>
-                </div>
               </div>
-              <div className="gemini-card">
-                <div className="gemini-icon">
-                  <Sparkles size={24} strokeWidth={1.5} />
-                </div>
-                <div className="gemini-copy">
-                  <h2>Your ingredients. A little inspiration.</h2>
-                  <p>Ask Gemini what’s for dinner, or copy your inventory to any AI.</p>
-                </div>
-                <div className="gemini-actions">
-                  <button className="button primary" onClick={() => setPage('assistant')}>
-                    <MessageCircle size={17} /> Ask Gemini
-                  </button>
-                  <button
-                    className="button mint-outline"
-                    onClick={() => {
-                      void copyInventory(false);
-                    }}
-                  >
-                    <Clipboard size={17} />
-                    Copy for Gemini
-                  </button>
-                  <a
-                    className="icon-button"
-                    href="https://gemini.google.com/app"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    aria-label="Open Gemini"
-                  >
-                    <ExternalLink size={19} />
-                  </a>
-                  <button
-                    className="icon-button"
-                    aria-label="Preview inventory export"
-                    onClick={() => {
-                      setExportSelected(false);
-                      setExportOpen(true);
-                    }}
-                  >
-                    <ChevronRight size={20} />
-                  </button>
-                </div>
-              </div>
-              <p className="footnote">A little less planning. A little more cooking.</p>
             </>
           ) : (
             <div className="tools-panel">
@@ -1036,22 +880,12 @@ export default function App() {
               </form>
               {!inventory.tools.length ? (
                 <div className="empty-state compact">
-                  <div className="empty-basket">
-                    <Utensils size={40} strokeWidth={1.3} />
-                  </div>
-                  <h2>What do you cook with?</h2>
-                  <p>
-                    Add your kitchen tools. They’ll be included
-                    <br />
-                    when you copy your inventory for Gemini.
-                  </p>
+                  <h2>No tools yet</h2>
+                  <p>Tools you add are included when you copy your kitchen for Gemini.</p>
                 </div>
               ) : (
                 inventory.tools.map((tool) => (
                   <div className="tool-row" key={tool.id}>
-                    <span className="overview-icon">
-                      <Utensils size={20} />
-                    </span>
                     <strong>{tool.name}</strong>
                     <button
                       className="icon-button"
@@ -1088,10 +922,6 @@ export default function App() {
             onClick={() => setPage('assistant')}
           >
             <Sparkles size={20} /> Gemini
-          </button>
-          <button className="mobile-scan" onClick={openScanner}>
-            <ScanLine size={23} />
-            Scan
           </button>
           <button className={page === 'tools' ? 'active' : ''} onClick={() => setPage('tools')}>
             <Utensils size={20} />
@@ -1316,7 +1146,6 @@ export default function App() {
       >
         <div className="settings-section">
           <div className="settings-section-heading">
-            <Cloud size={21} />
             <div>
               <h3>Saved on this device</h3>
               <p>Local only · This browser has its own kitchen.</p>

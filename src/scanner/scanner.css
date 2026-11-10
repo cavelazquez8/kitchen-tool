@@ -1,5 +1,5 @@
 .scanner {
-  color: #edf0f7;
+  color: var(--label);
   width: 100%;
   container-type: inline-size;
 }
@@ -11,8 +11,8 @@
   padding-bottom: 24px;
 }
 .scanner__eyebrow {
-  color: #8ca8fc;
-  font-size: 10px;
+  color: var(--label-2);
+  font-size: 12px;
   font-weight: 650;
   letter-spacing: 0.14em;
 }
@@ -25,7 +25,7 @@
 .scanner__header p {
   margin: 0;
   max-width: 440px;
-  color: #a2a9bb;
+  color: var(--label-2);
   font-size: 14px;
   line-height: 1.55;
 }
@@ -34,9 +34,9 @@
   min-height: 48px;
   display: grid;
   place-items: center;
-  border: 1px solid #353945;
-  background: #20232b;
-  color: #c7cbda;
+  border: 1px solid var(--separator);
+  background: var(--surface-2);
+  color: var(--label);
   border-radius: 14px;
   cursor: pointer;
 }
@@ -52,8 +52,7 @@
   position: relative;
   overflow: hidden;
   display: grid;
-  background: #111319;
-  border: 1px solid #353945;
+  background: var(--surface);
   border-radius: 20px;
   aspect-ratio: 4 / 3;
   min-height: 240px;
@@ -79,12 +78,11 @@
 .scanner__camera-symbol {
   width: 72px;
   height: 72px;
-  border: 1px solid #3a435a;
   border-radius: 22px;
   display: grid;
   place-items: center;
-  background: #202632;
-  color: #9db6ff;
+  background: var(--surface-2);
+  color: var(--label);
   margin: 0 auto 20px;
 }
 .scanner__camera-placeholder h3 {
@@ -94,7 +92,7 @@
   letter-spacing: -0.03em;
 }
 .scanner__camera-placeholder p {
-  color: #a3aabb;
+  color: var(--label-2);
   font-size: 13px;
   line-height: 1.6;
   margin: 0 0 20px;
@@ -110,10 +108,10 @@
   position: absolute;
   width: 28px;
   height: 28px;
-  border-color: #c5d4ff;
+  border-color: var(--separator);
   border-style: solid;
   border-width: 0;
-  filter: drop-shadow(0 1px 3px #000);
+  filter: drop-shadow(0 1px 3px var(--bg));
 }
 .scanner__target span:nth-child(1) {
   top: 0;
@@ -144,7 +142,7 @@
   border-bottom-right-radius: 8px;
 }
 .scanner__preview--captured .scanner__target span {
-  border-color: #7fe1b0;
+  border-color: var(--separator);
 }
 .scanner__camera-label {
   position: absolute;
@@ -154,7 +152,7 @@
   bottom: 16px;
   left: 16px;
   border: 1px solid #ffffff24;
-  background: #14161dc9;
+  background: color-mix(in srgb, var(--surface) 79%, transparent);
   border-radius: 100px;
   padding: 8px 12px;
   font-size: 12px;
@@ -165,11 +163,11 @@
   display: inline-block;
   width: 7px;
   height: 7px;
-  background: #87e5b5;
+  background: var(--accent);
   border-radius: 50%;
 }
 .scanner__paused-dot {
-  background: #96a8d9;
+  background: var(--label);
 }
 .scanner__status {
   display: flex;
@@ -178,10 +176,10 @@
   min-height: 46px;
   padding: 12px 2px;
   font-size: 13px;
-  color: #aeb8d1;
+  color: var(--label-2);
 }
 .scanner__status svg {
-  color: #95acef;
+  color: var(--label-2);
   flex-shrink: 0;
 }
 .scanner__button {
@@ -199,13 +197,13 @@
   cursor: pointer;
 }
 .scanner__button--primary {
-  background: #abc0ff;
-  color: #11182b;
+  background: var(--label);
+  color: var(--bg);
 }
 .scanner__button--secondary {
-  background: #292f3d;
-  border-color: #414a5d;
-  color: #e1e7f9;
+  background: var(--surface-3);
+  border-color: var(--separator);
+  color: var(--label);
 }
 .scanner__button:hover:not(:disabled) {
   filter: brightness(1.08);
@@ -217,14 +215,14 @@
 .scanner button:focus-visible,
 .scanner input:focus-visible,
 .scanner a:focus-visible {
-  outline: 3px solid #bdd0ff;
+  outline: 3px solid var(--separator);
   outline-offset: 3px;
 }
 .scanner__next {
   width: 100%;
 }
 .scanner__hint {
-  color: #8e98af;
+  color: var(--label-2);
   font-size: 12px;
   margin: 9px 0 0;
   line-height: 1.5;
@@ -232,14 +230,14 @@
 .scanner__manual {
   padding-top: 22px;
   margin-top: 18px;
-  border-top: 1px solid #303642;
+  border-top: 1px solid var(--separator);
 }
 .scanner__manual label {
   display: flex;
   gap: 8px;
   align-items: center;
   font-size: 13px;
-  color: #b6bed0;
+  color: var(--label-2);
   margin-bottom: 10px;
 }
 .scanner__manual-row {
@@ -252,18 +250,18 @@
   width: 100%;
   min-width: 0;
   min-height: 48px;
-  border-radius: 13px;
-  border: 1px solid #373e4d;
-  background: #191d26;
-  color: #edf0f7;
+  border-radius: 12px;
+  border: 1px solid transparent;
+  background: var(--field);
+  color: var(--label);
   padding: 12px 14px;
   font-size: 16px;
 }
 .scanner__manual-row input::placeholder {
-  color: #707b93;
+  color: var(--label-3);
 }
 .scanner__error {
-  color: #ffafb0;
+  color: var(--danger);
   margin: 10px 0 0;
   font-size: 13px;
   line-height: 1.5;
@@ -283,29 +281,28 @@
   align-items: center;
   gap: 7px;
   padding: 8px 2px;
-  color: #9da9c3;
+  color: var(--label-2);
   font-size: 12px;
   cursor: pointer;
 }
 .scanner__layout-button[aria-pressed='true'] {
-  color: #b6c9ff;
+  color: var(--label);
 }
 .scanner__source {
-  font-size: 11px;
-  color: #818b9f;
+  font-size: 12px;
+  color: var(--label-2);
   line-height: 1.5;
   margin: 4px 0 0;
 }
 .scanner__source a {
-  color: #a9b6d3;
+  color: var(--label-2);
   text-decoration: underline;
   text-underline-offset: 3px;
 }
 .scanner__tray {
   min-width: 0;
   padding: 20px;
-  background: #191d25;
-  border: 1px solid #303744;
+  background: var(--surface);
   border-radius: 20px;
 }
 .scanner__tray-heading {
@@ -321,7 +318,7 @@
   margin: 0;
 }
 .scanner__tray-heading span {
-  color: #939db4;
+  color: var(--label-2);
   font-size: 12px;
   white-space: nowrap;
 }
@@ -359,9 +356,8 @@
   gap: 16px;
   margin-top: 20px;
   padding: 16px;
-  border: 1px solid #353e4d;
   border-radius: 14px;
-  background: #1d232d;
+  background: var(--surface-2);
   cursor: pointer;
 }
 .scanner__auto-next > span {
@@ -369,12 +365,12 @@
   gap: 5px;
 }
 .scanner__auto-next strong {
-  color: #e2e9f7;
+  color: var(--label);
   font-size: 13px;
   font-weight: 550;
 }
 .scanner__auto-next span span {
-  color: #9ba8bf;
+  color: var(--label-2);
   font-size: 12px;
   line-height: 1.5;
 }
@@ -383,9 +379,9 @@
   flex: 0 0 48px;
   width: 48px;
   height: 28px;
-  border: 1px solid #526078;
+  border: 1px solid var(--separator);
   border-radius: 999px;
-  background: #394457;
+  background: var(--surface-3);
   position: relative;
   cursor: pointer;
 }
@@ -397,13 +393,13 @@
   width: 20px;
   height: 20px;
   border-radius: 50%;
-  background: #edf2ff;
+  background: var(--label);
 }
 .scanner__auto-next input:checked {
-  background: #93cbb5;
-  border-color: #93cbb5;
+  background: var(--surface-3);
+  border-color: var(--separator);
 }
 .scanner__auto-next input:checked::after {
   left: 23px;
-  background: #142b22;
+  background: var(--surface);
 }

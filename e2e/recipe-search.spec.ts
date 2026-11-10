@@ -134,6 +134,7 @@ test.beforeEach(async ({ page }) => {
 test('updates local results and counts while typing, changing facets, and choosing inventory', async ({
   page,
 }) => {
+  await page.getByRole('button', { name: 'Select', exact: true }).click();
   await page.getByRole('checkbox', { name: 'Select Rice in Pantry', exact: true }).check();
   await navigateRecipes(page);
   await expectCount(page, 6);
@@ -578,6 +579,7 @@ test('reveals recipes hidden by category without changing selected inventory or 
       }),
     });
   });
+  await page.getByRole('button', { name: 'Select', exact: true }).click();
   await page.getByRole('checkbox', { name: 'Select Rice in Pantry', exact: true }).check();
   await navigateRecipes(page);
   await setPreference(page, 'Use only selected inventory', true);

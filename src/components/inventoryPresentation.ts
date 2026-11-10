@@ -44,19 +44,3 @@ export function stapleCaption(group: InventoryGroup): string {
   }
   return available.some((batch) => batch.stapleStatus === 'low') ? 'Running low' : 'Empty';
 }
-
-export function foodIcon(name: string): string {
-  if (/milk|cream|yogurt|cheese|butter/i.test(name)) return '🥛';
-  if (/egg/i.test(name)) return '🥚';
-  if (/chicken|turkey/i.test(name)) return '🍗';
-  if (/beef|steak|pork|meat/i.test(name)) return '🥩';
-  if (/carrot/i.test(name)) return '🥕';
-  if (/apple|pear|fruit/i.test(name)) return '🍎';
-  if (/lemon|lime|orange/i.test(name)) return '🍋';
-  if (/rice|pasta|noodle/i.test(name)) return '🍚';
-  if (/bread|flour|bagel/i.test(name)) return '🍞';
-  if (/fish|salmon|tuna/i.test(name)) return '🐟';
-  if (/tomato/i.test(name)) return '🍅';
-  if (/potato/i.test(name)) return '🥔';
-  return '🌿';
-}

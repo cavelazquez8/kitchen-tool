@@ -1,7 +1,6 @@
 .grocery-mode-panel {
   padding: 16px;
   margin-bottom: 18px;
-  border: 1px solid var(--line);
   border-radius: 18px;
   background: var(--panel);
 }
@@ -10,7 +9,7 @@
   grid-template-columns: 1fr 1fr;
   padding: 4px;
   gap: 4px;
-  background: #14171b;
+  background: var(--surface);
   border-radius: 12px;
   margin-bottom: 14px;
 }
@@ -26,13 +25,12 @@
   cursor: pointer;
 }
 .grocery-mode button.selected {
-  background: #30383b;
-  color: #f1f5f3;
-  box-shadow: 0 2px 6px #0003;
+  background: var(--surface-3);
+  color: var(--label);
 }
 .grocery-field-heading {
   display: block;
-  color: #cdd5d2;
+  color: var(--label);
   font-size: 12px;
   font-weight: 650;
   margin-bottom: 9px;
@@ -48,26 +46,26 @@
   justify-content: center;
   gap: 7px;
   min-height: 54px;
-  border: 1px solid #343c40;
+  border: 1px solid var(--separator);
   border-radius: 12px;
-  background: #1c2226;
-  color: #b6c0be;
+  background: var(--surface-2);
+  color: var(--label-2);
   font: inherit;
   font-size: 13px;
   cursor: pointer;
   padding: 8px 4px;
 }
 .grocery-destinations button.selected {
-  background: #253b31;
-  border-color: #77ad88;
-  color: #dcefe0;
+  background: var(--surface-2);
+  border-color: var(--separator);
+  color: var(--label);
 }
 .grocery-auto {
   display: flex;
   align-items: flex-start;
   gap: 12px;
   margin-top: 16px;
-  color: #c9d3ce;
+  color: var(--label);
   font-size: 13px;
   line-height: 1.5;
   cursor: pointer;
@@ -77,7 +75,7 @@
   height: 19px;
   margin: 2px 0 0;
   flex-shrink: 0;
-  accent-color: #94b895;
+  accent-color: var(--surface-3);
 }
 .grocery-auto strong,
 .grocery-auto small {
@@ -93,7 +91,7 @@
   margin-top: -4px;
 }
 .grocery-auto small {
-  color: #8e9c96;
+  color: var(--label-2);
   margin-top: 4px;
   font-size: 12px;
 }
@@ -111,13 +109,12 @@
 }
 .grocery-brand {
   font-size: 12px;
-  color: #98a59f;
+  color: var(--label-2);
   margin-top: -11px;
 }
 .grocery-identity {
-  border: 1px solid #343e3a;
   border-radius: 14px;
-  background: #17211c;
+  background: var(--surface);
   padding: 14px;
 }
 .grocery-identity p {
@@ -129,7 +126,7 @@
   display: flex;
   gap: 7px;
   align-items: center;
-  color: #a4c9a5;
+  color: var(--label-2);
 }
 .grocery-candidates {
   display: flex;
@@ -145,10 +142,9 @@
   margin-top: 10px;
 }
 .grocery-recent {
-  border: 1px solid #303936;
   border-radius: 16px;
   padding: 16px;
-  background: #191f1c;
+  background: var(--surface);
 }
 .grocery-recent > p {
   font-size: 13px;
@@ -160,7 +156,7 @@
   align-items: center;
   padding: 13px 0;
   gap: 12px;
-  border-bottom: 1px solid #303936;
+  border-bottom: 1px solid var(--separator);
 }
 .grocery-recent-row strong,
 .grocery-recent-row small {
@@ -171,7 +167,7 @@
 }
 .grocery-recent-row small {
   margin-top: 5px;
-  color: #97a69f;
+  color: var(--label-2);
   font-size: 12px;
 }
 .grocery-recent > .button {

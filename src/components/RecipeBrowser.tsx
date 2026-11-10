@@ -9,7 +9,6 @@ import {
   Sparkles,
   Trash2,
   Upload,
-  Utensils,
   X,
 } from 'lucide-react';
 import type { InventoryState } from '../domain/types';
@@ -101,14 +100,7 @@ function RecipeCard({
   const recipe = match.recipe;
   return (
     <article className="recipe-card">
-      {safeLink(recipe.imageUrl) ? (
-        <img src={recipe.imageUrl} alt="" loading="lazy" />
-      ) : (
-        <div className="recipe-art" aria-hidden="true">
-          <Utensils size={30} strokeWidth={1.3} />
-          <span>{recipe.category ?? 'From the cookbook'}</span>
-        </div>
-      )}
+      {safeLink(recipe.imageUrl) && <img src={recipe.imageUrl} alt="" loading="lazy" />}
       <div className="recipe-card-body">
         <MatchBadge match={match} />
         <button className="recipe-title" onClick={onOpen}>
@@ -117,6 +109,7 @@ function RecipeCard({
         <p>{availabilitySummary(match, showMatches)}</p>
         <small>
           {recipe.source.name ?? sourceLabels[recipe.source.type]}
+          {recipe.category ? ` · ${recipe.category}` : ''}
           {recipe.servings ? ` · ${recipe.servings} servings` : ' · Yield not recorded'}
         </small>
         <div className="hub-actions">
@@ -501,7 +494,6 @@ export function RecipeBrowser({
       <header className="recipe-browser-heading">
         <div>
           <h1>Recipes</h1>
-          <p>Your collection, ready for your next meal.</p>
         </div>
         <div className="recipe-browser-actions">
           <button className="button secondary" onClick={onImport}>

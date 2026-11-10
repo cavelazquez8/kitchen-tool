@@ -6,6 +6,7 @@ A touch-friendly kitchen inventory, recipe library, meal planner, shopping list,
 
 ## Everyday use
 
+- Inventory is a plain list grouped by Fridge, Freezer, and Pantry. Use the location control, search, and Sort; the **Expiring soon** and **No date** chips filter by date. **Select** shows checkboxes for copying chosen ingredients or sharing them with Gemini. On phones the bottom bar switches between Inventory, Recipes, Shop, Gemini, and Tools; wider screens use a sidebar. Settings is the gear, where storage status, backup, the inventory export preview, and connections live.
 - Add foods with in-app autocomplete, scan barcodes, or tap familiar ingredients while shopping.
 - Scanning automatically continues by default. Turn it off in the scanner; the preference stays on this device.
 - Each scan opens a quick review with storage destination, quantity, and optional expiration date. **Add & scan next** saves that purchase immediately; **Undo** removes it. Choose **Bulk scan** to send a batch to one location, optionally adding clear matches automatically. Duplicates, unknown products, and uncertain ingredient identities always require review.
@@ -21,7 +22,7 @@ A touch-friendly kitchen inventory, recipe library, meal planner, shopping list,
 - Add your own recipes or import pasted recipes. Website import uses published Recipe JSON-LD through the optional backend.
 - Review recorded quantities, cook with step timers, and optionally keep the screen awake. Finish cooking reviews deductions before changing inventory.
 - Save recipes and choose meal-plan portions. Request a shopping list to combine requirements and subtract inventory once.
-- Ask Gemini follow-up questions inside Mise after connecting the optional free-tier backend. Copy for Gemini remains available without a backend.
+- Ask Gemini follow-up questions inside Mise after connecting the optional free-tier backend. Copy kitchen context on the Gemini page, and Preview inventory export in Settings, remain available without a backend.
 - Choose a Gemini model in settings and save it on this device. **Worker default** uses Cloudflare’s configured model; supported free-tier choices travel with your requests.
 - Mise checks Google’s model catalog and Standard free-tier pricing when you open settings after an hour. **Refresh models** checks immediately. Review and enable new verified choices before saving; paid or unverified models remain disabled. After the initial Worker update for discovery, new eligible model IDs need no separate Worker deployment.
 - Open **Your profile** from Gemini or settings to manage daily nutrition targets and multiple body scans. Save PDFs, pictures, or pasted text; explicitly read with Gemini, review, then choose **Add to Gemini** for the reports you want in a conversation. Backups include the original files.

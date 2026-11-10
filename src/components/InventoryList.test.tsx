@@ -42,6 +42,7 @@ function Harness({
       groups={groupInventory(state)}
       expanded={expanded}
       selected={[]}
+      selectable={false}
       onToggleGroup={(id) => setExpanded((current) => (current === id ? null : id))}
       onToggleSelected={vi.fn()}
       onEdit={onEdit}

@@ -1,3 +1,4 @@
+import { openSettings } from './helpers/settings';
 import { chooseRecipeFilter, clearRecipeFilters, chooseRecipeSort } from './helpers/recipeFilters';
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import { readFile } from 'node:fs/promises';
@@ -80,8 +81,10 @@ test.beforeEach(async ({ page }) => {
 });
 
 test('starts empty, labels local saving, and fits its screen', async ({ page }) => {
-  await expect(page.getByRole('heading', { name: 'A calmer kitchen starts here.' })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Local only' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'No items yet' })).toBeVisible();
+  await openSettings(page);
+  await expect(page.getByText('Local only · This browser has its own kitchen.')).toBeVisible();
+  await page.keyboard.press('Escape');
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(
     true,
   );
@@ -119,6 +122,7 @@ test('saves unknown quantity across reload and exports Markdown', async ({ page 
   await page.reload();
   await expect(page.getByText('Carrots', { exact: true })).toBeVisible();
   await expect(page.getByText('Quantity unknown', { exact: true })).toBeVisible();
+  await openSettings(page);
   await page.getByRole('button', { name: 'Preview inventory export' }).click();
   await expect(page.getByLabel('Copyable inventory Markdown')).toHaveValue(
     /Carrots[^\n]*Quantity unknown/,
@@ -169,7 +173,9 @@ test('unknown quantity needs remaining amount and rejects excess deductions', as
 test('selected export contains only chosen ingredients', async ({ page }) => {
   await addItem(page, 'Carrots', '2');
   await addItem(page, 'Potatoes', '5');
+  await page.getByRole('button', { name: 'Select', exact: true }).click();
   await page.getByRole('checkbox', { name: 'Select Carrots in Fridge' }).check();
+  await openSettings(page);
   await page.getByRole('button', { name: 'Preview inventory export' }).click();
   await page.getByRole('checkbox', { name: 'Only selected ingredients' }).check();
   const value = await page.getByLabel('Copyable inventory Markdown').inputValue();
@@ -236,7 +242,7 @@ test('tools and backup restore work with explicit replacement', async ({ page })
   await page.getByRole('option', { name: 'Air fryer', exact: true }).click();
   await page.getByRole('button', { name: 'Add tool', exact: true }).click();
   await expect(page.getByText('Air fryer', { exact: true })).toBeVisible();
-  await page.getByRole('button', { name: 'Local only' }).click();
+  await openSettings(page);
   const fileInput = page.locator('input[type=file]');
   const inventory = {
     products: [{ id: 'p', name: 'Backup carrots', isStaple: false }],
@@ -563,7 +569,7 @@ test('keeps local browsing during provider failure and saves licensed recipes in
   await page.getByRole('button', { name: 'Make shopping list', exact: true }).click();
   await expect(page.locator('.shopping-row')).toContainText('50 g');
   expect((await storedKitchen(page)).recipes?.[0].source.license).toBe('CC BY-SA 4.0');
-  await page.getByRole('button', { name: 'Local only', exact: true }).click();
+  await openSettings(page);
   const download = page.waitForEvent('download');
   await page
     .getByRole('dialog', { name: 'Your kitchen, your way' })
@@ -920,7 +926,7 @@ test('retains Gemini setup after failed checks, returning from chat and reload, 
       }),
     });
   });
-  await page.getByRole('button', { name: 'Local only', exact: true }).click();
+  await openSettings(page);
   const settings = page.getByRole('dialog', { name: 'Your kitchen, your way' });
   const address = settings.getByLabel('Backend address', { exact: true });
   const token = settings.getByLabel('Pairing token', { exact: true });
@@ -946,7 +952,7 @@ test('retains Gemini setup after failed checks, returning from chat and reload, 
   await expect(token).toHaveValue(wrongToken);
   expect(chatRequests).toBe(0);
   await page.reload();
-  await page.getByRole('button', { name: 'Local only', exact: true }).click();
+  await openSettings(page);
   await expect(address).toHaveValue(hostname);
   await expect(token).toHaveValue(wrongToken);
   const download = page.waitForEvent('download');
@@ -970,7 +976,7 @@ test('retains Gemini setup after failed checks, returning from chat and reload, 
   await page.getByRole('button', { name: 'Ask Gemini', exact: true }).click();
   await expect(page.getByText('Ready to help with dinner.', { exact: true })).toBeVisible();
   expect(chatRequests).toBe(1);
-  await page.getByRole('button', { name: 'Local only', exact: true }).click();
+  await openSettings(page);
   await expect(settings.getByText(/Connection saved on this device/)).toBeVisible();
 });
 
@@ -1048,7 +1054,7 @@ test('uses mocked Gemini recipes, keeps follow-up context, bounds history, and e
       body: JSON.stringify(reply),
     });
   });
-  await page.getByRole('button', { name: 'Local only', exact: true }).click();
+  await openSettings(page);
   const settings = page.getByRole('dialog', { name: 'Your kitchen, your way' });
   await settings.getByLabel('Backend address', { exact: true }).fill(backend);
   await settings.getByLabel('Pairing token', { exact: true }).fill(token);
@@ -1101,7 +1107,7 @@ test('uses mocked Gemini recipes, keeps follow-up context, bounds history, and e
     ).toBe(true);
     expect(JSON.stringify(request)).not.toContain(token);
   }
-  await page.getByRole('button', { name: 'Local only', exact: true }).click();
+  await openSettings(page);
   const download = page.waitForEvent('download');
   await settings.getByRole('button', { name: 'Download backup', exact: true }).click();
   const file = await (await download).path();

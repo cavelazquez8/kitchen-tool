@@ -6,44 +6,15 @@
   gap: 8px 16px;
 }
 .shopping-list-actions .text-button,
-.gemini-recipe-context .text-button,
 .recipe-card-secondary-actions .text-button {
   min-height: 44px;
-}
-.gemini-recipe-context {
-  padding: 16px;
-  margin: 0 0 18px;
-  border: 1px solid #354239;
-  border-radius: 16px;
-  background: #19221c;
-}
-.gemini-recipe-context .hub-section-title {
-  margin-bottom: 4px;
-}
-.gemini-recipe-context h3 {
-  font-size: 14px;
-}
-.gemini-context-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  border-top: 1px solid #354239;
-}
-.gemini-context-row > .text-button {
-  min-width: 0;
-  text-align: left;
-  overflow-wrap: anywhere;
-}
-.gemini-context-row > .icon-button {
-  flex-shrink: 0;
 }
 .recipe-card-secondary-actions {
   display: flex;
   justify-content: space-between;
   align-items: center;
   gap: 8px;
-  border-top: 1px solid #354239;
+  border-top: 1px solid var(--separator);
   margin-top: 12px;
   padding-top: 4px;
 }
@@ -54,5 +25,5 @@
   font-size: 12px;
 }
 .recipe-card-secondary-actions > .icon-button {
-  color: #bfa29b;
+  color: var(--label-2);
 }

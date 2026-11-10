@@ -1,15 +1,4 @@
-import {
-  ChevronDown,
-  ChevronRight,
-  CircleHelp,
-  CookingPot,
-  Ellipsis,
-  Minus,
-  Package,
-  Plus,
-  Search,
-  Snowflake,
-} from 'lucide-react';
+import { ChevronDown, ChevronRight, CircleHelp, Minus, Plus } from 'lucide-react';
 import { daysBetween, daysUntil, formatQuantity, todayDate } from '../domain/inventory';
 import {
   type Batch,
@@ -18,25 +7,15 @@ import {
   LOCATION_LABELS,
   STORAGE_LOCATIONS,
 } from '../domain/types';
-import {
-  dateLabel,
-  expiryLabel,
-  foodIcon,
-  groupExpiry,
-  stapleCaption,
-} from './inventoryPresentation';
+import { dateLabel, expiryLabel, groupExpiry, stapleCaption } from './inventoryPresentation';
 import './inventory-polish.css';
-
-const locationIcons = {
-  fridge: <Package size={17} />,
-  freezer: <Snowflake size={17} />,
-  pantry: <CookingPot size={17} />,
-};
 
 export interface InventoryListProps {
   groups: InventoryGroup[];
   expanded: string | null;
   selected: string[];
+  /** Row checkboxes appear while choosing items, and whenever something is selected. */
+  selectable: boolean;
   onToggleGroup: (id: string) => void;
   onToggleSelected: (group: InventoryGroup) => void;
   onEdit: (batch: Batch, product: Product) => void;
@@ -50,6 +29,7 @@ export function InventoryList({
   groups,
   expanded,
   selected,
+  selectable,
   onToggleGroup,
   onToggleSelected,
   onEdit,
@@ -60,15 +40,9 @@ export function InventoryList({
 }: InventoryListProps) {
   return (
     <>
-      <div className="list-heading">
-        <span>INGREDIENT</span>
-        <span>QUANTITY</span>
-        <span>EXPIRATION</span>
-      </div>
       {groups.length === 0 && (
         <div className="no-results">
-          <Search size={26} />
-          <h3>No items here yet.</h3>
+          <h3>No matches</h3>
           <p>Try another location, search, or filter.</p>
           <button className="text-button" onClick={onClearFilters}>
             Clear filters
@@ -85,9 +59,7 @@ export function InventoryList({
               aria-label={LOCATION_LABELS[storage]}
             >
               <div className="section-label">
-                {locationIcons[storage]}
                 <h2>{LOCATION_LABELS[storage]}</h2>
-                <span>{items.length}</span>
               </div>
               {items.map((group) => {
                 const date = groupExpiry(group);
@@ -130,24 +102,23 @@ export function InventoryList({
                     className={`inventory-group ${expanded === group.id ? 'expanded' : ''}`}
                   >
                     <div className="inventory-row">
-                      <label className="checkbox-hit">
-                        <input
-                          className="item-checkbox"
-                          type="checkbox"
-                          aria-label={`Select ${group.product.name} in ${LOCATION_LABELS[storage]}`}
-                          checked={group.batches.every((batch) => selected.includes(batch.id))}
-                          onChange={() => onToggleSelected(group)}
-                        />
-                      </label>
+                      {selectable && (
+                        <label className="checkbox-hit">
+                          <input
+                            className="item-checkbox"
+                            type="checkbox"
+                            aria-label={`Select ${group.product.name} in ${LOCATION_LABELS[storage]}`}
+                            checked={group.batches.every((batch) => selected.includes(batch.id))}
+                            onChange={() => onToggleSelected(group)}
+                          />
+                        </label>
+                      )}
                       <div className="item-main">
                         <button
                           className="item-summary"
                           onClick={() => onToggleGroup(group.id)}
                           aria-expanded={expanded === group.id}
                         >
-                          <span className="food-icon" aria-hidden="true">
-                            {foodIcon(group.product.name)}
-                          </span>
                           <span className="item-name">
                             <strong>{group.product.name}</strong>
                             <small>
@@ -218,7 +189,6 @@ export function InventoryList({
                         )}
                       </span>
                       <span className={`expiry-badge ${near ? 'soon' : !date ? 'undated' : ''}`}>
-                        {near && <span />}
                         {expiryLabel(date)}
                       </span>
                       <button
@@ -276,14 +246,8 @@ export function InventoryList({
                                   </button>
                                 </span>
                               )}
-                              <button onClick={() => onUse(batch)}>
-                                <Minus size={15} />
-                                Used some
-                              </button>
-                              <button onClick={() => onEdit(batch, group.product)}>
-                                <Ellipsis size={19} />
-                                Edit
-                              </button>
+                              <button onClick={() => onUse(batch)}>Used some</button>
+                              <button onClick={() => onEdit(batch, group.product)}>Edit</button>
                             </div>
                           </div>
                         ))}

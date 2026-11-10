@@ -15,17 +15,13 @@ import {
   ShoppingCart,
   Sparkles,
   Trash2,
-  Utensils,
   Upload,
   X,
   ArrowUp,
-  ChefHat,
   Clock3,
   SlidersHorizontal,
   PackageCheck,
   ChevronDown,
-  Globe,
-  BookOpen,
 } from 'lucide-react';
 import type { InventoryState, ShoppingItem } from '../domain/types';
 import type { InventoryReducer } from '../lib/repository';
@@ -167,12 +163,6 @@ function RecipeCard({
       {recipe.imageUrl && safeLink(recipe.imageUrl) && !imageFailed && (
         <img src={recipe.imageUrl} alt="" loading="lazy" onError={() => setImageFailed(true)} />
       )}
-      {(!safeLink(recipe.imageUrl) || imageFailed) && (
-        <div className="recipe-art" aria-hidden="true">
-          <Utensils size={30} strokeWidth={1.3} />
-          <span>{recipe.category ?? recipe.source.name ?? 'Your recipe'}</span>
-        </div>
-      )}
       <div className="recipe-card-body">
         <MatchBadge match={match} />
         <button className="recipe-title" onClick={onOpen}>
@@ -186,6 +176,7 @@ function RecipeCard({
         </p>
         <small>
           {recipe.source.name ?? sourceLabels[recipe.source.type]}
+          {recipe.category ? ` · ${recipe.category}` : ''}
           {recipe.servings ? ` · ${recipe.servings} servings` : ' · Yield not recorded'}
         </small>
         {duration !== undefined && (
@@ -264,8 +255,6 @@ export function KitchenHub({
   const conversationMode = inventory.assistantSession?.mode ?? 'discover';
   const [modeSaving, setModeSaving] = useState(false);
   const recipeMode = ASSISTANT_RECIPE_MODES.find((mode) => mode.value === conversationMode)!;
-  const RecipeSourceIcon =
-    conversationMode === 'discover' ? Globe : conversationMode === 'library' ? BookOpen : Sparkles;
   const [conversationOptionsOpen, setConversationOptionsOpen] = useState(false);
   const [inventoryContextOpen, setInventoryContextOpen] = useState(false);
   const grounded = conversationMode === 'library';
@@ -924,8 +913,7 @@ export function KitchenHub({
           <section className="quick-shopping">
             <div className="hub-section-title">
               <div>
-                <h2>Quick add while you shop</h2>
-                <p>Scan packaged foods or search for an ingredient.</p>
+                <h2>Quick add</h2>
               </div>
               <button className="button secondary" onClick={onScan}>
                 <ScanLine size={18} />
@@ -960,9 +948,6 @@ export function KitchenHub({
             </div>
             {!plan.length && (
               <div className="empty-meal-plan">
-                <p className="settings-note">
-                  Not sure what to make? Start with a few appealing options.
-                </p>
                 <button
                   className="button secondary"
                   onClick={() => {
@@ -1166,11 +1151,20 @@ export function KitchenHub({
       )}
       {page === 'assistant' && (
         <section className="assistant-panel mise-conversation">
-          <div className="conversation-heading">
-            <div className="assistant-brand">
-              <Sparkles size={20} />
-              <span>YOUR KITCHEN ASSISTANT</span>
-            </div>
+          <div className="assistant-controls">
+            <button
+              className="assistant-source-control"
+              aria-label="Recipe source"
+              aria-expanded={conversationOptionsOpen}
+              aria-controls="assistant-conversation-options"
+              onClick={() => setConversationOptionsOpen((current) => !current)}
+            >
+              <span>
+                <small>Recipe source</small>
+                <strong>{recipeMode.label}</strong>
+              </span>
+              <span className="assistant-source-change">Change</span>
+            </button>
             <button
               className="icon-button conversation-options-button"
               aria-label="Conversation options"
@@ -1181,21 +1175,6 @@ export function KitchenHub({
               <SlidersHorizontal size={19} />
             </button>
           </div>
-          <button
-            className="assistant-source-control"
-            aria-label="Recipe source"
-            aria-expanded={conversationOptionsOpen}
-            aria-controls="assistant-conversation-options"
-            onClick={() => setConversationOptionsOpen((current) => !current)}
-          >
-            <RecipeSourceIcon size={19} aria-hidden="true" />
-            <span>
-              <small>Recipe source</small>
-              <strong>{recipeMode.label}</strong>
-            </span>
-            <span className="assistant-source-change">Change</span>
-            <ChevronDown size={16} aria-hidden="true" />
-          </button>
           {conversationOptionsOpen && (
             <section
               className="conversation-options"
@@ -1277,7 +1256,6 @@ export function KitchenHub({
                   {
                     label: 'Help me choose dinner',
                     description: 'A few good options to start with',
-                    icon: ChefHat,
                     prompt:
                       'Help me choose dinner using real recipes. I am happy to shop for ingredients. Ask a brief question if it would help narrow down appealing options.',
                     createPrompt:
@@ -1286,7 +1264,6 @@ export function KitchenHub({
                   {
                     label: 'Find meals to prep',
                     description: 'Cook once, make the week easier',
-                    icon: Utensils,
                     prompt:
                       'Help me find real recipes that work well for meal prep. I am happy to buy missing ingredients. Help me decide what to make and ask about portions or effort when needed.',
                     createPrompt:
@@ -1295,13 +1272,12 @@ export function KitchenHub({
                   {
                     label: 'Use what I have',
                     description: 'Put your groceries to good use',
-                    icon: PackageCheck,
                     prompt:
                       'Help me find real recipes using what I have, prioritizing items expiring soon. Explain what is missing and keep the original recipe intact unless I ask for substitutions.',
                     createPrompt:
                       'Help me create a recipe using the inventory I have shared, prioritizing items expiring soon. Ask if you need to know quantities or preferences.',
                   },
-                ].map(({ label, description, icon: Icon, prompt, createPrompt }) => (
+                ].map(({ label, description, prompt, createPrompt }) => (
                   <button
                     className="assistant-starter"
                     aria-label={label}
@@ -1318,7 +1294,6 @@ export function KitchenHub({
                       void ask(conversationMode === 'create' ? createPrompt : prompt);
                     }}
                   >
-                    <Icon size={21} />
                     <strong>{label}</strong>
                     <span>{description}</span>
                   </button>
