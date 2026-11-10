@@ -100,6 +100,20 @@ test('starts empty, labels local saving, and fits its screen', async ({ page }) 
   );
 });
 
+test('Escape closes an open suggestion list before the add dialog', async ({ page }) => {
+  await page.getByRole('button', { name: 'Add item', exact: true }).click();
+  const editor = page.getByRole('dialog', { name: 'Add an ingredient' });
+  const name = editor.getByRole('combobox', { name: 'Item name', exact: true });
+  await name.fill('Carr');
+  await expect(name).toHaveAttribute('aria-expanded', 'true');
+  await page.keyboard.press('Escape');
+  await expect(name).toHaveAttribute('aria-expanded', 'false');
+  await expect(editor).toBeVisible();
+  await expect(name).toHaveValue('Carr');
+  await page.keyboard.press('Escape');
+  await expect(editor).not.toBeVisible();
+});
+
 test('saves unknown quantity across reload and exports Markdown', async ({ page }) => {
   await addItem(page, 'Carrots');
   await page.reload();

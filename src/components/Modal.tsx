@@ -24,6 +24,13 @@ export function Modal({ open, onClose, title, description, children, className =
         <Dialog.Content
           className={`modal ${className}`}
           onInteractOutside={(event) => event.preventDefault()}
+          onEscapeKeyDown={(event) => {
+            // Radix listens for Escape on the document before the field sees it. When a
+            // suggestion list is open, the first Escape closes only that list and keeps
+            // the unsaved entry; a second Escape closes the dialog.
+            const focused = event.target instanceof Element ? event.target : null;
+            if (focused?.closest('[role="combobox"][aria-expanded="true"]')) event.preventDefault();
+          }}
         >
           <div className="modal-heading">
             <div>
