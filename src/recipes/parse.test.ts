@@ -38,6 +38,16 @@ describe('recipe measurement parsing', () => {
       quantity: 3,
       unit: 'each',
     });
+    expect(parseIngredientLine('1 quart chicken broth')).toMatchObject({
+      name: 'chicken broth',
+      quantity: 1,
+      unit: 'qt',
+    });
+    expect(parseIngredientLine('0.5 gal milk')).toMatchObject({
+      name: 'milk',
+      quantity: 0.5,
+      unit: 'gal',
+    });
     expect(parseIngredientLine('1-2 cups rice')).toMatchObject({
       name: 'rice',
       quantity: null,

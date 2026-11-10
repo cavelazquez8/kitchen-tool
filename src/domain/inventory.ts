@@ -211,6 +211,10 @@ registerUnit(['tsp', 'teaspoon', 'teaspoons'], 'volume', 4.92892159375);
 registerUnit(['tbsp', 'tablespoon', 'tablespoons'], 'volume', 14.78676478125);
 registerUnit(['cup', 'cups'], 'volume', 236.5882365);
 registerUnit(['fl oz', 'fluid ounce', 'fluid ounces'], 'volume', 29.5735295625);
+// US liquid measures, matching the US cup and fluid ounce above. Pints are left out because
+// British recipes use a 20% larger pint under the same name.
+registerUnit(['qt', 'quart', 'quarts'], 'volume', 946.352946);
+registerUnit(['gal', 'gallon', 'gallons'], 'volume', 3785.411784);
 registerUnit(['package', 'packages'], 'package', 1);
 registerUnit(['item', 'items', 'piece', 'pieces', 'each', 'count', 'ct'], 'item', 1);
 registerUnit(['can', 'cans'], 'can', 1);

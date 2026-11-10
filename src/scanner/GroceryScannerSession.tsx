@@ -539,6 +539,8 @@ export function GroceryScannerSession({
                     'L',
                     'fl oz',
                     'cup',
+                    'qt',
+                    'gal',
                     'can',
                     'bottle',
                     'bag',

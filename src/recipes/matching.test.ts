@@ -420,3 +420,11 @@ describe('recipe wording against plain stock', () => {
     );
   });
 });
+
+it('compares a gallon of milk with a recipe measured in cups', () => {
+  const milk = inventory('Milk', [{ quantity: 1, unit: 'gal' }]);
+  expect(matchRecipe(recipe(0.5, 'cup', 'milk'), milk, options).status).toBe('ready');
+  expect(matchRecipe(recipe(20, 'cup', 'milk'), milk, options).ingredients[0]).toMatchObject({
+    status: 'short',
+  });
+});

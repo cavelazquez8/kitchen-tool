@@ -322,7 +322,22 @@ export function ItemEditor({
               label="Unit"
               value={draft.unit}
               onChange={(unit) => onDraftChange({ ...draft, unit })}
-              options={['each', 'package', 'g', 'kg', 'oz', 'lb', 'mL', 'L', 'cup', 'tbsp', 'tsp']}
+              options={[
+                'each',
+                'package',
+                'g',
+                'kg',
+                'oz',
+                'lb',
+                'mL',
+                'L',
+                'fl oz',
+                'cup',
+                'qt',
+                'gal',
+                'tbsp',
+                'tsp',
+              ]}
               required
             />
           </label>

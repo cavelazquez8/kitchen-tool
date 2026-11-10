@@ -35,6 +35,8 @@ const UNITS = [
   { pattern: /^(?:ounces?|oz)\b/i, canonical: 'oz' },
   { pattern: /^(?:pounds?|lbs?)\b/i, canonical: 'lb' },
   { pattern: /^(?:cups?|c)\b/i, canonical: 'cup' },
+  { pattern: /^(?:quarts?|qt)\b/i, canonical: 'qt' },
+  { pattern: /^(?:gallons?|gal)\b/i, canonical: 'gal' },
   { pattern: /^(?:each|ea|items?|pieces?|counts?|ct)\b/i, canonical: 'each' },
   { pattern: /^sticks?\b/i, canonical: 'stick' },
   { pattern: /^packages?\b/i, canonical: 'package' },

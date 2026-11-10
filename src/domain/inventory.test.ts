@@ -249,6 +249,9 @@ describe('safe consumption', () => {
     expect(original.batches[0].quantity).toBe(2);
     expect(convertQuantity(3, 'tsp', 'tbsp')).toBeCloseTo(1);
     expect(convertQuantity(1, ' CUP ', 'ml')).toBeCloseTo(236.5882365);
+    expect(convertQuantity(1, 'gal', 'cup')).toBeCloseTo(16);
+    expect(convertQuantity(1, 'quart', 'cups')).toBeCloseTo(4);
+    expect(() => convertQuantity(1, 'pint', 'cup')).toThrow();
   });
 
   it('rejects package-weight guesses, mass-volume conversion, and overuse', () => {
