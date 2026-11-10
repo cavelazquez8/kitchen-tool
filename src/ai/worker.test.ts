@@ -9,7 +9,7 @@ import {
 import type { Env } from '../../server/src/index';
 import { MAX_MEDIA_BYTES } from './protocol';
 
-const origin = 'https://mise-kitchen-cv8.expertroot3.chatgpt.site';
+const origin = 'https://kitchen.example';
 const token = 'test_only_' + 'a'.repeat(40);
 const env: Env = {
   ALLOWED_ORIGIN: origin,

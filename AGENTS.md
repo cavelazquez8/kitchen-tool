@@ -54,11 +54,16 @@ one process cannot delete another process's active traces.
 - `npm run emulators`: local auth and Firestore; use demo project only.
 - `npm run format`: format edited source; do not claim this is a test.
 
-The GitHub workflow runs checks and uploads build artifacts when the repository is
-connected; it does not deploy the private site. Avoid forced reloads, unnecessary
-service workers, and destructive data migrations.
+`delivery.yml` runs checks and browser tests on pushes and pull requests. `pages.yml`
+runs `npm run check` and publishes `dist` to GitHub Pages on pushes to `main`, built
+with `BASE_PATH` from the Pages configuration. Avoid forced reloads, unnecessary service
+workers, and destructive data migrations.
 
-The private hosted copy uses Sites. Reuse the project ID in `.openai/hosting.json`
-and apply the Sites skill for source synchronization and publication. Preserve its
-private audience and website origin. Firebase deployment is a separate optional
+The hosted copy is GitHub Pages at `https://cavelazquez8.github.io/kitchen-tool/`.
+Pages sites are publicly reachable; never describe the hosted site as private. Kitchen
+data stays in each browser, and the Gemini Worker requires its pairing token plus the
+exact `ALLOWED_ORIGIN` (`https://cavelazquez8.github.io`, no path). Files in `public/`
+must be referenced through `publicUrl()` or relative paths so the app works under the
+project path. Changing the site origin separates browser data: tell the user to back up
+before switching and restore afterwards. Firebase deployment is a separate optional
 delivery path; do not claim it is configured until its account settings exist.

@@ -55,10 +55,13 @@ In **Workers & Pages → mise-gemini → Settings → Variables and Secrets**, a
 | ------------------- | ------ | ---------------------------------------------------------------------- |
 | `GEMINI_API_KEY`    | Secret | Your Google AI Studio key                                              |
 | `MISE_ACCESS_TOKEN` | Secret | A new random pairing token, generated in Mise's AI connection settings |
-| `ALLOWED_ORIGIN`    | Text   | `https://mise-kitchen-cv8.expertroot3.chatgpt.site`                    |
+| `ALLOWED_ORIGIN`    | Text   | `https://cavelazquez8.github.io`                                       |
 | `GEMINI_MODEL`      | Text   | `gemini-3.5-flash-lite`                                                |
 
-The origin is the exact interface address, with no trailing slash or path. Wrangler
+The origin is the exact interface address, with no trailing slash or path. For the GitHub
+Pages copy at `https://cavelazquez8.github.io/kitchen-tool/`, that is
+`https://cavelazquez8.github.io` — leave out `/kitchen-tool`. Mise's AI connection
+settings show the exact value for the address you opened. Wrangler
 already sets the two text values from `server/wrangler.jsonc`; set them explicitly when
 using the dashboard. Save/deploy the settings. The Worker refuses AI requests until both
 secrets are present and the access token is sufficiently strong.

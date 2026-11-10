@@ -2,10 +2,10 @@
   "name": "Mise — Your kitchen, in order",
   "short_name": "Mise",
   "description": "Kitchen inventory and a simpler way to cook with what you have.",
-  "start_url": "/",
-  "scope": "/",
+  "start_url": ".",
+  "scope": ".",
   "display": "standalone",
   "background_color": "#111613",
   "theme_color": "#111613",
-  "icons": [{ "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }]
+  "icons": [{ "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }]
 }

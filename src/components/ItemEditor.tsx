@@ -8,6 +8,7 @@ import { Choice } from './Choice';
 import { useFoodCatalog } from '../food/useFoodCatalog';
 import { findPackagedFoods, type PackagedFood } from '../food/products';
 import { suggestIngredientIdentity } from '../recipes/identity';
+import { publicUrl } from '../lib/publicUrl';
 
 export type ItemDraft = {
   name: string;
@@ -173,7 +174,7 @@ export function ItemEditor({
                 : 'Choose a suggestion or type any item'}
           </span>
           <a
-            href="/data/food-ingredients.json"
+            href={publicUrl('data/food-ingredients.json')}
             download
             title="Food name source and attribution · Open Database License 1.0"
           >

@@ -1,6 +1,7 @@
 import { FOOD_CATALOG } from '../recipes/catalog';
+import { publicUrl } from '../lib/publicUrl';
 
-const URL = '/data/food-ingredients.json';
+const URL = publicUrl('data/food-ingredients.json');
 const CACHE_KEY = 'mise.food-catalog.v1';
 const MAX_BYTES = 512_000;
 const MAX_NAMES = 15_000;

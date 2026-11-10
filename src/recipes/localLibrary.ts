@@ -1,8 +1,9 @@
 import { canonicalIngredientName } from './matching';
 import { isRecipe, type Recipe } from './types';
 import { parseIngredientLine } from './parse';
+import { publicUrl } from '../lib/publicUrl';
 
-const COLLECTION_URL = '/data/wikibooks-recipes.json';
+const COLLECTION_URL = publicUrl('data/wikibooks-recipes.json');
 const MAX_COLLECTION_BYTES = 20 * 1024 * 1024;
 const MAX_RECIPES = 10_000;
 const LOAD_TIMEOUT_MS = 20_000;

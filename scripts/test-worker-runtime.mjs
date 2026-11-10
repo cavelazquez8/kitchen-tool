@@ -11,7 +11,7 @@ import {
 // Every outbound request is intercepted; these tests need no accounts or network.
 const script = await readFile(new URL('../server/dist/index.js', import.meta.url), 'utf8');
 const { Response } = globalThis;
-const origin = 'https://mise-kitchen-cv8.expertroot3.chatgpt.site';
+const origin = 'https://kitchen.example';
 const token = 'test_only_' + 'a'.repeat(40);
 const bindings = {
   ALLOWED_ORIGIN: origin,

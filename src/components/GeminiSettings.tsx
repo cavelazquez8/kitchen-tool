@@ -13,6 +13,7 @@ import {
   normalizeGeminiConnection,
   type GeminiConnection,
 } from '../ai/client';
+import { publicUrl } from '../lib/publicUrl';
 export function GeminiSettings({ onToast }: { onToast: (message: string) => void }) {
   const initial = readGeminiConnection();
   const [draft, setDraft] = useState(
@@ -79,7 +80,7 @@ export function GeminiSettings({ onToast }: { onToast: (message: string) => void
         <summary>Set up the free connection</summary>
         <ol>
           <li>
-            <a className="text-button" href="/mise-gemini-worker.js" download>
+            <a className="text-button" href={publicUrl('mise-gemini-worker.js')} download>
               Download Worker code
             </a>{' '}
             and paste it into a Worker named mise-gemini in your Cloudflare dashboard.
@@ -92,8 +93,9 @@ export function GeminiSettings({ onToast }: { onToast: (message: string) => void
             Generate a pairing token below. Copy it into the Cloudflare secret MISE_ACCESS_TOKEN.
           </li>
           <li>
-            Set ALLOWED_ORIGIN to https://mise-kitchen-cv8.expertroot3.chatgpt.site and GEMINI_MODEL
-            to gemini-3.5-flash-lite. Deploy, enter your Worker address below, and connect.
+            Set ALLOWED_ORIGIN to {window.location.origin} (the site address without any path) and
+            GEMINI_MODEL to gemini-3.5-flash-lite. Deploy, enter your Worker address below, and
+            connect.
           </li>
         </ol>
       </details>
@@ -110,7 +112,7 @@ export function GeminiSettings({ onToast }: { onToast: (message: string) => void
         <ol>
           <li>
             Download the latest{' '}
-            <a className="text-button" href="/mise-gemini-worker.js" download>
+            <a className="text-button" href={publicUrl('mise-gemini-worker.js')} download>
               Worker code
             </a>{' '}
             and replace the code in your existing Cloudflare Worker. Keep your current secrets.

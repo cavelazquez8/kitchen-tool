@@ -11,8 +11,7 @@ const raw = input
   : await (async () => {
       const response = await globalThis.fetch(sourceUrl, {
         headers: {
-          'User-Agent':
-            'MiseKitchen/1.0 (personal kitchen inventory; https://mise-kitchen-cv8.expertroot3.chatgpt.site)',
+          'User-Agent': 'MiseKitchen/1.0 (personal kitchen inventory)',
         },
         signal: globalThis.AbortSignal.timeout(30000),
       });

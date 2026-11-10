@@ -8,6 +8,7 @@ import {
   type RecipeProviderStatus,
 } from '../recipes/providers';
 import './recipeProviders.css';
+import { publicUrl } from '../lib/publicUrl';
 
 type SearchCheck = {
   state: 'pending' | 'success' | 'empty' | 'error';
@@ -203,7 +204,7 @@ export function RecipeProviderSettings({ onToast }: { onToast: (message: string)
             add a Text variable <code>RECIPEAPI_PLAN</code> with the value <code>free</code>.
           </li>
           <li>
-            <a className="text-button" href="/mise-gemini-worker.js" download>
+            <a className="text-button" href={publicUrl('mise-gemini-worker.js')} download>
               Download the updated Worker code
             </a>
             , replace your Worker code, and deploy. Keep your existing Gemini settings and secrets.

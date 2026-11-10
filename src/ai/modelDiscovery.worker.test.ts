@@ -4,7 +4,7 @@ import { createWorker, createWorkerState, type Env } from '../../server/src/inde
 // Server-only parser/cache tests run through this discovered Vitest entry.
 import { googleModel, newModel, pricingPage } from '../../server/src/models.test';
 
-const origin = 'https://mise-kitchen-cv8.expertroot3.chatgpt.site';
+const origin = 'https://kitchen.example';
 const token = 'test_only_' + 'a'.repeat(40);
 const env: Env = {
   ALLOWED_ORIGIN: origin,

@@ -17,6 +17,7 @@ import {
 import { Choice } from './Choice';
 import { Modal } from './Modal';
 import './geminiModels.css';
+import { publicUrl } from '../lib/publicUrl';
 
 function builtInName(id: string): string {
   return id === 'gemini-3.5-flash-lite'
@@ -198,7 +199,7 @@ export function GeminiModelPicker({
         </p>
       )}
       {needsWorkerUpdate && (
-        <a className="text-button" href="/mise-gemini-worker.js" download>
+        <a className="text-button" href={publicUrl('mise-gemini-worker.js')} download>
           Download updated Worker
         </a>
       )}

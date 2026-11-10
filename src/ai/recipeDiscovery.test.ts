@@ -258,7 +258,7 @@ describe('publisher discovery conversation', () => {
 });
 
 describe('Worker assistant tools and diagnostics', () => {
-  const origin = 'https://mise-kitchen-cv8.expertroot3.chatgpt.site';
+  const origin = 'https://kitchen.example';
   const workerEnv: Env = {
     ALLOWED_ORIGIN: origin,
     MISE_ACCESS_TOKEN: 'a'.repeat(43),
@@ -345,17 +345,15 @@ describe('Worker assistant tools and diagnostics', () => {
         warnings: [],
         ...(candidates ? { recommendedRecipeIds: [] } : {}),
       };
-      const fetcher = vi
-        .fn<typeof fetch>()
-        .mockResolvedValue(
-          new Response(
-            JSON.stringify({
-              candidates: [
-                { finishReason: 'STOP', content: { parts: [{ text: JSON.stringify(reply) }] } },
-              ],
-            }),
-          ),
-        );
+      const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            candidates: [
+              { finishReason: 'STOP', content: { parts: [{ text: JSON.stringify(reply) }] } },
+            ],
+          }),
+        ),
+      );
       const response = await createWorker(fetcher).fetch(
         request('/chat', {
           message: 'Plan portions using the recommended daily ranges in my reviewed report.',

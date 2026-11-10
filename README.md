@@ -2,7 +2,7 @@
 
 A touch-friendly kitchen inventory, recipe library, meal planner, shopping list, and optional Gemini assistant. The dark interface works in Microsoft Edge on a narrow phone, an unfolded device, and a laptop.
 
-[Open Mise](https://mise-kitchen-cv8.expertroot3.chatgpt.site). Future releases reuse the project in `.openai/hosting.json` and the same URL.
+[Open Mise](https://cavelazquez8.github.io/kitchen-tool/). GitHub Pages publishes each push to `main`; the site address is public, while your kitchen data stays in your browser.
 
 ## Everyday use
 
@@ -45,7 +45,7 @@ The downloadable Worker uses request options accepted by Cloudflare, including o
 
 ## Data and backups
 
-Kitchen data is saved in **this browser only**. There is no active Firebase connection. Another device, browser profile, or website origin has a separate kitchen. Clearing site data removes the local copy.
+Kitchen data is saved in **this browser only**. There is no active Firebase connection. Another device, browser profile, or website origin has a separate kitchen. Clearing site data removes the local copy. To move to a new site address, download a backup on the old address and restore it on the new one, then reconnect Gemini (pairing credentials are not in backups).
 
 Settings → Download backup saves inventory, tools, saved recipes, meal plan, shopping list, and conversation. Restoring requires confirmation and replaces the current kitchen. Older inventory-only backups remain supported. Google API keys and device pairing credentials are excluded. Markdown export is a copyable Gemini context document, not a restore format.
 
